@@ -12,8 +12,10 @@ números autorizados recebem resposta.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Optional
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -264,6 +266,94 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "blocked_by_whitelist": result.blocked_by_whitelist,
             "error": result.error,
         })
+
+    # ================================================================
+    # ENDPOINT KOMMO — integração com o número oficial (WhatsApp Business)
+    # ================================================================
+    # O número 8133-1005 está na API oficial via Kommo. Um Salesbot do Kommo,
+    # no passo "Widget" (widget_request), faz POST aqui a cada mensagem do
+    # paciente. Fluxo:
+    #   1. Kommo POST /kommo  {token, data:{message,...}, return_url}
+    #   2. respondemos 200 em <2s (exigência do Kommo)
+    #   3. em background: Claude gera a resposta
+    #   4. POST no return_url com execute_handlers=[show/text] → o Salesbot
+    #      envia a resposta no WhatsApp do paciente
+    # Doc: https://developers.kommo.com/docs/private-chatbot-integration
+
+    def _process_kommo(message: str, convo_key: str, return_url: str) -> None:
+        """Processa a mensagem do Kommo e devolve a resposta ao Salesbot."""
+        try:
+            result = responder.reply(convo_key, message)
+            answer = result.get("answer") or ""
+        except Exception as e:  # noqa: BLE001
+            log.exception("Kommo: Claude falhou")
+            answer = (
+                "Tive uma instabilidade aqui. Pode me reenviar sua última "
+                "mensagem, por favor?"
+            )
+        # Continua o fluxo do Salesbot enviando a resposta como handler 'show'
+        body = {
+            "data": {"agent_answer": answer},
+            "execute_handlers": [
+                {"handler": "show", "params": {"type": "text", "value": answer}}
+            ],
+        }
+        headers = {"Content-Type": "application/json"}
+        if settings.kommo_token:
+            headers["Authorization"] = f"Bearer {settings.kommo_token}"
+        try:
+            with httpx.Client(timeout=15) as c:
+                r = c.post(return_url, json=body, headers=headers)
+            if r.status_code // 100 != 2:
+                log.warning(
+                    "Kommo continue falhou: HTTP %d — %s",
+                    r.status_code, (r.text or "")[:200],
+                )
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo continue erro: %s", e)
+
+    @app.post("/kommo")
+    async def kommo_webhook(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001
+            raise HTTPException(400, "Body não-JSON")
+
+        data = payload.get("data") or {}
+        return_url = payload.get("return_url") or ""
+        message = (data.get("message") or "").strip()
+        # Chave de conversa: lead id do Kommo (estável por paciente)
+        lead_id = str(data.get("lead_id") or data.get("lead") or "").strip()
+        contact = str(data.get("phone") or data.get("contact") or "").strip()
+        convo_key = (
+            f"kommo:{lead_id}" if lead_id
+            else (_conversation_key(contact) if contact else "kommo:unknown")
+        )
+
+        if not return_url:
+            log.warning("Kommo webhook sem return_url — ignorado")
+            return JSONResponse({"ignored": "sem return_url"})
+        if not message:
+            # Sem texto (ex.: imagem) — devolve aviso curto pra não travar o bot
+            threading.Thread(
+                target=_process_kommo,
+                args=(
+                    "[O paciente enviou uma mensagem sem texto — imagem, áudio "
+                    "ou documento. Confirme o recebimento de forma calorosa e "
+                    "siga o atendimento.]",
+                    convo_key, return_url,
+                ),
+                daemon=True,
+            ).start()
+            return JSONResponse({"ok": True, "note": "sem texto"})
+
+        # Responde 200 já (exigência <2s) e processa em background
+        threading.Thread(
+            target=_process_kommo,
+            args=(message, convo_key, return_url),
+            daemon=True,
+        ).start()
+        return JSONResponse({"ok": True})
 
     return app
 

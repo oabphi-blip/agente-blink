@@ -1,0 +1,33 @@
+{
+  "widget": {
+    "name": "widget.name",
+    "description": "widget.description",
+    "short_description": "widget.short_description",
+    "version": "1.0.0",
+    "interface_version": 2,
+    "init_once": true,
+    "locale": ["pt", "en"],
+    "installation": true,
+    "support": {
+      "link": "https://blink-agent.6prkfn.easypanel.host/health",
+      "email": "oabphi@gmail.com"
+    }
+  },
+
+  "locations": ["salesbot_designer"],
+
+  "salesbot_designer": {
+    "logo": "/widgets/agente_blink/images/logo.png",
+    "agente_blink": {
+      "name": "salesbot.handler_name",
+      "settings": {
+        "url": {
+          "name": "salesbot.url",
+          "default_value": "https://blink-agent.6prkfn.easypanel.host/kommo",
+          "type": "text",
+          "manual": true
+        }
+      }
+    }
+  }
+}
