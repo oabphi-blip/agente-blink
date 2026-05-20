@@ -14,11 +14,58 @@ import logging
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Deque
+from zoneinfo import ZoneInfo
 
 from anthropic import Anthropic
 
 from .knowledge import KB_DIR, KnowledgeBase
+
+# Fuso horário oficial da clínica (Brasília) — usado pra cálculo de idade
+# e data de "hoje" injetada no system prompt.
+_TZ_BRT = ZoneInfo("America/Sao_Paulo")
+
+
+def _today_brt_block() -> str:
+    """Bloco de data de hoje (BRT) com instruções de cálculo de idade.
+
+    Inclui a data por extenso, ISO e dia da semana — o Claude por padrão
+    não tem acesso a relógio do sistema, então sem essa injeção ele chuta
+    com base no cutoff de treino e erra idades por 1 ou mais anos.
+    """
+    now = datetime.now(_TZ_BRT)
+    months = [
+        "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+        "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+    ]
+    weekdays = [
+        "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+        "sexta-feira", "sábado", "domingo",
+    ]
+    extenso = f"{weekdays[now.weekday()]}, {now.day} de {months[now.month-1]} de {now.year}"
+    iso = now.strftime("%Y-%m-%d")
+    hora = now.strftime("%H:%M")
+    return (
+        "\n\n================================================================"
+        "\nDATA DE HOJE (fuso Brasília — fonte de verdade para cálculos)"
+        "\n================================================================"
+        f"\nHoje é {extenso} ({iso}), {hora} BRT."
+        "\n"
+        "\nREGRA OBRIGATÓRIA DE CÁLCULO DE IDADE:"
+        "\n1. Idade = (ano de hoje − ano de nascimento)"
+        "\n2. SE (mês de hoje, dia de hoje) < (mês de nascimento, dia de nascimento):"
+        "\n   subtrair 1 da idade (ainda não fez aniversário este ano)"
+        "\n3. SENÃO: manter o valor (já fez aniversário ou faz hoje)"
+        "\n"
+        "\nExemplo: nascido em 23/07/1976. Hoje é 20/05/2026."
+        "\n  Ano: 2026 − 1976 = 50. Mês/dia hoje (05/20) < mês/dia nasc (07/23)."
+        "\n  Logo idade = 50 − 1 = 49 anos."
+        "\n"
+        "\nÉ PROIBIDO usar conhecimento interno de 'data atual'. SEMPRE usar a data"
+        "\nacima como hoje. PROIBIDO inventar ano, mês ou dia."
+        "\n================================================================"
+    )
 
 log = logging.getLogger(__name__)
 
@@ -161,8 +208,8 @@ class Responder:
 
         kb_block = self._kb.format_for_prompt(combined) if combined else ""
 
-        # 2. Monta system prompt = INSTRUÇÃO MESTRA + KB contextual
-        system_prompt = self._base_system_prompt
+        # 2. Monta system prompt = INSTRUÇÃO MESTRA + DATA DE HOJE + KB contextual
+        system_prompt = self._base_system_prompt + _today_brt_block()
         if kb_block:
             system_prompt += (
                 "\n\n================================================================"
