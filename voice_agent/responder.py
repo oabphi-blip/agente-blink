@@ -44,11 +44,24 @@ def _today_brt_block() -> str:
     extenso = f"{weekdays[now.weekday()]}, {now.day} de {months[now.month-1]} de {now.year}"
     iso = now.strftime("%Y-%m-%d")
     hora = now.strftime("%H:%M")
+    # Saudação correta conforme a hora BRT — calculada no código (à prova de erro)
+    h = now.hour
+    if h < 12:
+        saudacao, periodo = "Bom dia", "manhã"
+    elif h < 18:
+        saudacao, periodo = "Boa tarde", "tarde"
+    else:
+        saudacao, periodo = "Boa noite", "noite"
     return (
         "\n\n================================================================"
         "\nDATA DE HOJE (fuso Brasília — fonte de verdade para cálculos)"
         "\n================================================================"
         f"\nHoje é {extenso} ({iso}), {hora} BRT."
+        f"\nPeríodo do dia agora: {periodo}."
+        f"\nSAUDAÇÃO CORRETA AGORA: \"{saudacao}\"."
+        "\nSe for cumprimentar pelo período do dia, use EXATAMENTE \"" + saudacao + "\"."
+        "\nÉ PROIBIDO usar outra saudação de período (não diga 'Bom dia' à tarde/noite)."
+        "\nNa dúvida, use apenas \"Olá!\" — neutro, nunca erra."
         "\n"
         "\nREGRA OBRIGATÓRIA DE CÁLCULO DE IDADE:"
         "\n1. Idade = (ano de hoje − ano de nascimento)"
