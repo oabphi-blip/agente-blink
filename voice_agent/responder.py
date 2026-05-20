@@ -98,6 +98,54 @@ SONNET_TRIGGERS = {
 }
 
 
+def _caller_context_block(ctx: Optional[dict]) -> str:
+    """Bloco de ONBOARDING — o que o CRM já sabe sobre quem está conversando.
+
+    Sem isto o agente repergunta dados que a clínica já tem. Com isto, ele
+    saúda de forma personalizada e pula etapas já satisfeitas.
+    """
+    if not ctx or not ctx.get("found"):
+        return (
+            "\n\n================================================================"
+            "\nONBOARDING — CONTATO NOVO"
+            "\n================================================================"
+            "\nNão há registro anterior deste contato no CRM. Trate como primeiro"
+            "\ncontato: boas-vindas padrão e triagem normal."
+            "\n================================================================"
+        )
+    known = ctx.get("known") or {}
+    nome = ctx.get("name")
+    linhas = []
+    rotulos = {
+        "nome_paciente": "Nome do paciente", "motivo": "Motivo registrado",
+        "convenio": "Convênio", "unidade": "Unidade", "medico": "Médico",
+        "especialidade": "Especialidade", "dia_turno": "Preferência dia/turno",
+    }
+    for k, label in rotulos.items():
+        if known.get(k):
+            linhas.append(f"- {label}: {known[k]}")
+    dados = "\n".join(linhas) if linhas else "- (lead existe, mas sem campos preenchidos ainda)"
+    saudacao = (
+        f'Cumprimente pelo nome ("Olá, {nome}!") de forma calorosa.'
+        if nome else "Há um lead existente para este contato."
+    )
+    return (
+        "\n\n================================================================"
+        "\nONBOARDING — CONTATO JÁ CONHECIDO PELO CRM"
+        "\n================================================================"
+        f"\n{saudacao}"
+        "\nO CRM já tem estes dados deste contato:"
+        f"\n{dados}"
+        "\n"
+        "\nREGRA: É PROIBIDO reperguntar qualquer dado já listado acima. Trate-os"
+        "\ncomo confirmados e avance direto para a próxima etapa pendente do"
+        "\nfluxo mestre (seção 0-B). Confirme de leve se fizer sentido"
+        '("Você quer seguir com [convênio/médico] como da outra vez?"), mas'
+        "\nnunca recolha de novo o que já está aqui."
+        "\n================================================================"
+    )
+
+
 def _route_model(user_text: str, history_len: int, sonnet: str, haiku: str) -> str:
     """Roteador Sonnet vs Haiku por complexidade.
 
@@ -149,8 +197,15 @@ class Responder:
         self._convos = conversation_store or ConversationStore()
         self._kb = knowledge_base or KnowledgeBase()
 
-    def reply(self, conversation_key: str, user_text: str) -> dict:
+    def reply(
+        self, conversation_key: str, user_text: str,
+        caller_context: Optional[dict] = None,
+    ) -> dict:
         """Gera resposta para o paciente.
+
+        Args:
+            caller_context: dict opcional com o que o CRM já sabe sobre o
+                contato (onboarding orquestrado). Injetado no system prompt.
 
         Returns:
             {"answer": str, "model_used": str, "articles_used": list[str]}
@@ -181,6 +236,7 @@ class Responder:
 
         # 2. Monta system prompt = INSTRUÇÃO MESTRA + DATA DE HOJE + KB contextual
         system_prompt = self._base_system_prompt + _today_brt_block()
+        system_prompt += _caller_context_block(caller_context)
         if kb_block:
             system_prompt += (
                 "\n\n================================================================"

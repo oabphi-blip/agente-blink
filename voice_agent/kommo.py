@@ -271,3 +271,60 @@ class KommoClient:
         except Exception as e:  # noqa: BLE001
             log.warning("Kommo update error: %s", e)
         return False
+
+    # ----------------------- enriquecimento de contexto (onboarding)
+
+    def get_caller_context(self, phone: str) -> dict:
+        """Busca o que o CRM já sabe sobre quem está ligando — para onboarding.
+
+        Retorna um dict resumido. Usado no início da conversa para o agente
+        saudar de forma personalizada e NÃO reperguntar dados já conhecidos.
+
+        {
+          "found": bool,
+          "lead_id": int | None,
+          "name": str | None,            # 1.NOME PACIENTE, se já preenchido
+          "known": { campo: valor, ... } # campos já preenchidos no lead
+        }
+        """
+        out: dict = {"found": False, "lead_id": None, "name": None, "known": {}}
+        lead_id = self.find_lead_id_by_phone(phone)
+        if not lead_id:
+            return out
+        out["found"] = True
+        out["lead_id"] = lead_id
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.get(
+                    f"{self._base}/leads/{lead_id}",
+                    params={"with": "contacts"},
+                    headers=self._headers,
+                )
+            if r.status_code != 200:
+                return out
+            data = r.json() or {}
+            # Campos custom relevantes → nome legível
+            id_to_label = {
+                FIELD_NOME_PACIENTE_1: "nome_paciente",
+                FIELD_MOTIVO_PACIENTE_1: "motivo",
+                FIELD_CONVENIO[0]: "convenio",
+                FIELD_UNIDADE[0]: "unidade",
+                FIELD_MEDICOS[0]: "medico",
+                FIELD_ESPECIALIDADE[0]: "especialidade",
+                FIELD_DIA_TURNO_PERIODO: "dia_turno",
+            }
+            for cf in (data.get("custom_fields_values") or []):
+                fid = cf.get("field_id")
+                label = id_to_label.get(fid)
+                if not label:
+                    continue
+                vals = cf.get("values") or []
+                if vals:
+                    v = vals[0].get("value")
+                    if v:
+                        out["known"][label] = v
+                        if label == "nome_paciente":
+                            out["name"] = v
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo get_caller_context erro: %s", e)
+        return out

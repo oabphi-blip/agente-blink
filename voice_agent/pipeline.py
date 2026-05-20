@@ -133,9 +133,31 @@ class VoicePipeline:
                 error="entrada vazia",
             )
 
+        # 2b) Onboarding orquestrado — só na PRIMEIRA mensagem da conversa,
+        # busca no Kommo o que já se sabe deste contato (evita reperguntar).
+        caller_context = None
+        if self.kommo is not None and reply_to_number:
+            try:
+                is_new_conversation = not self.responder._convos.get(conversation_key)
+            except Exception:  # noqa: BLE001
+                is_new_conversation = False
+            if is_new_conversation:
+                try:
+                    caller_context = self.kommo.get_caller_context(reply_to_number)
+                    if caller_context and caller_context.get("found"):
+                        log.info(
+                            "Onboarding: contato conhecido (lead %s, nome=%s)",
+                            caller_context.get("lead_id"), caller_context.get("name"),
+                        )
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Onboarding lookup falhou: %s", e)
+                    caller_context = None
+
         # 3) Resposta com Claude
         try:
-            result = self.responder.reply(conversation_key, user_text)
+            result = self.responder.reply(
+                conversation_key, user_text, caller_context=caller_context
+            )
             answer = result["answer"]
             model_used = result["model_used"]
             articles_used = result["articles_used"]
