@@ -11,7 +11,7 @@ Arquitetura:
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -77,6 +77,98 @@ def _today_brt_block() -> str:
         "\nacima como hoje. PROIBIDO inventar ano, mês ou dia."
         "\n================================================================"
     )
+
+
+# Nomes dos dias da semana e meses — índices alinhados ao datetime.weekday()
+# (0 = segunda-feira ... 6 = domingo).
+_WEEKDAYS_PT = [
+    "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+    "sexta-feira", "sábado", "domingo",
+]
+_MONTHS_PT = [
+    "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+    "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+]
+
+
+def _offer_window_block() -> str:
+    """Janela de oferta de agenda — os próximos 5 dias úteis, já com a data
+    e o dia da semana CALCULADOS pelo código (à prova de erro).
+
+    Por que isto existe: o Claude não tem um calendário confiável. Se ele
+    "calcula" sozinho a que dia da semana cai uma data futura, erra — foi
+    exatamente o bug do lead Alonso Marques (ofereceu 31/05 chamando de
+    segunda-feira, quando era domingo). Aqui o código entrega a lista
+    pronta, e o agente fica PROIBIDO de oferecer data fora dela ou de
+    inventar o dia da semana.
+
+    A janela começa AMANHÃ (hoje não se oferece — o horário exato é
+    confirmado depois pela equipe humana) e cobre 5 dias úteis (seg–sex).
+    Sábados que caiam dentro desse intervalo são listados à parte como
+    Agenda Extra de sábado.
+    """
+    now = datetime.now(_TZ_BRT)
+    today = now.date()
+
+    business: list = []   # próximos 5 dias úteis (seg–sex)
+    saturdays: list = []  # sábados dentro do mesmo intervalo (Agenda Extra)
+
+    d = today + timedelta(days=1)  # começa amanhã
+    while len(business) < 5:
+        wd = d.weekday()
+        if wd < 5:            # segunda a sexta
+            business.append(d)
+        elif wd == 5:         # sábado
+            saturdays.append(d)
+        d = d + timedelta(days=1)
+
+    def _fmt(dt) -> str:
+        return f"{_WEEKDAYS_PT[dt.weekday()]}, {dt.day:02d}/{dt.month:02d}/{dt.year}"
+
+    linhas_uteis = "\n".join(f"   - {_fmt(dt)}" for dt in business)
+    if saturdays:
+        linhas_sab = "\n".join(
+            f"   - {_fmt(dt)} (Agenda Extra de sábado)" for dt in saturdays
+        )
+        sab_block = (
+            "\n\nSábado(s) dentro do mesmo intervalo (oferecer SÓ como Agenda"
+            "\nExtra, quando a regra 11.2 da Instrução Mestra permitir):"
+            f"\n{linhas_sab}"
+        )
+    else:
+        sab_block = ""
+
+    primeiro, ultimo = business[0], business[-1]
+    return (
+        "\n\n================================================================"
+        "\nJANELA DE OFERTA DE AGENDA — PRÓXIMOS 5 DIAS ÚTEIS"
+        "\n(datas e dias da semana calculados pelo sistema — fonte de verdade)"
+        "\n================================================================"
+        "\nEstas são as ÚNICAS datas que você pode oferecer ao paciente. Cada"
+        "\nlinha já traz o dia da semana CORRETO — copie exatamente como está."
+        f"\n\nDias úteis disponíveis para oferta "
+        f"(de {primeiro.day:02d}/{primeiro.month:02d} a {ultimo.day:02d}/{ultimo.month:02d}):"
+        f"\n{linhas_uteis}"
+        f"{sab_block}"
+        "\n"
+        "\nREGRAS OBRIGATÓRIAS DE OFERTA DE DATA:"
+        "\n1. SÓ ofereça datas que aparecem na lista acima. É PROIBIDO oferecer"
+        "\n   qualquer data fora desta janela de 5 dias úteis."
+        "\n2. É PROIBIDO calcular, deduzir ou inventar o dia da semana de uma"
+        "\n   data. Use SOMENTE o dia da semana escrito ao lado de cada data."
+        "\n3. Ao citar uma data, escreva sempre dia-da-semana + data JUNTOS,"
+        "\n   exatamente como na lista (ex.: \"quinta-feira, "
+        f"{primeiro.day:02d}/{primeiro.month:02d}/{primeiro.year}\")."
+        "\n4. Cruze com os dias de atendimento do médico (artigos 22/34): ofereça"
+        "\n   apenas as datas da lista cujo dia da semana o médico atende."
+        "\n5. Se o paciente pedir um dia fora desta janela, informe gentilmente"
+        "\n   as opções da lista e ofereça as da lista — NUNCA confirme nem"
+        "\n   invente data fora dela."
+        "\n6. O horário exato (HH:MM) é confirmado pela equipe humana. Você"
+        "\n   oferece o DIA; não invente horário cheio."
+        "\n================================================================"
+    )
+
 
 log = logging.getLogger(__name__)
 
@@ -247,8 +339,10 @@ class Responder:
 
         kb_block = self._kb.format_for_prompt(combined) if combined else ""
 
-        # 2. Monta system prompt = INSTRUÇÃO MESTRA + DATA DE HOJE + KB contextual
+        # 2. Monta system prompt = INSTRUÇÃO MESTRA + DATA DE HOJE +
+        #    JANELA DE OFERTA (5 dias úteis) + ONBOARDING + KB contextual
         system_prompt = self._base_system_prompt + _today_brt_block()
+        system_prompt += _offer_window_block()
         system_prompt += _caller_context_block(caller_context)
         if kb_block:
             system_prompt += (

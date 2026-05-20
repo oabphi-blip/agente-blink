@@ -6,7 +6,7 @@
     "version": "1.0.0",
     "interface_version": 2,
     "init_once": true,
-    "locale": ["pt", "en"],
+    "locale": ["pt"],
     "installation": true,
     "support": {
       "link": "https://blink-agent.6prkfn.easypanel.host/health",
@@ -14,15 +14,23 @@
     }
   },
 
-  "locations": ["salesbot_designer"],
+  "locations": ["salesbot_designer", "settings"],
+
+  "settings": {
+    "url": {
+      "name": "settings.url",
+      "type": "text",
+      "required": false
+    }
+  },
 
   "salesbot_designer": {
     "logo": "/widgets/agente_blink/images/logo.png",
-    "agente_blink": {
+    "handler_name": {
       "name": "salesbot.handler_name",
       "settings": {
-        "url": {
-          "name": "salesbot.url",
+        "text": {
+          "name": "salesbot.text",
           "default_value": "https://blink-agent.6prkfn.easypanel.host/kommo",
           "type": "text",
           "manual": true

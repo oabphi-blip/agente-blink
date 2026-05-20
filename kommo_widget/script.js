@@ -1,10 +1,9 @@
 /**
- * Widget "Agente Blink" — ponte entre o Salesbot do Kommo e o agente de IA.
+ * Widget "Agente Blink IA" — ponte entre o Salesbot do Kommo e o agente de IA.
  *
- * Função: registrar o passo de Widget no designer do Salesbot. Ao salvar,
- * gera um fluxo que faz `widget_request` para o endpoint /kommo do agente,
- * enviando a mensagem do paciente. A resposta do agente volta pelo
- * return_url e o Salesbot a exibe no chat (handler "show").
+ * Registra o passo de Widget no designer do Salesbot. Ao salvar, gera um fluxo
+ * que faz widget_request ao endpoint /kommo do agente, enviando a mensagem do
+ * paciente. A resposta do agente volta pelo return_url e o Salesbot a exibe.
  *
  * Doc: https://developers.kommo.com/docs/private-chatbot-integration
  */
@@ -22,13 +21,9 @@ define(['jquery'], function ($) {
       bind_actions: function () { return true; },
       render: function () { return true; },
 
-      /**
-       * Chamado quando o usuário salva o passo do widget no designer do
-       * Salesbot. Monta o fluxo: chama o agente e segue para o próximo passo.
-       */
       onSalesbotDesignerSave: function (_handler_code, params) {
         var hookUrl =
-          (params && params.url) ||
+          (params && params.text) ||
           'https://blink-agent.6prkfn.easypanel.host/kommo';
 
         var requestData = {

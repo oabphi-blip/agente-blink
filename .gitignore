@@ -1,4 +1,4 @@
-# Secrets
+# Secrets — NEVER commit
 .env
 .env.local
 *.env
@@ -12,3 +12,14 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+
+# Local-only build files
+.deploy_dockerfile_v2.txt
+.deploy_dockerfile_v3.txt
+blink-agent.tar.xz
+blink-agent.zip
+agente_blink_widget.zip
+ziN3L4Ro
+
+# macOS
+.DS_Store

@@ -1,11 +1,14 @@
 {
   "widget": {
-    "name": "Agente Blink",
-    "short_description": "Blink Oftalmologia AI attendance agent.",
-    "description": "Connects the Salesbot to the Blink AI agent. On each patient message, the agent generates the reply and the Salesbot sends it on WhatsApp."
+    "name": "Agente Blink IA",
+    "short_description": "Blink AI attendance agent.",
+    "description": "Connects the Salesbot to the Blink Oftalmologia AI agent. On each patient message, the agent generates the reply and the Salesbot sends it on WhatsApp."
+  },
+  "settings": {
+    "url": "Agent URL"
   },
   "salesbot": {
     "handler_name": "Agente Blink — reply",
-    "url": "Agent URL"
+    "text": "Agent URL"
   }
 }
