@@ -261,3 +261,114 @@ class Responder:
 
     def reset(self, conversation_key: str) -> None:
         self._convos.reset(conversation_key)
+
+    # ----------------------------------------------------- Kommo extraction
+
+    def extract_lead_fields(self, conversation_key: str) -> dict:
+        """Lê o histórico da conversa e devolve campos estruturados pro Kommo.
+
+        Usa Claude Haiku (barato, ~5¢/MM tokens) e tool_use pra garantir JSON
+        bem formado. Retorna {} se ainda não houver dado suficiente.
+
+        Chaves possíveis:
+          name, birth_date_iso (YYYY-MM-DD), reason,
+          convenio, unidade, medico, especialidade, tipo_agendamento,
+          perfil_paciente, num_pacientes, dia_turno_periodo
+        """
+        history = self._convos.get(conversation_key)
+        if not history:
+            return {}
+
+        # Formata histórico como texto simples
+        transcript = []
+        for msg in history:
+            role = "PACIENTE" if msg["role"] == "user" else "AGENTE"
+            transcript.append(f"[{role}] {msg['content']}")
+        conversation = "\n".join(transcript)
+
+        tool_schema = {
+            "name": "save_lead_fields",
+            "description": (
+                "Salva os dados estruturados do paciente extraídos da conversa. "
+                "Só preencha um campo se a informação foi DITA EXPLICITAMENTE "
+                "pelo paciente ou pelo agente. Não invente."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Nome completo do paciente"},
+                    "birth_date_iso": {
+                        "type": "string",
+                        "description": "Data de nascimento em formato YYYY-MM-DD",
+                    },
+                    "reason": {"type": "string", "description": "Motivo/queixa da consulta"},
+                    "convenio": {
+                        "type": "string",
+                        "description": "Nome do convênio (ex: 'Pro Ser STJ') ou 'Particular'",
+                    },
+                    "unidade": {
+                        "type": "string",
+                        "enum": ["Asa Norte", "Águas Claras"],
+                    },
+                    "medico": {
+                        "type": "string",
+                        "description": "Nome do médico (Dra. Karla Delalibera, Dr. Fabricio Freitas, Dra. Katia Delalibera, etc.)",
+                    },
+                    "especialidade": {
+                        "type": "string",
+                        "enum": [
+                            "Oftalmopediatria", "Estrabismo", "SDP",
+                            "Catarata", "Retina", "Oftalmologia Geral",
+                            "Lentes", "Refrativa",
+                        ],
+                    },
+                    "tipo_agendamento": {
+                        "type": "string",
+                        "enum": ["Fixo/Definido", "Encaixe", "Domiciliar"],
+                    },
+                    "perfil_paciente": {
+                        "type": "string",
+                        "enum": [
+                            "Bebê 0-2", "Criança 3-12", "Adolescente 13-18",
+                            "Adulto de 19 a 49", "Acima de 50",
+                        ],
+                    },
+                    "num_pacientes": {
+                        "type": "string",
+                        "enum": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+                    },
+                    "dia_turno_periodo": {
+                        "type": "string",
+                        "description": "Preferência do paciente em texto livre, ex: 'Segunda-feira — manhã — início (8h-9h)'",
+                    },
+                },
+            },
+        }
+
+        system = (
+            "Você é um extrator de dados estruturados de conversas de atendimento "
+            "da clínica Blink Oftalmologia. Leia a conversa entre AGENTE e PACIENTE "
+            "e chame save_lead_fields APENAS com os campos cuja informação foi "
+            "explicitamente confirmada na conversa. Se um campo não foi dito, "
+            "NÃO inclua. Não chute idade — só preencha perfil_paciente se a data "
+            "de nascimento ou idade foi dita."
+        )
+
+        try:
+            response = self._client.messages.create(
+                model=self._haiku,
+                max_tokens=600,
+                system=system,
+                tools=[tool_schema],
+                tool_choice={"type": "tool", "name": "save_lead_fields"},
+                messages=[{"role": "user", "content": conversation}],
+                temperature=0,
+            )
+            for block in response.content:
+                if block.type == "tool_use" and block.name == "save_lead_fields":
+                    extracted = dict(block.input or {})
+                    # Remove vazios
+                    return {k: v for k, v in extracted.items() if v}
+        except Exception as e:  # noqa: BLE001
+            log.warning("extract_lead_fields falhou: %s", e)
+        return {}

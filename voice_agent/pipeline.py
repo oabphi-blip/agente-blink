@@ -7,10 +7,12 @@ autorizados em settings recebem resposta. Demais ficam apenas logados.
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Optional
 
 from .evolution import EvolutionClient, EvolutionError
+from .kommo import KommoClient
 from .responder import Responder
 from .settings import Settings
 from .transcribe import Transcriber
@@ -41,6 +43,11 @@ class VoicePipeline:
         self.responder = responder
         self.evolution = evolution
         self.settings = settings
+        self.kommo: Optional[KommoClient] = (
+            KommoClient(subdomain=settings.kommo_subdomain, token=settings.kommo_token)
+            if settings.kommo_enabled
+            else None
+        )
 
     def process_audio_bytes(
         self,
@@ -161,7 +168,37 @@ class VoicePipeline:
                 error=f"evolution: {e}",
             )
 
+        # 5) Auto-preenchimento do Kommo CRM (best-effort, em background)
+        # — não bloqueia a resposta do WhatsApp se Kommo demorar/falhar.
+        if self.kommo is not None and reply_to_number:
+            threading.Thread(
+                target=self._sync_kommo_safely,
+                args=(reply_to_number, conversation_key),
+                daemon=True,
+            ).start()
+
         return PipelineResult(
             transcript=user_text, answer=answer, sent=True,
             model_used=model_used, articles_used=articles_used,
         )
+
+    def _sync_kommo_safely(self, phone: str, conversation_key: str) -> None:
+        """Atualiza o lead do Kommo com os dados extraídos da conversa.
+
+        Roda em thread separada — qualquer erro é logado, não propaga.
+        """
+        if self.kommo is None:
+            return
+        try:
+            # Recupera histórico via responder.extract_lead_fields
+            fields = self.responder.extract_lead_fields(conversation_key)
+            if not fields:
+                log.debug("Kommo sync: nenhum campo extraído pra %s", conversation_key)
+                return
+            lead_id = self.kommo.find_lead_id_by_phone(phone)
+            if not lead_id:
+                log.info("Kommo sync: lead não encontrado pra %s", phone)
+                return
+            self.kommo.update_lead_fields(lead_id, fields)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo sync falhou (%s): %s", phone, e)

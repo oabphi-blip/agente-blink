@@ -38,6 +38,11 @@ class Settings:
     whitelist_numbers: tuple[str, ...]
     whitelist_strict: bool
 
+    # Kommo CRM (auto-preenchimento de leads)
+    kommo_subdomain: str
+    kommo_token: str
+    kommo_enabled: bool
+
     @classmethod
     def load(cls) -> "Settings":
         load_dotenv()
@@ -45,6 +50,7 @@ class Settings:
         oai = cfg.get("openai", {}) if isinstance(cfg, dict) else {}
         anthropic = cfg.get("anthropic", {}) if isinstance(cfg, dict) else {}
         ev = cfg.get("evolution_api", {}) if isinstance(cfg, dict) else {}
+        kommo_cfg = cfg.get("kommo", {}) if isinstance(cfg, dict) else {}
         agent = cfg.get("agent", {}) if isinstance(cfg, dict) else {}
 
         openai_api_key = os.getenv("OPENAI_API_KEY") or oai.get("api_key", "")
@@ -77,6 +83,11 @@ class Settings:
                 "Configuração ausente:\n  - " + "\n  - ".join(missing)
             )
 
+        # Kommo (opcional — desabilitado se não houver token)
+        kommo_subdomain = os.getenv("KOMMO_SUBDOMAIN") or kommo_cfg.get("subdomain", "")
+        kommo_token = os.getenv("KOMMO_TOKEN") or kommo_cfg.get("token", "")
+        kommo_enabled = bool(kommo_subdomain and kommo_token)
+
         return cls(
             openai_api_key=openai_api_key,
             whisper_model=os.getenv("WHISPER_MODEL") or agent.get("whisper_model", "whisper-1"),
@@ -91,6 +102,9 @@ class Settings:
             max_response_chars=int(os.getenv("MAX_RESPONSE_CHARS", "1200")),
             whitelist_numbers=wl,
             whitelist_strict=(os.getenv("WHITELIST_STRICT", str(agent.get("whitelist_strict", True))).lower() == "true"),
+            kommo_subdomain=kommo_subdomain,
+            kommo_token=kommo_token,
+            kommo_enabled=kommo_enabled,
         )
 
     def is_whitelisted(self, number: str) -> bool:
