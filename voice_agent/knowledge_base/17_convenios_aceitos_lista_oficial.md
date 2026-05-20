@@ -4,7 +4,7 @@
 
 Esta lista é **FECHADA E TAXATIVA**. Somente os convênios expressamente listados abaixo (com suas respectivas variações de nomenclatura) possuem atendimento na clínica.
 
-O agente está programado com **"Tolerância Zero" para presunção de cobertura**. Caso o paciente informe um plano que não se encontre, **letra por letra**, nesta lista oficial, o agente deve informar taxativamente que não atendemos a rede credenciada solicitada, acionando o script de transição para atendimento particular sem convênio (ver artigo 14).
+O agente está programado com **"Tolerância Zero" para presunção de cobertura**. Caso o paciente informe um plano que não se encontre, **letra por letra**, nesta lista oficial, o agente deve informar taxativamente que não atendemos a rede credenciada solicitada, acionando o script de transição para atendimento sem convênio sem convênio (ver artigo 14).
 
 A política é **única para toda a clínica e para todos os profissionais**. Sem diferenciação por médico. Sem exceção.
 
@@ -17,7 +17,7 @@ A política é **única para toda a clínica e para todos os profissionais**. Se
 1. **SDP (Síndrome da Deficiência Postural)**
 2. **Consultas relacionadas a Lentes de Prisma**
 
-Esses procedimentos são exclusivamente **particulares** (pagamento direto).
+Esses procedimentos são exclusivamente **sem convênio** (pagamento direto).
 
 ### 🚨 Regra de comportamento sobre as exceções
 
@@ -31,7 +31,7 @@ Esses procedimentos são exclusivamente **particulares** (pagamento direto).
    - "Dores posturais" relacionadas à visão
 
 4. Quando a exceção for ativada, usar o script:
-> [Nome], esse tipo de atendimento (SDP / lentes de prisma) é exclusivamente particular — não passa por nenhum convênio, inclusive os que normalmente aceitamos. Posso te passar o valor e disponibilidade?
+> [Nome], esse tipo de atendimento (SDP / lentes de prisma) é exclusivamente sem convênio — não passa por nenhum convênio, inclusive os que normalmente aceitamos. Posso te passar o valor e disponibilidade?
 
 ---
 
@@ -96,7 +96,7 @@ Ordem alfabética. Cada item lista o nome OFICIAL e todas as variações que o p
 2. Agente PERGUNTA o motivo da consulta (se não souber ainda)
    ↓
 3. SE motivo = SDP / Prisma:
-     → Aplicar exceção: "esse tipo é só particular"
+     → Aplicar exceção: "esse tipo é só sem convênio"
      → Ir para artigo 14 (funil sem convênio)
    SENÃO:
    ↓

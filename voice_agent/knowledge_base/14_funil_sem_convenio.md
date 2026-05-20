@@ -6,7 +6,7 @@ Sempre que o convênio não for aceito (ver artigo 18 — Convênios Não Aceito
 
 ```
 [Nome do Paciente], ✨ Esse plano ainda não faz parte da nossa rede credenciada.
-Porém, nós liberamos condições especiais de atendimento particular para que
+Porém, nós liberamos condições especiais de atendimento sem convênio para que
 você não fique sem os nossos cuidados! 💙
 
 Como você prefere seguir? 👇

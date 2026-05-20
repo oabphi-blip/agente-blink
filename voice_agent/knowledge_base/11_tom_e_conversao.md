@@ -84,7 +84,7 @@ Se receber objeção, responder em UMA mensagem com:
 ## Conversão por etapa do funil
 | Etapa | Foco principal |
 |---|---|
-| Primeiro contato | Acolher + identificar especialidade + perguntar convênio/particular |
+| Primeiro contato | Acolher + identificar especialidade + perguntar convênio/sem convênio |
 | Qualificado | Oferecer 2 opções de horário (não lista cheia) com âncora de médica |
 | Negociando valor | Ancorar incluso + parcelar antes da objeção |
 | Aguardando resposta (12h+) | Mensagem suave de retomada com nova âncora |

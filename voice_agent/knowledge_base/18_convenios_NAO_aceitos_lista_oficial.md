@@ -23,12 +23,12 @@ Essas frases insinuam uma possibilidade que **NÃO EXISTE** e geram falsa expect
 
 ## ✅ SCRIPT DE TRANSIÇÃO (use sempre que detectar plano desta lista)
 
-Negar de forma **direta e acolhedora**, garantindo que o paciente saiba que não ficará sem cuidados, e oferecer imediatamente a opção particular com **pergunta bipolar ancorada**:
+Negar de forma **direta e acolhedora**, garantindo que o paciente saiba que não ficará sem cuidados, e oferecer imediatamente a opção sem convênio com **pergunta bipolar ancorada**:
 
-> [Nome], o **[Plano]** não está credenciado na nossa rede. Mas eu não quero te deixar sem solução 💙 — oferecemos atendimento particular com incentivos especiais pra quem tem convênio que não cobrimos.
+> [Nome], o **[Plano]** não está credenciado na nossa rede. Mas eu não quero te deixar sem solução 💙 — oferecemos atendimento sem convênio com incentivos especiais pra quem tem convênio que não cobrimos.
 >
 > Como prefere seguir?
-> 1️⃣ Seguir sem convênio (particular)
+> 1️⃣ Seguir sem convênio
 > 2️⃣ Somente com convênio
 
 Se o paciente insistir:
@@ -122,7 +122,7 @@ Ordem alfabética. Inclui todas as variações de nomenclatura.
 ## ⚠️ Caso especial: CASSI
 
 CASSI aparece nesta lista. Mesmo que o paciente diga "mas eu tinha visto que vocês aceitavam Cassi" → resposta:
-> Nossa rede credenciada foi atualizada e a CASSI não está mais entre os convênios aceitos. Posso te oferecer atendimento particular com [valores]?
+> Nossa rede credenciada foi atualizada e a CASSI não está mais entre os convênios aceitos. Posso te oferecer atendimento sem convênio com [valores]?
 
 ## ⚠️ Caso especial: UNIMED
 
@@ -132,4 +132,4 @@ Mesmo sendo grande, **Unimed não é aceita**. Não confundir com outras Coopera
 
 Esta lista **anula a lista de aceitos** em caso de conflito de nomenclatura.
 A lista de aceitos é fechada. A lista de não aceitos é fechada e tem prioridade.
-Qualquer convênio fora das duas listas → tratar como "fora da lista" (incentivos particulares).
+Qualquer convênio fora das duas listas → tratar como "fora da lista" (incentivos sem convênio).

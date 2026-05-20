@@ -34,7 +34,7 @@ Rafaela Ortiga. Ela vai preparar o plano cirúrgico.
 Para isso, confirme seus dados:
 👤 Nome Completo:
 🎂 Data de Nascimento:
-🏥 Convênio? (Ou Particular)
+🏥 Convênio? (Ou Sem Convênio)
 ```
 
 ### 2.2. CENÁRIO 2 — Primeira avaliação (Opção 2)

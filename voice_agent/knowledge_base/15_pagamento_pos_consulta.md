@@ -15,7 +15,7 @@ Fluxo do funil "Agendar Sem Convênio" no CRM, parte de pagamento e pós-atendim
 
 ## 1. Reserva de horário com 50%
 
-Para pacientes particulares — pedir 50% do valor da consulta para SEGURAR o horário.
+Para pacientes sem convênio — pedir 50% do valor da consulta para SEGURAR o horário.
 
 > [Nome] 💙 Para garantir esse horário exclusivamente para você, pedimos uma reserva de 50% do valor da consulta (R$ 305,50 via Pix).
 >
@@ -77,7 +77,7 @@ Padrão:
 
 ## Regras
 
-1. **Reserva 50% só para consultas particulares.** Convênio nunca pede reserva.
+1. **Reserva 50% só para consultas sem convênio.** Convênio nunca pede reserva.
 2. **Comprovante de Pix** deve sempre ser solicitado ao paciente para confirmação cruzada.
 3. **Estorno e NF para terceiros** → sempre humano.
 4. **Avaliação Google é pedido educado, não obrigação.** Se paciente disser que vai fazer depois, não cobrar.

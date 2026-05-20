@@ -13,7 +13,7 @@ Ativar este fluxo caso o motivo da consulta inclua termos como:
 - "Instabilidade"
 
 ### Trava de Segurança
-Atendimentos de **SDP e lentes de prisma** são **exclusivamente PARTICULARES**.
+Atendimentos de **SDP e lentes de prisma** são **exclusivamente SEM CONVÊNIO**.
 
 ⚠️ **PROIBIDO** verificar convênio ou mencionar que o plano não cobre ANTES de o paciente informar o motivo da busca.
 

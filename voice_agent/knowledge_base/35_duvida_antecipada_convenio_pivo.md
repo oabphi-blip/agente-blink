@@ -1,7 +1,7 @@
 # DÚVIDA ANTECIPADA DE CONVÊNIO (PIVÔ DE ATENDIMENTO)
 
 ## 🎯 OBJETIVO
-Acolher a dúvida do paciente que pergunta sobre convênio na **primeira mensagem**, sem confirmar cobertura antes de identificar o motivo (regra crítica por causa de SDP e Lentes de Prisma, que são exclusivamente particulares).
+Acolher a dúvida do paciente que pergunta sobre convênio na **primeira mensagem**, sem confirmar cobertura antes de identificar o motivo (regra crítica por causa de SDP e Lentes de Prisma, que são exclusivamente sem convênio).
 
 ## 🚨 GATILHO
 A **primeira mensagem do paciente** é uma pergunta direta sobre convênio.
@@ -53,13 +53,13 @@ Obrigado, [Nome]. Qual é o motivo principal da consulta?
 
 Com **nome e motivo** em mãos:
 
-1. **Verifique se o caso é EXCEÇÃO** (SDP ou Prisma): atendimento exclusivamente particular, **NÃO** consultar lista de convênios. → ir para artigo 31 (SDP) ou 14 (sem convênio).
+1. **Verifique se o caso é EXCEÇÃO** (SDP ou Prisma): atendimento exclusivamente sem convênio, **NÃO** consultar lista de convênios. → ir para artigo 31 (SDP) ou 14 (sem convênio).
 
 2. **Caso contrário, cruze o convênio EXCLUSIVAMENTE com o "ARTIGO CONVÊNIOS ACEITOS" (17)**.
-   - Se o nome NÃO constar exatamente, recuse a cobertura de forma direta (**sem "infelizmente"**) e aplique o roteiro particular (artigo 14).
+   - Se o nome NÃO constar exatamente, recuse a cobertura de forma direta (**sem "infelizmente"**) e aplique o roteiro sem convênio (artigo 14).
    - Se aceito: continuar a coleta de dados (data de nascimento, foto da carteirinha, documento) — artigo 13.
 
-3. **Se particular:** explicar o procedimento com foco em agendamento.
+3. **Se sem convênio:** explicar o procedimento com foco em agendamento.
 
 ---
 

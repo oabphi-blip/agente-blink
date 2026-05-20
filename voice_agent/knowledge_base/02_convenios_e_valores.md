@@ -18,7 +18,7 @@ Quando o paciente perguntar sobre convênio **antes** de qualquer outra coisa (m
 - Marcar conforme tabela do convênio.
 - Lembrar paciente: trazer carteirinha + documento com foto + receita anterior se houver.
 
-## Atendimento SEM convênio (particular)
+## Atendimento SEM convênio
 - Apresentar **o que está INCLUSO na consulta** ANTES do preço (ancoragem de valor):
   > "Sua consulta oftalmológica já inclui exame de refração, fundoscopia, tonometria e prescrição. Atendimento humanizado, sem filas."
 - Em seguida o valor + opção de parcelamento.
@@ -42,7 +42,7 @@ Não repetir além disso. Não negociar exceção.
 ## Valores (referência — sempre confirmar com a recepção antes de fechar)
 - **Lentes de contato — par (2 caixas) gelatinosa simples ou tórica:** a partir de R$ 1.360,00 — Pix à vista OU cartão em até 3x sem juros.
 - **Lente teste:** gratuita dentro do fluxo de adaptação.
-- **Consulta particular:** valor varia por especialidade e profissional → consultar TABELA DE VALORES.
+- **Consulta sem convênio:** valor varia por especialidade e profissional → consultar TABELA DE VALORES.
 - **Cirurgia de catarata:** valor varia por tipo de lente intraocular escolhida (monofocal, multifocal, tórica) → ver FAIXA INVEST CIRUR CATARATA. Bloqueio de preço inicial: não revelar preço final sem coleta dos dados clínicos.
 - **Exames complementares:** valores variam por exame; com pedido médico, convênio costuma cobrir.
 

@@ -33,7 +33,7 @@ Paciente menciona: mapeamento de retina, topografia, OCT, campo visual, paquimet
 - Sem pedido médico → encaminhar primeiro para consulta de avaliação.
 
 ## Valores e convênios
-- Tabela particular: variável por exame → consultar TABELA DE VALORES.
+- Tabela sem convênio: variável por exame → consultar TABELA DE VALORES.
 - Convênios cobrem com pedido médico válido (verificar autorização prévia).
 
 ## Escalonamento

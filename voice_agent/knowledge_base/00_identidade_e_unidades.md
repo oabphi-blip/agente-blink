@@ -63,7 +63,7 @@ Com **15 anos de experiência** na área. Reconhecida em Brasília como uma das 
 
 3. **Síndrome de Deficiência Postural (SDP)**
    - Avaliação multidisciplinar da relação entre visão e postura.
-   - Atendimento exclusivamente particular (não passa por convênio — ver artigos 17 e 18).
+   - Atendimento exclusivamente sem convênio (não passa por convênio — ver artigos 17 e 18).
 
 ### Unidade onde atende
 Dra. Karla atende **exclusivamente na unidade ASA NORTE**, nos dias Segunda, Quarta e Sexta.

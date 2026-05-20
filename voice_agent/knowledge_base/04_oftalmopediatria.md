@@ -7,7 +7,7 @@ Usar quando o paciente mencionar: **filho, filha, criança, bebê, escolar, vis�
 1.2. **Idade da criança** (ESSENCIAL — define se é oftalmopediatria ou pode atender adulto).
 1.3. Sintoma ou motivo principal (já informado? não repergunte).
 1.4. Nome do responsável que vai acompanhar.
-1.5. Convênio (se aplicável) ou particular.
+1.5. Convênio (se aplicável) ou sem convênio.
 1.6. Preferência de unidade e turno.
 
 ## 2. REGRAS POR FAIXA ETÁRIA
@@ -29,7 +29,7 @@ Usar quando o paciente mencionar: **filho, filha, criança, bebê, escolar, vis�
 4.5. **Perda súbita de visão, visão dupla, dor intensa → URGÊNCIA, escalonar** (artigo 07).
 
 ## 5. VALORES E CONVÊNIOS
-5.1. Consulta de oftalmopediatria (particular): consultar artigo TABELA DE VALORES (19).
+5.1. Consulta de oftalmopediatria (sem convênio): consultar artigo TABELA DE VALORES (19).
 5.2. Convênios aceitos: ver artigo CONVÊNIOS ACEITOS (17).
 5.3. Não oferecer benefício infantil se convênio cobre normalmente.
 

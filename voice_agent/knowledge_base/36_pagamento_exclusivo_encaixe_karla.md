@@ -1,7 +1,7 @@
 # TIPO DE PAGAMENTO — AGENDAMENTO EXCLUSIVO / ENCAIXE (EXCLUSIVO DRA. KARLA DELALÍBERA)
 
 ## 🚨 ATENÇÃO
-Este roteiro é **estritamente EXCLUSIVO** e deve ser utilizado **somente** para consultas e procedimentos **particulares** (sem convênio, incluindo SDP) com a **Dra. Karla Delalíbera**.
+Este roteiro é **estritamente EXCLUSIVO** e deve ser utilizado **somente** para consultas e procedimentos **sem convênio** (sem convênio, incluindo SDP) com a **Dra. Karla Delalíbera**.
 
 O Agente deve utilizá-lo na **fase de finalização do agendamento logístico**, enviando **estritamente um passo por vez** e aguardando a resposta antes de avançar para a próxima etapa.
 
@@ -85,7 +85,7 @@ que assumirá o contato em breve para os próximos passos da sua reserva. ✨
 
 📋 Resumo do atendimento:
 👤 Paciente: [Nome]
-🏥 Modalidade: Particular (Dra. Karla) — [Reserva Imediata 50% OU Fila de Encaixe]
+🏥 Modalidade: Sem Convênio (Dra. Karla) — [Reserva Imediata 50% OU Fila de Encaixe]
 📍 Preferência: [Unidade] — [Dias, Turnos e Períodos escolhidos]
 ```
 
@@ -93,7 +93,7 @@ que assumirá o contato em breve para os próximos passos da sua reserva. ✨
 
 ## ⚠️ Regras críticas
 
-1. **Apenas Dra. Karla particular** — não usar para Dr. Fabrício ou convênios.
+1. **Apenas Dra. Karla sem convênio** — não usar para Dr. Fabrício ou convênios.
 2. **Um passo por vez** — esperar resposta a cada passo.
 3. **Reserva 50%:** chave Pix Asa Norte: `karladelaliberaoftalmo@gmail.com` | Águas Claras: CNPJ `52.303.729/0001-30`.
 4. **Fila de Encaixe:** sem adiantamento, paga no dia.
