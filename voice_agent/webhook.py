@@ -280,7 +280,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     #      envia a resposta no WhatsApp do paciente
     # Doc: https://developers.kommo.com/docs/private-chatbot-integration
 
-    def _process_kommo(message: str, convo_key: str, return_url: str) -> None:
+    def _process_kommo(
+        message: str, convo_key: str, return_url: str, lead_id: str = "",
+    ) -> None:
         """Processa a mensagem do Kommo e devolve a resposta ao Salesbot."""
         try:
             result = responder.reply(convo_key, message)
@@ -312,6 +314,16 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception as e:  # noqa: BLE001
             log.warning("Kommo continue erro: %s", e)
 
+        # Auto-preenchimento dos campos do lead no Kommo (mesmo que o caminho
+        # Evolution faz). Aqui já temos o lead_id direto — não precisa buscar.
+        if pipeline.kommo is not None and lead_id:
+            try:
+                fields = responder.extract_lead_fields(convo_key)
+                if fields:
+                    pipeline.kommo.update_lead_fields(int(lead_id), fields)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Kommo auto-fill (/kommo) falhou: %s", e)
+
     @app.post("/kommo")
     async def kommo_webhook(request: Request) -> JSONResponse:
         try:
@@ -341,7 +353,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     "[O paciente enviou uma mensagem sem texto — imagem, áudio "
                     "ou documento. Confirme o recebimento de forma calorosa e "
                     "siga o atendimento.]",
-                    convo_key, return_url,
+                    convo_key, return_url, lead_id,
                 ),
                 daemon=True,
             ).start()
@@ -350,7 +362,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         # Responde 200 já (exigência <2s) e processa em background
         threading.Thread(
             target=_process_kommo,
-            args=(message, convo_key, return_url),
+            args=(message, convo_key, return_url, lead_id),
             daemon=True,
         ).start()
         return JSONResponse({"ok": True})
