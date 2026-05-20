@@ -1,0 +1,12 @@
+# Agente Easypanel
+anthropic>=0.40.0
+requests>=2.31.0
+rich>=13.7.0
+python-dotenv>=1.0.0
+
+# Voice Agent (WhatsApp + Whisper + GPT)
+openai>=1.40.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+httpx>=0.27.0
+python-multipart>=0.0.9
