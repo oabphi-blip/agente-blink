@@ -275,24 +275,22 @@ class KommoClient:
     # ----------------------- enriquecimento de contexto (onboarding)
 
     def get_caller_context(self, phone: str) -> dict:
-        """Busca o que o CRM já sabe sobre quem está ligando — para onboarding.
+        """Onboarding por telefone: busca o lead e o que o CRM já sabe.
 
-        Retorna um dict resumido. Usado no início da conversa para o agente
-        saudar de forma personalizada e NÃO reperguntar dados já conhecidos.
-
-        {
-          "found": bool,
-          "lead_id": int | None,
-          "name": str | None,            # 1.NOME PACIENTE, se já preenchido
-          "known": { campo: valor, ... } # campos já preenchidos no lead
-        }
+        Usado no caminho Evolution (0710). Retorna:
+        {found, lead_id, name, known:{campo:valor}}
         """
-        out: dict = {"found": False, "lead_id": None, "name": None, "known": {}}
         lead_id = self.find_lead_id_by_phone(phone)
         if not lead_id:
-            return out
-        out["found"] = True
-        out["lead_id"] = lead_id
+            return {"found": False, "lead_id": None, "name": None, "known": {}}
+        return self.get_caller_context_by_lead(lead_id)
+
+    def get_caller_context_by_lead(self, lead_id: int | str) -> dict:
+        """Onboarding por lead_id direto — usado no caminho Kommo (8133),
+        onde o widget_request já entrega o lead_id."""
+        out: dict = {
+            "found": True, "lead_id": int(lead_id), "name": None, "known": {},
+        }
         try:
             with httpx.Client(timeout=self.timeout) as c:
                 r = c.get(
@@ -303,7 +301,6 @@ class KommoClient:
             if r.status_code != 200:
                 return out
             data = r.json() or {}
-            # Campos custom relevantes → nome legível
             id_to_label = {
                 FIELD_NOME_PACIENTE_1: "nome_paciente",
                 FIELD_MOTIVO_PACIENTE_1: "motivo",
@@ -326,5 +323,5 @@ class KommoClient:
                         if label == "nome_paciente":
                             out["name"] = v
         except Exception as e:  # noqa: BLE001
-            log.warning("Kommo get_caller_context erro: %s", e)
+            log.warning("Kommo get_caller_context_by_lead erro: %s", e)
         return out

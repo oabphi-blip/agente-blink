@@ -133,25 +133,23 @@ class VoicePipeline:
                 error="entrada vazia",
             )
 
-        # 2b) Onboarding orquestrado — só na PRIMEIRA mensagem da conversa,
-        # busca no Kommo o que já se sabe deste contato (evita reperguntar).
+        # 2b) Onboarding orquestrado — busca no Kommo o que já se sabe deste
+        # contato. Feito em TODA mensagem (não só na primeira): assim o agente
+        # nunca "esquece" os dados do lead no meio da conversa, e enxerga
+        # também o que ele mesmo já preencheu (convênio, médico, unidade...).
         caller_context = None
         if self.kommo is not None and reply_to_number:
             try:
-                is_new_conversation = not self.responder._convos.get(conversation_key)
-            except Exception:  # noqa: BLE001
-                is_new_conversation = False
-            if is_new_conversation:
-                try:
-                    caller_context = self.kommo.get_caller_context(reply_to_number)
-                    if caller_context and caller_context.get("found"):
-                        log.info(
-                            "Onboarding: contato conhecido (lead %s, nome=%s)",
-                            caller_context.get("lead_id"), caller_context.get("name"),
-                        )
-                except Exception as e:  # noqa: BLE001
-                    log.warning("Onboarding lookup falhou: %s", e)
-                    caller_context = None
+                caller_context = self.kommo.get_caller_context(reply_to_number)
+                if caller_context and caller_context.get("found"):
+                    log.info(
+                        "Onboarding: contato conhecido (lead %s, campos=%s)",
+                        caller_context.get("lead_id"),
+                        list((caller_context.get("known") or {}).keys()),
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning("Onboarding lookup falhou: %s", e)
+                caller_context = None
 
         # 3) Resposta com Claude
         try:

@@ -284,8 +284,16 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         message: str, convo_key: str, return_url: str, lead_id: str = "",
     ) -> None:
         """Processa a mensagem do Kommo e devolve a resposta ao Salesbot."""
+        # Onboarding: já temos o lead_id — busca o que o CRM sabe do contato
+        # (convênio, médico, unidade já preenchidos) para o agente não reperguntar.
+        caller_context = None
+        if pipeline.kommo is not None and lead_id:
+            try:
+                caller_context = pipeline.kommo.get_caller_context_by_lead(lead_id)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Kommo onboarding (/kommo) falhou: %s", e)
         try:
-            result = responder.reply(convo_key, message)
+            result = responder.reply(convo_key, message, caller_context=caller_context)
             answer = result.get("answer") or ""
         except Exception as e:  # noqa: BLE001
             log.exception("Kommo: Claude falhou")
