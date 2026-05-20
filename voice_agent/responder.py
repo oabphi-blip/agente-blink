@@ -72,7 +72,7 @@ def _load_master_instruction() -> str:
     path = KB_DIR / "_MASTER_INSTRUCTION.md"
     if path.is_file():
         return path.read_text(encoding="utf-8")
-    return "Você é a assistente virtual da Blink Oftalmologia."
+    return "Você é a Lia, assistente virtual da Blink Oftalmologia."
 
 
 # Palavras/contextos que exigem Sonnet (mais inteligente, mais caro)
