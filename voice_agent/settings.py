@@ -46,6 +46,11 @@ class Settings:
     # Redis (persistência de histórico de conversa + dedup)
     redis_url: str
 
+    # Medware (sistema de agenda da clínica)
+    medware_user: str
+    medware_password: str
+    medware_enabled: bool
+
     @classmethod
     def load(cls) -> "Settings":
         load_dotenv()
@@ -94,6 +99,12 @@ class Settings:
         # Redis (opcional — fallback em memória se ausente)
         redis_url = os.getenv("REDIS_URL") or cfg.get("redis", {}).get("url", "")
 
+        # Medware (opcional)
+        mw_cfg = cfg.get("medware", {}) if isinstance(cfg, dict) else {}
+        medware_user = os.getenv("MEDWARE_USER") or mw_cfg.get("user", "")
+        medware_password = os.getenv("MEDWARE_PASSWORD") or mw_cfg.get("password", "")
+        medware_enabled = bool(medware_user and medware_password)
+
         return cls(
             openai_api_key=openai_api_key,
             whisper_model=os.getenv("WHISPER_MODEL") or agent.get("whisper_model", "whisper-1"),
@@ -112,6 +123,9 @@ class Settings:
             kommo_token=kommo_token,
             kommo_enabled=kommo_enabled,
             redis_url=redis_url,
+            medware_user=medware_user,
+            medware_password=medware_password,
+            medware_enabled=medware_enabled,
         )
 
     def is_whitelisted(self, number: str) -> bool:

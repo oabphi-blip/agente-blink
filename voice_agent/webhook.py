@@ -69,6 +69,15 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     )
     pipeline = VoicePipeline(transcriber, responder, evolution, settings)
 
+    # Cliente Medware (opcional) — usado pelo /health e futura integração de agenda.
+    medware = None
+    if settings.medware_enabled:
+        from .medware import MedwareClient
+        medware = MedwareClient(
+            identificacao=settings.medware_user,
+            senha=settings.medware_password,
+        )
+
     app = FastAPI(
         title="Agente Blink Oftalmologia — Voice + Text",
         version="0.2.0",
@@ -80,6 +89,28 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict:
+        # Redis: tenta um round-trip rápido pelo store
+        redis_status = {"configured": bool(settings.redis_url)}
+        try:
+            store_redis = getattr(conversation_store, "_redis", None)
+            if store_redis is not None:
+                store_redis.ping()
+                redis_status["connected"] = True
+            else:
+                redis_status["connected"] = False
+                redis_status["mode"] = "memória (fallback — NÃO persiste entre restarts)"
+        except Exception as e:  # noqa: BLE001
+            redis_status["connected"] = False
+            redis_status["error"] = str(e)[:120]
+
+        # Medware: status de login
+        medware_status = {"configured": settings.medware_enabled}
+        if medware is not None:
+            medware_status.update(medware.status())
+
+        # Kommo: apenas se está configurado (sem chamada de rede pesada)
+        kommo_status = {"configured": settings.kommo_enabled}
+
         return {
             "status": "ok",
             "whitelist_strict": settings.whitelist_strict,
@@ -89,6 +120,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "sonnet": settings.claude_sonnet_model,
                 "haiku": settings.claude_haiku_model,
             },
+            "redis": redis_status,
+            "medware": medware_status,
+            "kommo": kommo_status,
         }
 
     @app.post("/webhook")
