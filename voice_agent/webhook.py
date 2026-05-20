@@ -212,8 +212,47 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 quoted_message_id=msg_id,
             )
 
+        # IMAGEM / DOCUMENTO → o paciente provavelmente mandou carteirinha ou
+        # identidade. Roteia como texto sintético para o agente reconhecer e
+        # responder (em vez de ignorar e ficar mudo).
+        elif msg_type in ("imageMessage", "documentMessage"):
+            legenda = ""
+            for k in ("imageMessage", "documentMessage"):
+                cap = (message.get(k) or {}).get("caption")
+                if cap:
+                    legenda = cap
+                    break
+            tipo = "uma imagem/foto" if msg_type == "imageMessage" else "um documento/arquivo"
+            sintetico = (
+                f"[O paciente acabou de enviar {tipo} pelo WhatsApp"
+                + (f', com a legenda: \"{legenda}\"' if legenda else "")
+                + ". Provavelmente é a carteirinha do convênio ou um documento "
+                "de identidade. Confirme o recebimento de forma calorosa, diga "
+                "que a equipe vai conferir, e prossiga normalmente o atendimento.]"
+            )
+            result = pipeline.process_text(
+                text=sintetico,
+                conversation_key=convo_key,
+                reply_to_number=remote_jid,
+                quoted_message_id=msg_id,
+            )
+
+        # OUTROS TIPOS (figurinha, vídeo, localização, contato...) → não ignora
+        # em silêncio: envia um aviso curto pedindo texto ou áudio.
         else:
-            return JSONResponse({"ignored": f"messageType={msg_type}"})
+            try:
+                evolution.send_text(
+                    number=remote_jid,
+                    text=(
+                        "Recebi sua mensagem! 🙂 Para eu conseguir te ajudar com "
+                        "o agendamento, pode me escrever uma mensagem de texto ou "
+                        "enviar um áudio?"
+                    ),
+                    quoted_message_id=msg_id,
+                )
+            except Exception:  # noqa: BLE001
+                log.exception("falha ao enviar aviso de tipo não suportado")
+            return JSONResponse({"handled": f"messageType={msg_type}", "sent_hint": True})
 
         return JSONResponse({
             "ok": result.error is None,
