@@ -11,16 +11,14 @@ Arquitetura:
 from __future__ import annotations
 
 import logging
-import time
-from collections import defaultdict, deque
-from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Deque
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 from anthropic import Anthropic
 
 from .knowledge import KB_DIR, KnowledgeBase
+from .store import ConversationStore
 
 # Fuso horário oficial da clínica (Brasília) — usado pra cálculo de idade
 # e data de "hoje" injetada no system prompt.
@@ -100,35 +98,6 @@ SONNET_TRIGGERS = {
 }
 
 
-@dataclass
-class _ConversationStore:
-    """Histórico em memória com TTL e janela limitada por contato."""
-    max_turns: int = 12
-    ttl_seconds: int = 60 * 60 * 6  # 6h
-    _store: dict[str, Deque[dict]] = field(default_factory=lambda: defaultdict(deque))
-    _last_seen: dict[str, float] = field(default_factory=dict)
-
-    def get(self, key: str) -> list[dict]:
-        self._gc()
-        return list(self._store.get(key, []))
-
-    def append(self, key: str, role: str, content: str) -> None:
-        dq = self._store.setdefault(key, deque())
-        dq.append({"role": role, "content": content})
-        while len(dq) > self.max_turns * 2:
-            dq.popleft()
-        self._last_seen[key] = time.time()
-
-    def reset(self, key: str) -> None:
-        self._store.pop(key, None)
-        self._last_seen.pop(key, None)
-
-    def _gc(self) -> None:
-        cutoff = time.time() - self.ttl_seconds
-        for k in [k for k, t in self._last_seen.items() if t < cutoff]:
-            self.reset(k)
-
-
 def _route_model(user_text: str, history_len: int, sonnet: str, haiku: str) -> str:
     """Roteador Sonnet vs Haiku por complexidade.
 
@@ -168,6 +137,7 @@ class Responder:
         system_prompt: str | None = None,
         max_response_chars: int = 1200,
         knowledge_base: KnowledgeBase | None = None,
+        conversation_store: Optional[ConversationStore] = None,
     ):
         self._client = Anthropic(api_key=api_key)
         self._sonnet = sonnet_model
@@ -175,7 +145,8 @@ class Responder:
         # System prompt oficial = INSTRUÇÃO MESTRA + artigos por contexto
         self._base_system_prompt = system_prompt or _load_master_instruction()
         self._max_chars = max_response_chars
-        self._convos = _ConversationStore()
+        # Store de conversa — persistente (Redis) se fornecido; senão memória.
+        self._convos = conversation_store or ConversationStore()
         self._kb = knowledge_base or KnowledgeBase()
 
     def reply(self, conversation_key: str, user_text: str) -> dict:

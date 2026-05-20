@@ -12,7 +12,6 @@ números autorizados recebem resposta.
 from __future__ import annotations
 
 import logging
-import threading
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
@@ -22,7 +21,26 @@ from .evolution import EvolutionClient
 from .pipeline import VoicePipeline
 from .responder import Responder
 from .settings import Settings
+from .store import ConversationStore
 from .transcribe import Transcriber
+
+
+def _conversation_key(jid: str) -> str:
+    """Chave de conversa ESTÁVEL — só os dígitos do telefone.
+
+    O WhatsApp/Evolution entrega o remetente ora como '<num>@s.whatsapp.net',
+    ora como '<id>@lid', ora com/sem o 9 extra de celular BR. Se a chave
+    variar, o histórico "se perde" no meio da conversa. Normalizamos para
+    apenas dígitos — e, para celulares BR de 13 dígitos, removemos o 9 extra
+    para que 55619... e 5561 9... colidam na MESMA conversa.
+    """
+    if not jid:
+        return jid
+    digits = "".join(c for c in jid.split("@", 1)[0] if c.isdigit())
+    # Normaliza BR: 13 díg (55 + DDD + 9 + 8) → 12 díg (remove o 9)
+    if digits.startswith("55") and len(digits) == 13 and digits[4] == "9":
+        digits = digits[:4] + digits[5:]
+    return digits or jid
 
 log = logging.getLogger(__name__)
 logging.basicConfig(
@@ -35,11 +53,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     settings = settings or Settings.load()
 
     transcriber = Transcriber(api_key=settings.openai_api_key, model=settings.whisper_model)
+    # Store compartilhado — persistente em Redis se REDIS_URL estiver setado.
+    conversation_store = ConversationStore(redis_url=settings.redis_url or None)
     responder = Responder(
         api_key=settings.anthropic_api_key,
         sonnet_model=settings.claude_sonnet_model,
         haiku_model=settings.claude_haiku_model,
         max_response_chars=settings.max_response_chars,
+        conversation_store=conversation_store,
     )
     evolution = EvolutionClient(
         base_url=settings.evolution_base_url,
@@ -56,9 +77,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "com Whisper + Claude Sonnet/Haiku."
         ),
     )
-
-    seen_ids: set[str] = set()
-    seen_lock = threading.Lock()
 
     @app.get("/health")
     def health() -> dict:
@@ -116,18 +134,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if not remote_jid:
             return JSONResponse({"ignored": "sem remoteJid"})
 
-        # Dedup por id
-        if msg_id:
-            with seen_lock:
-                if msg_id in seen_ids:
-                    return JSONResponse({"ignored": "duplicate"})
-                seen_ids.add(msg_id)
-                if len(seen_ids) > 5000:
-                    seen_ids.clear()
-                    seen_ids.add(msg_id)
+        # Dedup por id — agora persistente (Redis). Sobrevive a restart e
+        # bloqueia reentrega de webhook mesmo após redeploy.
+        if msg_id and not conversation_store.mark_seen(msg_id):
+            return JSONResponse({"ignored": "duplicate"})
 
         if instance:
             evolution.instance = instance
+
+        # Chave de conversa ESTÁVEL (só dígitos do telefone) — garante que
+        # o histórico não se perca quando o WhatsApp alterna @lid/@s.whatsapp.net.
+        convo_key = _conversation_key(remote_jid)
 
         # ÁUDIO → transcrever + responder
         if msg_type in ("audioMessage", "pttMessage"):
@@ -144,7 +161,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             result = pipeline.process_audio_bytes(
                 audio_bytes=audio_bytes,
                 mime_type=mime,
-                conversation_key=remote_jid,
+                conversation_key=convo_key,
                 reply_to_number=remote_jid,
                 quoted_message_id=msg_id,
             )
@@ -156,7 +173,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 return JSONResponse({"ignored": "texto vazio"})
             result = pipeline.process_text(
                 text=text,
-                conversation_key=remote_jid,
+                conversation_key=convo_key,
                 reply_to_number=remote_jid,
                 quoted_message_id=msg_id,
             )

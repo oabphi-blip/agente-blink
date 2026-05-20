@@ -43,6 +43,9 @@ class Settings:
     kommo_token: str
     kommo_enabled: bool
 
+    # Redis (persistência de histórico de conversa + dedup)
+    redis_url: str
+
     @classmethod
     def load(cls) -> "Settings":
         load_dotenv()
@@ -88,6 +91,9 @@ class Settings:
         kommo_token = os.getenv("KOMMO_TOKEN") or kommo_cfg.get("token", "")
         kommo_enabled = bool(kommo_subdomain and kommo_token)
 
+        # Redis (opcional — fallback em memória se ausente)
+        redis_url = os.getenv("REDIS_URL") or cfg.get("redis", {}).get("url", "")
+
         return cls(
             openai_api_key=openai_api_key,
             whisper_model=os.getenv("WHISPER_MODEL") or agent.get("whisper_model", "whisper-1"),
@@ -105,6 +111,7 @@ class Settings:
             kommo_subdomain=kommo_subdomain,
             kommo_token=kommo_token,
             kommo_enabled=kommo_enabled,
+            redis_url=redis_url,
         )
 
     def is_whitelisted(self, number: str) -> bool:
