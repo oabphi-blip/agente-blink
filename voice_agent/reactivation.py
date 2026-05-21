@@ -151,22 +151,31 @@ class ReactivationEngine:
     def _today(self) -> str:
         return datetime.now(_TZ).strftime("%Y-%m-%d")
 
+    def _mode(self) -> str:
+        # 'dry' e 'live' usam namespaces SEPARADOS de dedup: assim um teste
+        # em dry-run não "consome" os leads da fila real. Ao passar para
+        # live, todos os leads frios continuam elegíveis.
+        return "dry" if self.s.reactivation_dry_run else "live"
+
+    def _done_key(self, lead_id: int) -> str:
+        return f"blink:react:done:{self._mode()}:{lead_id}"
+
     def _is_done(self, lead_id: int) -> bool:
         if self._redis is not None:
             try:
-                return bool(self._redis.exists(f"blink:react:done:{lead_id}"))
+                return bool(self._redis.exists(self._done_key(lead_id)))
             except Exception:  # noqa: BLE001
                 pass
-        return lead_id in self._mem_done
+        return f"{self._mode()}:{lead_id}" in self._mem_done
 
     def _mark_done(self, lead_id: int) -> None:
         if self._redis is not None:
             try:
-                self._redis.set(f"blink:react:done:{lead_id}", "1", ex=90 * 86400)
+                self._redis.set(self._done_key(lead_id), "1", ex=90 * 86400)
                 return
             except Exception:  # noqa: BLE001
                 pass
-        self._mem_done.add(lead_id)
+        self._mem_done.add(f"{self._mode()}:{lead_id}")
 
     def _daily_count(self) -> int:
         day = self._today()
@@ -239,8 +248,14 @@ class ReactivationEngine:
             "kommo_ready": self.kommo is not None,
         }
 
-    def tick(self) -> ReactivationReport:
-        """Executa um ciclo: valida travas e processa no máximo 1 lead."""
+    def tick(self, force: bool = False) -> ReactivationReport:
+        """Executa um ciclo: valida travas e processa no máximo 1 lead.
+
+        force=True ignora as travas de horário comercial e de intervalo
+        mínimo — usado para TESTE manual. As travas que protegem o paciente
+        (reactivation_enabled e reactivation_dry_run) continuam valendo:
+        com force, um teste em dry-run continua não enviando nada.
+        """
         s = self.s
 
         if not s.reactivation_enabled:
@@ -251,10 +266,11 @@ class ReactivationEngine:
             return ReactivationReport(False, "skipped", "Kommo não configurado")
 
         now = datetime.now(_TZ)
-        if now.weekday() > 4:
-            return ReactivationReport(False, "skipped", "fim de semana — fora do horário")
-        if not (s.reactivation_hour_start <= now.hour < s.reactivation_hour_end):
-            return ReactivationReport(False, "skipped", "fora do horário comercial")
+        if not force:
+            if now.weekday() > 4:
+                return ReactivationReport(False, "skipped", "fim de semana — fora do horário")
+            if not (s.reactivation_hour_start <= now.hour < s.reactivation_hour_end):
+                return ReactivationReport(False, "skipped", "fora do horário comercial")
 
         count = self._daily_count()
         if count >= s.reactivation_daily_cap:
@@ -264,14 +280,15 @@ class ReactivationEngine:
                 daily_count=count,
             )
 
-        elapsed = time.time() - self._last_send()
-        if elapsed < s.reactivation_min_interval_min * 60:
-            falta = int(s.reactivation_min_interval_min * 60 - elapsed)
-            return ReactivationReport(
-                False, "skipped",
-                f"intervalo mínimo não cumprido (faltam {falta}s)",
-                daily_count=count,
-            )
+        if not force:
+            elapsed = time.time() - self._last_send()
+            if elapsed < s.reactivation_min_interval_min * 60:
+                falta = int(s.reactivation_min_interval_min * 60 - elapsed)
+                return ReactivationReport(
+                    False, "skipped",
+                    f"intervalo mínimo não cumprido (faltam {falta}s)",
+                    daily_count=count,
+                )
 
         # Busca os leads frios e escolhe o próximo ainda não ativado
         try:

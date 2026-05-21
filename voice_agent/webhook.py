@@ -405,8 +405,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             )
             if got != settings.webhook_secret:
                 raise HTTPException(401, "Unauthorized")
-        report = reactivation.tick()
-        log.info("[REATIVACAO tick] %s", report.as_dict())
+        # ?force=true → teste manual: ignora horário comercial e intervalo
+        # mínimo. NÃO ignora dry-run nem o enabled — segue seguro.
+        force = str(request.query_params.get("force", "")).lower() in (
+            "1", "true", "yes", "sim",
+        )
+        report = reactivation.tick(force=force)
+        log.info("[REATIVACAO tick force=%s] %s", force, report.as_dict())
         return JSONResponse(report.as_dict())
 
     return app
