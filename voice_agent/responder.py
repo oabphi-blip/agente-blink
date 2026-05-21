@@ -487,7 +487,16 @@ class Responder:
             "e chame save_lead_fields APENAS com os campos cuja informação foi "
             "explicitamente confirmada na conversa. Se um campo não foi dito, "
             "NÃO inclua. Não chute idade — só preencha perfil_paciente se a data "
-            "de nascimento ou idade foi dita."
+            "de nascimento ou idade foi dita.\n\n"
+            "REGRA DA INFORMAÇÃO MAIS RECENTE: se um dado foi mencionado mais de "
+            "uma vez, mudou, ou foi corrigido ao longo da conversa, use SEMPRE o "
+            "valor MAIS RECENTE — a última vez que apareceu. Nunca use um valor "
+            "antigo que já foi substituído. A conversa pode conter mais de uma "
+            "tentativa de agendamento; o que vale é sempre o estado final.\n\n"
+            "QUEM É O PACIENTE: o campo 'name' é o nome de quem VAI SER ATENDIDO. "
+            "Pode ser diferente de quem está escrevendo — por exemplo, um familiar "
+            "agendando para outra pessoa. Se a consulta é para outra pessoa, use o "
+            "nome do paciente, NUNCA o de quem apenas enviou as mensagens."
         )
 
         try:

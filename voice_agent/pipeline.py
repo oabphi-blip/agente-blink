@@ -211,14 +211,11 @@ class VoicePipeline:
             if not lead_id:
                 log.info("Kommo sync: lead não encontrado pra %s", phone)
                 return
-            # Nota da conversa — para a equipe acompanhar o andamento
-            # no Kommo, já que os canais não passam pelo chat nativo.
-            if user_text and answer:
-                note = (
-                    "🤖 Atendimento Lia (WhatsApp)\n\n"
-                    f"👤 Paciente:\n{user_text.strip()}\n\n"
-                    f"💬 Lia:\n{answer.strip()}"
-                )
+            # Nota da conversa — só a resposta da Lia, para a equipe
+            # acompanhar o andamento no Kommo (os canais não passam
+            # pelo chat nativo).
+            if answer:
+                note = f"🤖 Lia (WhatsApp):\n{answer.strip()}"
                 try:
                     self.kommo.add_note(lead_id, note)
                 except Exception as e:  # noqa: BLE001
