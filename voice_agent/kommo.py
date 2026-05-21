@@ -91,6 +91,10 @@ FIELD_ESPECIALIDADE = (1259130, {
     "Consulta Domiciliar": 925894, "Domiciliar": 925894,
 })
 
+# ⚠️ DESATIVADO — o campo "Tipo de agendamento" (id 1260438) NÃO existe na
+# conta univeja.kommo.com. Enviá-lo fazia o Kommo rejeitar o PATCH inteiro
+# com HTTP 400 (NotSupportedChoice em custom_fields_values.N.field_id).
+# Mantido só como referência; não é mais usado em update_lead_fields.
 FIELD_TIPO_AGENDAMENTO = (1260438, {
     "Fixo": 926254, "Fixo/Definido": 926254, "Definido": 926254,
     "Encaixe": 926140,
@@ -246,7 +250,8 @@ class KommoClient:
         add_select(FIELD_UNIDADE, fields.get("unidade"))
         add_select(FIELD_MEDICOS, fields.get("medico"))
         add_select(FIELD_ESPECIALIDADE, fields.get("especialidade"))
-        add_select(FIELD_TIPO_AGENDAMENTO, fields.get("tipo_agendamento"))
+        # FIELD_TIPO_AGENDAMENTO desativado — campo 1260438 não existe no Kommo
+        # e derrubava o PATCH inteiro com HTTP 400.
         add_select(FIELD_PERFIL_PACIENTE_1, fields.get("perfil_paciente"))
         add_select(FIELD_NUMERO_PACIENTES, fields.get("num_pacientes"))
 
