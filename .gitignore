@@ -23,3 +23,6 @@ ziN3L4Ro
 
 # macOS
 .DS_Store
+
+# Planilhas com dados de pacientes — nunca versionar (LGPD)
+*.xlsx

@@ -375,6 +375,40 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         ).start()
         return JSONResponse({"ok": True})
 
+    # ================================================================
+    # REATIVAÇÃO DE LEADS FRIOS
+    # ================================================================
+    # Motor que retoma contato com leads parados nas etapas frias do funil.
+    # Disparo DESLIGADO por padrão (reactivation_enabled / reactivation_dry_run).
+    # Cadência: um agendamento externo chama POST /reactivation/tick a cada
+    # N minutos; cada chamada processa no máximo 1 lead.
+    from .reactivation import ReactivationEngine
+
+    reactivation = ReactivationEngine(
+        settings=settings,
+        kommo=pipeline.kommo,
+        evolution=evolution,
+        store=conversation_store,
+    )
+
+    @app.get("/reactivation/status")
+    def reactivation_status() -> dict:
+        return reactivation.status()
+
+    @app.post("/reactivation/tick")
+    async def reactivation_tick(request: Request) -> JSONResponse:
+        # Mesma autenticação opcional do /webhook
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        report = reactivation.tick()
+        log.info("[REATIVACAO tick] %s", report.as_dict())
+        return JSONResponse(report.as_dict())
+
     return app
 
 

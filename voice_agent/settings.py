@@ -51,6 +51,26 @@ class Settings:
     medware_password: str
     medware_enabled: bool
 
+    # Reativação de leads frios (motor — DESLIGADO por padrão)
+    # Duas travas: 'enabled' liga o motor; 'dry_run' impede o envio real.
+    # Mensagem real só sai com enabled=True E dry_run=False.
+    reactivation_enabled: bool = False
+    reactivation_dry_run: bool = True
+    reactivation_daily_cap: int = 30
+    reactivation_min_interval_min: int = 8
+    reactivation_hour_start: int = 8
+    reactivation_hour_end: int = 18
+    reactivation_pipeline_id: int = 8601819
+    reactivation_cold_status_ids: tuple[int, ...] = (
+        96441724,   # 0-ETAPA ENTRADA
+        101508307,  # 1.LEADS FRIO
+        102560495,  # 2-AGENDAR
+        106184631,  # 3.REAGENDAR
+        106184983,  # 5.1-NO-SHOW (ATIVAR)
+    )
+    reactivation_target_status_id: int = 102560495  # 2-AGENDAR
+    slack_webhook_url: str = ""
+
     @classmethod
     def load(cls) -> "Settings":
         load_dotenv()
@@ -105,6 +125,41 @@ class Settings:
         medware_password = os.getenv("MEDWARE_PASSWORD") or mw_cfg.get("password", "")
         medware_enabled = bool(medware_user and medware_password)
 
+        # Reativação de leads frios (opcional — tudo via env var)
+        rc = cfg.get("reactivation", {}) if isinstance(cfg, dict) else {}
+
+        def _flag(env_name: str, cfg_key: str, default: bool) -> bool:
+            raw = os.getenv(env_name)
+            if raw is not None:
+                return raw.strip().lower() in ("1", "true", "yes", "sim")
+            return bool(rc.get(cfg_key, default))
+
+        def _intval(env_name: str, cfg_key: str, default: int) -> int:
+            raw = os.getenv(env_name) or rc.get(cfg_key)
+            try:
+                return int(raw) if raw not in (None, "") else default
+            except (TypeError, ValueError):
+                return default
+
+        cold_default = (96441724, 101508307, 102560495, 106184631, 106184983)
+        cold_raw = os.getenv("REACTIVATION_COLD_STATUS_IDS") or rc.get("cold_status_ids")
+        if isinstance(cold_raw, str) and cold_raw.strip():
+            cold_ids = tuple(int(x) for x in cold_raw.split(",") if x.strip().isdigit())
+        elif isinstance(cold_raw, (list, tuple)) and cold_raw:
+            cold_ids = tuple(int(x) for x in cold_raw)
+        else:
+            cold_ids = cold_default
+
+        reactivation_enabled = _flag("REACTIVATION_ENABLED", "enabled", False)
+        reactivation_dry_run = _flag("REACTIVATION_DRY_RUN", "dry_run", True)
+        reactivation_daily_cap = _intval("REACTIVATION_DAILY_CAP", "daily_cap", 30)
+        reactivation_min_interval = _intval("REACTIVATION_MIN_INTERVAL_MIN", "min_interval_min", 8)
+        reactivation_hour_start = _intval("REACTIVATION_HOUR_START", "hour_start", 8)
+        reactivation_hour_end = _intval("REACTIVATION_HOUR_END", "hour_end", 18)
+        reactivation_pipeline_id = _intval("REACTIVATION_PIPELINE_ID", "pipeline_id", 8601819)
+        reactivation_target_status = _intval("REACTIVATION_TARGET_STATUS_ID", "target_status_id", 102560495)
+        slack_webhook_url = os.getenv("SLACK_WEBHOOK_URL") or rc.get("slack_webhook_url", "") or ""
+
         return cls(
             openai_api_key=openai_api_key,
             whisper_model=os.getenv("WHISPER_MODEL") or agent.get("whisper_model", "whisper-1"),
@@ -126,6 +181,16 @@ class Settings:
             medware_user=medware_user,
             medware_password=medware_password,
             medware_enabled=medware_enabled,
+            reactivation_enabled=reactivation_enabled,
+            reactivation_dry_run=reactivation_dry_run,
+            reactivation_daily_cap=reactivation_daily_cap,
+            reactivation_min_interval_min=reactivation_min_interval,
+            reactivation_hour_start=reactivation_hour_start,
+            reactivation_hour_end=reactivation_hour_end,
+            reactivation_pipeline_id=reactivation_pipeline_id,
+            reactivation_cold_status_ids=cold_ids,
+            reactivation_target_status_id=reactivation_target_status,
+            slack_webhook_url=slack_webhook_url,
         )
 
     def is_whitelisted(self, number: str) -> bool:

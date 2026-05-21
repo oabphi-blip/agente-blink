@@ -285,6 +285,103 @@ class KommoClient:
             return {"found": False, "lead_id": None, "name": None, "known": {}}
         return self.get_caller_context_by_lead(lead_id)
 
+    # ----------------------- reativação de leads frios
+
+    def list_leads_by_status(
+        self, pipeline_id: int, status_ids: list[int], limit: int = 200,
+    ) -> list[dict]:
+        """Lista leads de um pipeline que estejam em qualquer uma das etapas
+        informadas. Ordenado por updated_at asc (mais parados primeiro).
+
+        Usa a API REST direta do Kommo (filter[statuses]) — diferente da
+        busca textual, aqui o filtro por etapa funciona de fato.
+        """
+        params: dict[str, Any] = {
+            "limit": min(int(limit), 250),
+            "order[updated_at]": "asc",
+        }
+        for i, sid in enumerate(status_ids):
+            params[f"filter[statuses][{i}][pipeline_id]"] = pipeline_id
+            params[f"filter[statuses][{i}][status_id]"] = sid
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.get(f"{self._base}/leads", params=params, headers=self._headers)
+            if r.status_code == 204:
+                return []
+            if r.status_code != 200:
+                log.warning("Kommo list_leads_by_status: HTTP %d", r.status_code)
+                return []
+            data = r.json() or {}
+            return [
+                {"id": ld["id"], "name": ld.get("name"),
+                 "status_id": ld.get("status_id")}
+                for ld in ((data.get("_embedded") or {}).get("leads") or [])
+            ]
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo list_leads_by_status erro: %s", e)
+            return []
+
+    def get_lead_main_phone(self, lead_id: int | str) -> Optional[str]:
+        """Retorna o telefone (só dígitos) do contato principal do lead."""
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.get(
+                    f"{self._base}/leads/{lead_id}",
+                    params={"with": "contacts"}, headers=self._headers,
+                )
+                if r.status_code != 200:
+                    return None
+                contacts = (
+                    ((r.json() or {}).get("_embedded") or {}).get("contacts") or []
+                )
+                if not contacts:
+                    return None
+                main = next(
+                    (ct for ct in contacts if ct.get("is_main")), contacts[0]
+                )
+                cid = main.get("id")
+                if not cid:
+                    return None
+                r2 = c.get(f"{self._base}/contacts/{cid}", headers=self._headers)
+                if r2.status_code != 200:
+                    return None
+                for cf in ((r2.json() or {}).get("custom_fields_values") or []):
+                    if cf.get("field_code") == "PHONE":
+                        vals = cf.get("values") or []
+                        if vals and vals[0].get("value"):
+                            digits = "".join(
+                                ch for ch in str(vals[0]["value"]) if ch.isdigit()
+                            )
+                            return digits or None
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo get_lead_main_phone erro (lead %s): %s", lead_id, e)
+        return None
+
+    def update_lead_status(
+        self, lead_id: int, status_id: int, pipeline_id: Optional[int] = None,
+    ) -> bool:
+        """Move o lead para outra etapa do funil."""
+        payload: dict[str, Any] = {"status_id": status_id}
+        if pipeline_id:
+            payload["pipeline_id"] = pipeline_id
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.patch(
+                    f"{self._base}/leads/{lead_id}",
+                    json=payload, headers=self._headers,
+                )
+            if r.status_code // 100 == 2:
+                return True
+            log.warning(
+                "Kommo update_lead_status lead %s falhou: HTTP %d",
+                lead_id, r.status_code,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo update_lead_status erro: %s", e)
+        return False
+
+    # ----------------------- enriquecimento de contexto (onboarding)
+
     def get_caller_context_by_lead(self, lead_id: int | str) -> dict:
         """Onboarding por lead_id direto — usado no caminho Kommo (8133),
         onde o widget_request já entrega o lead_id."""
