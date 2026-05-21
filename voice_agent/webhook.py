@@ -11,6 +11,7 @@ números autorizados recebem resposta.
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from typing import Any, Optional
@@ -334,17 +335,47 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     @app.post("/kommo")
     async def kommo_webhook(request: Request) -> JSONResponse:
-        try:
-            payload = await request.json()
-        except Exception:  # noqa: BLE001
-            raise HTTPException(400, "Body não-JSON")
+        # Lê o corpo CRU e loga sempre — precisamos ver exatamente o que o
+        # Salesbot do Kommo envia. E NUNCA devolve 400: um 400 faz o Salesbot
+        # marcar o passo como falho, e a Lia nunca responde o paciente.
+        raw = await request.body()
+        ctype = request.headers.get("content-type", "")
+        log.info(
+            "/kommo IN: ctype=%s len=%d body=%.900s",
+            ctype, len(raw or b""), (raw or b"").decode("utf-8", "ignore"),
+        )
+        payload = None
+        if raw:
+            try:
+                payload = json.loads(raw.decode("utf-8", "ignore"))
+            except Exception:  # noqa: BLE001
+                try:
+                    from urllib.parse import parse_qs
+                    payload = {
+                        k: (v[0] if len(v) == 1 else v)
+                        for k, v in parse_qs(raw.decode("utf-8", "ignore")).items()
+                    } or None
+                except Exception:  # noqa: BLE001
+                    payload = None
+        if not isinstance(payload, dict):
+            log.warning("/kommo: corpo vazio ou não-parseável — ignorado (sem 400)")
+            return JSONResponse({"ignored": "corpo nao-parseavel"})
 
-        data = payload.get("data") or {}
-        return_url = payload.get("return_url") or ""
-        message = (data.get("message") or "").strip()
+        # Extração TOLERANTE: aceita os campos no topo OU dentro de 'data'.
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            data = payload
+        return_url = payload.get("return_url") or data.get("return_url") or ""
+        message = str(data.get("message") or payload.get("message") or "").strip()
         # Chave de conversa: lead id do Kommo (estável por paciente)
-        lead_id = str(data.get("lead_id") or data.get("lead") or "").strip()
-        contact = str(data.get("phone") or data.get("contact") or "").strip()
+        lead_id = str(
+            data.get("lead_id") or data.get("lead")
+            or payload.get("lead_id") or ""
+        ).strip()
+        contact = str(
+            data.get("phone") or data.get("contact")
+            or payload.get("phone") or ""
+        ).strip()
         convo_key = (
             f"kommo:{lead_id}" if lead_id
             else (_conversation_key(contact) if contact else "kommo:unknown")
