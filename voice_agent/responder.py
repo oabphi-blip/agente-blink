@@ -340,9 +340,11 @@ class Responder:
         kb_block = self._kb.format_for_prompt(combined) if combined else ""
 
         # 2. Monta system prompt = INSTRUÇÃO MESTRA + DATA DE HOJE +
-        #    JANELA DE OFERTA (5 dias úteis) + ONBOARDING + KB contextual
+        #    ONBOARDING + KB contextual.
+        # NOTA: o bloco "JANELA DE OFERTA DE AGENDA" foi removido de
+        # propósito — a Lia não oferece datas/horários, apenas coleta a
+        # preferência do paciente (seção 12 da instrução mestra).
         system_prompt = self._base_system_prompt + _today_brt_block()
-        system_prompt += _offer_window_block()
         system_prompt += _caller_context_block(caller_context)
         if kb_block:
             system_prompt += (
