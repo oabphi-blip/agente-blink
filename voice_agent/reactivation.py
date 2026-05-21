@@ -63,24 +63,51 @@ def _first_name(full: str) -> str:
     return full.strip().split()[0].capitalize()
 
 
-def build_message(name: str, convenio: Optional[str]) -> str:
-    """Mensagem curta e personalizada de retomada — tom da Lia, sem palavras
-    proibidas, terminando com pergunta fechada."""
+# Etapas frias do funil ATENDE — usadas para escolher a ABORDAGEM da mensagem
+_ST_NO_SHOW = 106184983    # 5.1-NO-SHOW (ATIVAR)
+_ST_REAGENDAR = 106184631  # 3.REAGENDAR
+_ST_AGENDAR = 102560495    # 2-AGENDAR
+
+
+def build_message(
+    name: str, convenio: Optional[str], status_id: Optional[int] = None,
+) -> str:
+    """Mensagem de retomada com ABORDAGEM ESCOLHIDA CONFORME O CONTEXTO do lead.
+
+    A abordagem varia pela etapa do funil (quem não compareceu recebe um tom
+    de remarcação acolhedora; quem parou perto de fechar recebe um empurrão
+    direto; lead frio recebe uma retomada leve) e é modulada pelo convênio.
+    O objetivo é impulsionar a conversão em agendamento.
+
+    Tom da Lia: cordial, sem palavras proibidas, termina com pergunta fechada.
+    """
     nome = _first_name(name)
     saud = f"Olá, {nome}!" if nome else "Olá!"
     conv = (convenio or "").strip()
-    if conv.lower() in _SEM_CONVENIO:
-        corpo = (
-            "Estou retomando nosso contato para concluir o seu atendimento. "
-            "Posso verificar uma data próxima para a sua consulta?"
+    tem_convenio = bool(conv) and conv.lower() not in _SEM_CONVENIO
+
+    # Abordagem conforme a etapa do funil
+    if status_id == _ST_NO_SHOW:
+        intro = (
+            "Notei que não conseguimos concluir a sua consulta no dia "
+            "marcado — acontece, e eu quero ajudar a resolver."
         )
-    else:
-        corpo = (
-            "Estou retomando nosso contato para concluir o seu atendimento. "
-            f"Atendemos pelo {conv} e tenho horários próximos — quer que eu "
-            "verifique uma data para você?"
-        )
-    return f"{saud} Aqui é a Lia, da Blink Oftalmologia. {corpo}"
+        cta = "Posso remarcar para um horário melhor para você?"
+    elif status_id == _ST_REAGENDAR:
+        intro = "Estou retomando o seu contato para reagendar a sua consulta."
+        cta = "Me diga um dia e turno de preferência que eu já organizo."
+    elif status_id == _ST_AGENDAR:
+        intro = "Faltou pouco para concluir o seu agendamento na Blink."
+        cta = "Posso reservar um horário para você? É só me dizer o melhor dia."
+    else:  # 0-ETAPA ENTRADA, 1.LEADS FRIO e demais
+        intro = "Estou retomando o nosso contato para cuidar da sua consulta."
+        cta = "Posso verificar uma data para você?"
+
+    disponibilidade = (
+        f"Atendemos pelo {conv} e temos horários próximos."
+        if tem_convenio else "Temos horários próximos."
+    )
+    return f"{saud} Aqui é a Lia, da Blink Oftalmologia. {intro} {disponibilidade} {cta}"
 
 
 @dataclass
@@ -292,7 +319,7 @@ class ReactivationEngine:
                 lead_id=lead_id, lead_name=name, daily_count=count,
             )
 
-        message = build_message(name, convenio)
+        message = build_message(name, convenio, target.get("status_id"))
 
         # ---- DRY-RUN: monta tudo mas NÃO envia
         if s.reactivation_dry_run:
