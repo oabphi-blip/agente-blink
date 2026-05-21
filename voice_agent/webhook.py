@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from .evolution import EvolutionClient
 from .pipeline import VoicePipeline
@@ -81,6 +81,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             senha=settings.medware_password,
         )
 
+    # Cliente WhatsApp Cloud API (Meta) — canal do número OFICIAL (8133).
+    # Só é criado quando as credenciais estiverem nas variáveis de ambiente.
+    wa_cloud = None
+    if settings.whatsapp_cloud_enabled:
+        from .whatsapp_cloud import WhatsAppCloudClient
+        wa_cloud = WhatsAppCloudClient(
+            token=settings.whatsapp_cloud_token,
+            phone_number_id=settings.whatsapp_cloud_phone_number_id,
+            api_version=settings.whatsapp_cloud_api_version,
+        )
+
     app = FastAPI(
         title="Agente Blink Oftalmologia — Voice + Text",
         version="0.2.0",
@@ -126,6 +137,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "redis": redis_status,
             "medware": medware_status,
             "kommo": kommo_status,
+            "whatsapp_cloud": {"configured": settings.whatsapp_cloud_enabled},
         }
 
     @app.post("/webhook")
@@ -406,6 +418,133 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             args=(message, convo_key, return_url, lead_id),
             daemon=True,
         ).start()
+        return JSONResponse({"ok": True})
+
+    # ================================================================
+    # WHATSAPP CLOUD API (META) — canal do número OFICIAL (8133)
+    # ================================================================
+    # Caminho direto e oficial: a Meta entrega a mensagem no webhook abaixo
+    # e o agente responde pela Graph API. Sem Kommo nem Salesbot no meio —
+    # espelha o que a Evolution faz para o 0710.
+    #   GET  /whatsapp  → verificação do webhook (handshake da Meta)
+    #   POST /whatsapp  → recebe a mensagem do paciente
+    from .whatsapp_cloud import parse_webhook as _wa_parse
+
+    def _process_whatsapp_cloud(user_text: str, phone: str, msg_id: str) -> None:
+        """Gera a resposta da Lia e envia pela WhatsApp Cloud API."""
+        if wa_cloud is None:
+            return
+        convo_key = _conversation_key(phone)
+        # Onboarding: o que o CRM já sabe deste contato (pelo telefone).
+        caller_context = None
+        if pipeline.kommo is not None and phone:
+            try:
+                caller_context = pipeline.kommo.get_caller_context(phone)
+            except Exception as e:  # noqa: BLE001
+                log.warning("WA Cloud onboarding falhou: %s", e)
+        try:
+            result = responder.reply(
+                convo_key, user_text, caller_context=caller_context
+            )
+            answer = result.get("answer") or ""
+        except Exception as e:  # noqa: BLE001
+            log.exception("WA Cloud: Claude falhou")
+            answer = (
+                "Tive uma instabilidade aqui. Pode me reenviar sua última "
+                "mensagem, por favor?"
+            )
+        if not answer:
+            return
+        try:
+            wa_cloud.send_text(phone, answer)
+        except Exception as e:  # noqa: BLE001
+            log.warning("WA Cloud envio falhou: %s", e)
+            return
+        # Sincroniza o lead no Kommo (best-effort, em background).
+        if pipeline.kommo is not None and phone:
+            threading.Thread(
+                target=pipeline._sync_kommo_safely,
+                args=(phone, convo_key),
+                daemon=True,
+            ).start()
+
+    def _process_wa_cloud_audio(
+        media_id: str, mime: str, phone: str, msg_id: str,
+    ) -> None:
+        """Baixa o áudio da Cloud API, transcreve e processa como texto."""
+        if wa_cloud is None:
+            return
+        try:
+            audio_bytes, real_mime = wa_cloud.get_media_bytes(media_id)
+            text = transcriber.transcribe(
+                audio_bytes, mime_type=real_mime or mime or "audio/ogg"
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("WA Cloud áudio falhou: %s", e)
+            return
+        if text and text.strip():
+            _process_whatsapp_cloud(text, phone, msg_id)
+
+    @app.get("/whatsapp")
+    def whatsapp_cloud_verify(request: Request):
+        """Verificação do webhook exigida pela Meta (handshake)."""
+        p = request.query_params
+        token = settings.whatsapp_cloud_verify_token
+        if (
+            token
+            and p.get("hub.mode") == "subscribe"
+            and p.get("hub.verify_token") == token
+        ):
+            return PlainTextResponse(p.get("hub.challenge") or "")
+        raise HTTPException(403, "verificação do webhook falhou")
+
+    @app.post("/whatsapp")
+    async def whatsapp_cloud_webhook(request: Request) -> JSONResponse:
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse({"ignored": "body não-JSON"})
+        if wa_cloud is None:
+            log.warning("/whatsapp recebido, mas WhatsApp Cloud não configurado")
+            return JSONResponse({"ignored": "cloud não configurado"})
+
+        for m in _wa_parse(payload):
+            mid = m.get("id") or ""
+            phone = m.get("from") or ""
+            if not phone:
+                continue
+            # Dedup — a Meta reentrega o webhook em caso de timeout.
+            if mid and not conversation_store.mark_seen(f"wa:{mid}"):
+                continue
+            mtype = m.get("type")
+            if mtype == "text" and (m.get("text") or "").strip():
+                threading.Thread(
+                    target=_process_whatsapp_cloud,
+                    args=(m["text"], phone, mid),
+                    daemon=True,
+                ).start()
+            elif mtype == "audio" and m.get("media_id"):
+                threading.Thread(
+                    target=_process_wa_cloud_audio,
+                    args=(m["media_id"], m.get("mime") or "", phone, mid),
+                    daemon=True,
+                ).start()
+            elif mtype in ("image", "document", "video", "sticker"):
+                cap = m.get("caption") or ""
+                tipo = "uma imagem" if mtype == "image" else f"um {mtype}"
+                sintetico = (
+                    f"[O paciente enviou {tipo} pelo WhatsApp"
+                    + (f', com a legenda: "{cap}"' if cap else "")
+                    + ". Provavelmente é a carteirinha do convênio ou um "
+                    "documento de identidade. Confirme o recebimento de forma "
+                    "calorosa, diga que a equipe vai conferir, e siga o "
+                    "atendimento normalmente.]"
+                )
+                threading.Thread(
+                    target=_process_whatsapp_cloud,
+                    args=(sintetico, phone, mid),
+                    daemon=True,
+                ).start()
         return JSONResponse({"ok": True})
 
     # ================================================================

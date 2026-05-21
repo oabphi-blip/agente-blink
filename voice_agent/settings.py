@@ -71,6 +71,13 @@ class Settings:
     reactivation_target_status_id: int = 102560495  # 2-AGENDAR
     slack_webhook_url: str = ""
 
+    # WhatsApp Cloud API (Meta) — canal do número OFICIAL, direto (sem Kommo)
+    whatsapp_cloud_token: str = ""
+    whatsapp_cloud_phone_number_id: str = ""
+    whatsapp_cloud_verify_token: str = ""
+    whatsapp_cloud_api_version: str = "v21.0"
+    whatsapp_cloud_enabled: bool = False
+
     @classmethod
     def load(cls) -> "Settings":
         load_dotenv()
@@ -160,6 +167,22 @@ class Settings:
         reactivation_target_status = _intval("REACTIVATION_TARGET_STATUS_ID", "target_status_id", 102560495)
         slack_webhook_url = os.getenv("SLACK_WEBHOOK_URL") or rc.get("slack_webhook_url", "") or ""
 
+        # WhatsApp Cloud API (Meta) — canal do número oficial
+        wac = cfg.get("whatsapp_cloud", {}) if isinstance(cfg, dict) else {}
+        whatsapp_cloud_token = os.getenv("WHATSAPP_CLOUD_TOKEN") or wac.get("token", "")
+        whatsapp_cloud_phone_number_id = (
+            os.getenv("WHATSAPP_CLOUD_PHONE_NUMBER_ID") or wac.get("phone_number_id", "")
+        )
+        whatsapp_cloud_verify_token = (
+            os.getenv("WHATSAPP_CLOUD_VERIFY_TOKEN") or wac.get("verify_token", "")
+        )
+        whatsapp_cloud_api_version = (
+            os.getenv("WHATSAPP_CLOUD_API_VERSION") or wac.get("api_version", "v21.0")
+        )
+        whatsapp_cloud_enabled = bool(
+            whatsapp_cloud_token and whatsapp_cloud_phone_number_id
+        )
+
         return cls(
             openai_api_key=openai_api_key,
             whisper_model=os.getenv("WHISPER_MODEL") or agent.get("whisper_model", "whisper-1"),
@@ -191,6 +214,11 @@ class Settings:
             reactivation_cold_status_ids=cold_ids,
             reactivation_target_status_id=reactivation_target_status,
             slack_webhook_url=slack_webhook_url,
+            whatsapp_cloud_token=whatsapp_cloud_token,
+            whatsapp_cloud_phone_number_id=whatsapp_cloud_phone_number_id,
+            whatsapp_cloud_verify_token=whatsapp_cloud_verify_token,
+            whatsapp_cloud_api_version=whatsapp_cloud_api_version,
+            whatsapp_cloud_enabled=whatsapp_cloud_enabled,
         )
 
     def is_whitelisted(self, number: str) -> bool:
