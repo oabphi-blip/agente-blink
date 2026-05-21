@@ -302,12 +302,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "Tive uma instabilidade aqui. Pode me reenviar sua última "
                 "mensagem, por favor?"
             )
-        # Continua o fluxo do Salesbot enviando a resposta como handler 'show'
+        # Continua o fluxo do Salesbot. A resposta vai SÓ no campo `data`,
+        # na variável `agent_answer`. O `execute_handlers` com 'show/text'
+        # foi removido: o Kommo impõe limite de 80 caracteres em
+        # `execute_handlers.params.value` e fazia o POST inteiro falhar com
+        # HTTP 400 — bloqueando QUALQUER resposta longa. O Salesbot deve
+        # enviar a mensagem usando a variável {{agent_answer}}.
         body = {
             "data": {"agent_answer": answer},
-            "execute_handlers": [
-                {"handler": "show", "params": {"type": "text", "value": answer}}
-            ],
         }
         headers = {"Content-Type": "application/json"}
         if settings.kommo_token:

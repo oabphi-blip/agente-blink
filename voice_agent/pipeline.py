@@ -97,19 +97,9 @@ class VoicePipeline:
         quoted_message_id: Optional[str],
         send_typing: bool,
     ) -> PipelineResult:
-        # 0) Whitelist primeiro — bloqueia ANTES de gastar token
-        if reply_to_number and not self.settings.is_whitelisted(reply_to_number):
-            log.warning(
-                "[WHITELIST] Número %s NÃO está autorizado. Bloqueando envio. "
-                "Adicione em settings.whitelist_numbers se desejar liberar.",
-                reply_to_number,
-            )
-            return PipelineResult(
-                transcript="", answer="", sent=False,
-                model_used="", articles_used=[],
-                blocked_by_whitelist=True,
-                error=f"number_not_in_whitelist: {reply_to_number}",
-            )
+        # 0) Whitelist DESATIVADA — atendimento público geral. O agente
+        # responde a TODOS os números (soft launch encerrado). O bloco de
+        # bloqueio por whitelist foi removido de propósito.
 
         # 1) Presença "digitando" (best-effort)
         if send_typing and reply_to_number:
