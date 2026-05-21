@@ -183,7 +183,7 @@ class VoicePipeline:
         if self.kommo is not None and reply_to_number:
             threading.Thread(
                 target=self._sync_kommo_safely,
-                args=(reply_to_number, conversation_key),
+                args=(reply_to_number, conversation_key, user_text, answer),
                 daemon=True,
             ).start()
 
@@ -192,23 +192,40 @@ class VoicePipeline:
             model_used=model_used, articles_used=articles_used,
         )
 
-    def _sync_kommo_safely(self, phone: str, conversation_key: str) -> None:
-        """Atualiza o lead do Kommo com os dados extraídos da conversa.
+    def _sync_kommo_safely(
+        self,
+        phone: str,
+        conversation_key: str,
+        user_text: str | None = None,
+        answer: str | None = None,
+    ) -> None:
+        """Sincroniza o lead do Kommo: grava a nota da conversa e atualiza
+        os campos extraídos.
 
         Roda em thread separada — qualquer erro é logado, não propaga.
         """
         if self.kommo is None:
             return
         try:
-            # Recupera histórico via responder.extract_lead_fields
-            fields = self.responder.extract_lead_fields(conversation_key)
-            if not fields:
-                log.debug("Kommo sync: nenhum campo extraído pra %s", conversation_key)
-                return
             lead_id = self.kommo.find_lead_id_by_phone(phone)
             if not lead_id:
                 log.info("Kommo sync: lead não encontrado pra %s", phone)
                 return
-            self.kommo.update_lead_fields(lead_id, fields)
+            # Nota da conversa — para a equipe acompanhar o andamento
+            # no Kommo, já que os canais não passam pelo chat nativo.
+            if user_text and answer:
+                note = (
+                    "🤖 Atendimento Lia (WhatsApp)\n\n"
+                    f"👤 Paciente:\n{user_text.strip()}\n\n"
+                    f"💬 Lia:\n{answer.strip()}"
+                )
+                try:
+                    self.kommo.add_note(lead_id, note)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Kommo nota falhou (%s): %s", phone, e)
+            # Campos extraídos da conversa.
+            fields = self.responder.extract_lead_fields(conversation_key)
+            if fields:
+                self.kommo.update_lead_fields(lead_id, fields)
         except Exception as e:  # noqa: BLE001
             log.warning("Kommo sync falhou (%s): %s", phone, e)

@@ -277,6 +277,36 @@ class KommoClient:
             log.warning("Kommo update error: %s", e)
         return False
 
+    # ----------------------- nota (registro da conversa)
+
+    def add_note(self, lead_id: int, text: str) -> bool:
+        """Adiciona uma nota de texto ('common') na linha do tempo do lead.
+
+        Usado para registrar as trocas de mensagem do agente — assim a
+        equipe acompanha o andamento no Kommo, mesmo nos canais que não
+        passam pelo chat nativo (8133 via API oficial, 0710 via Evolution).
+        """
+        if not text:
+            return False
+        payload = [{"note_type": "common", "params": {"text": text[:5000]}}]
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.post(
+                    f"{self._base}/leads/{lead_id}/notes",
+                    json=payload,
+                    headers=self._headers,
+                )
+            if r.status_code // 100 == 2:
+                log.info("Kommo nota gravada no lead %d", lead_id)
+                return True
+            log.warning(
+                "Kommo add_note lead %d falhou: HTTP %d — %s",
+                lead_id, r.status_code, (r.text or "")[:300],
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo add_note error: %s", e)
+        return False
+
     # ----------------------- enriquecimento de contexto (onboarding)
 
     def get_caller_context(self, phone: str) -> dict:

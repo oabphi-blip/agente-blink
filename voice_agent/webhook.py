@@ -460,11 +460,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception as e:  # noqa: BLE001
             log.warning("WA Cloud envio falhou: %s", e)
             return
-        # Sincroniza o lead no Kommo (best-effort, em background).
+        # Sincroniza o lead no Kommo (best-effort, em background):
+        # grava a nota da conversa + atualiza os campos extraídos.
         if pipeline.kommo is not None and phone:
             threading.Thread(
                 target=pipeline._sync_kommo_safely,
-                args=(phone, convo_key),
+                args=(phone, convo_key, user_text, answer),
                 daemon=True,
             ).start()
 
