@@ -71,6 +71,10 @@ class Settings:
     reactivation_target_status_id: int = 102560495  # 2-AGENDAR
     slack_webhook_url: str = ""
 
+    # Reconciliação de etapas (Medware × Kommo) — duas travas, igual reativação.
+    reconciliation_enabled: bool = False
+    reconciliation_dry_run: bool = True
+
     # WhatsApp Cloud API (Meta) — canal do número OFICIAL, direto (sem Kommo)
     whatsapp_cloud_token: str = ""
     whatsapp_cloud_phone_number_id: str = ""
@@ -159,6 +163,10 @@ class Settings:
 
         reactivation_enabled = _flag("REACTIVATION_ENABLED", "enabled", False)
         reactivation_dry_run = _flag("REACTIVATION_DRY_RUN", "dry_run", True)
+        reconciliation_enabled = _flag(
+            "RECONCILIATION_ENABLED", "reconciliation_enabled", False)
+        reconciliation_dry_run = _flag(
+            "RECONCILIATION_DRY_RUN", "reconciliation_dry_run", True)
         reactivation_daily_cap = _intval("REACTIVATION_DAILY_CAP", "daily_cap", 30)
         reactivation_min_interval = _intval("REACTIVATION_MIN_INTERVAL_MIN", "min_interval_min", 8)
         reactivation_hour_start = _intval("REACTIVATION_HOUR_START", "hour_start", 8)
@@ -206,6 +214,8 @@ class Settings:
             medware_enabled=medware_enabled,
             reactivation_enabled=reactivation_enabled,
             reactivation_dry_run=reactivation_dry_run,
+            reconciliation_enabled=reconciliation_enabled,
+            reconciliation_dry_run=reconciliation_dry_run,
             reactivation_daily_cap=reactivation_daily_cap,
             reactivation_min_interval_min=reactivation_min_interval,
             reactivation_hour_start=reactivation_hour_start,

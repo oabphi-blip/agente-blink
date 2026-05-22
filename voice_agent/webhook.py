@@ -587,6 +587,38 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         log.info("[REATIVACAO tick force=%s] %s", force, report.as_dict())
         return JSONResponse(report.as_dict())
 
+    # ================================================================
+    # RECONCILIAÇÃO DE ETAPAS (Medware × Kommo)
+    # ================================================================
+    # Cruza quem consultou em 2026 com os leads abertos e ajusta a etapa.
+    # Acionar: POST /reconciliation/run  — ?dry_run=false aplica de verdade;
+    # sem o parâmetro, usa o modo definido em settings.
+    from .reconciliation import ReconciliationEngine
+
+    reconciliation = ReconciliationEngine(
+        kommo=pipeline.kommo,
+        medware=medware,
+        enabled=settings.reconciliation_enabled,
+        dry_run=settings.reconciliation_dry_run,
+    )
+
+    @app.post("/reconciliation/run")
+    async def reconciliation_run(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        dr_param = request.query_params.get("dry_run")
+        dry_run: Optional[bool] = None
+        if dr_param is not None:
+            dry_run = str(dr_param).lower() not in ("0", "false", "no", "nao")
+        report = reconciliation.run(dry_run=dry_run)
+        log.info("[RECONCILIACAO] %s", report.as_dict())
+        return JSONResponse(report.as_dict())
+
     return app
 
 
