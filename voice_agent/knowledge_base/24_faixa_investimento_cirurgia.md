@@ -102,6 +102,6 @@ celular e dirigir, tudo isso sem depender de óculos!
 | 3️⃣ Só corrigir catarata | **Perfil 1** (R$ 5,8–7,5k/olho) |
 
 ## ⚠️ Após enviar o perfil
-- Convidar imediatamente para a **Consulta de Avaliação (R$ 297)** — porta de entrada.
+- Convidar imediatamente para a **Consulta de Avaliação (R$ 450)** — porta de entrada.
 - Lembrar que valor exato depende dos exames feitos pelo Dr. Fabrício.
 - Aplicar o script de transição da avaliação (artigo 21).

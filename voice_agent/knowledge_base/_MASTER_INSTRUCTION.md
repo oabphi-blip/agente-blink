@@ -216,7 +216,7 @@ Para eu te direcionar certo, qual destas áreas descreve melhor o que você proc
 
 7.1. **Dr. Fabrício Freitas (Catarata)**
 - 7.1.1. Atendimento e cirurgias EXCLUSIVAMENTE em Águas Claras.
-- 7.1.2. Consulta de Avaliação Inicial: R$ 297,00 (Pix) ou 2x de R$ 168,50.
+- 7.1.2. Consulta de Avaliação Inicial — valor normal R$ 470,00; no Pix R$ 450,00; no cartão 2x de R$ 225,00 ou 3x de R$ 150,00 (sem juros).
 - 7.1.3. Investimento cirúrgico — aplicar "Pergunta Investigativa de Lente" e apresentar APENAS UM perfil:
   - a) Longe com óculos para perto: R$ 5.800 a R$ 7.500 por olho.
   - b) Longe perfeito + 50% perto: R$ 7.500 a R$ 14.000 por olho.
@@ -225,7 +225,7 @@ Para eu te direcionar certo, qual destas áreas descreve melhor o que você proc
 7.2. **Dra. Karla Delalíbera (Oftalmopediatria, Estrabismo, SDP)**
 - 7.2.1. Unidades: Asa Norte e Águas Claras.
 - 7.2.2. Avaliação Pediátrica e de Rotina: R$ 611,00 (Pix) ou 2x de R$ 335,00 (cartão).
-- 7.2.3. PROIBIDO oferecer R$ 297,00 para consultas com a Dra. Karla.
+- 7.2.3. PROIBIDO oferecer R$ 450,00 para consultas com a Dra. Karla.
 - 7.2.4. Avaliação SDP: R$ 800,00 (Pix) ou 2x de R$ 425,00.
 - 7.2.5. Cirurgia de Estrabismo: NÃO informar valor antes da consulta de avaliação.
 
@@ -417,7 +417,7 @@ No mesmo ciclo do item 15, criar UMA tarefa nativa por mês único de retorno:
 
 ## 18. AUTO-PREENCHIMENTO DE CAMPOS NA TRIAGEM
 
-Conforme a info aparece, preencher: MÉDICOS, ESPECIALIDADE, UNIDADE, FORM PAGAMENTO, CONVÊNIO (ou Não se aplica), VALOR (R$297 Fabrício; R$611 Karla rotina/ped; R$800 SDP), Nº PACIENTES; por paciente N.NOME, N.DATA NASC, N.PERFIL, N.MOTIVO, N.DIA CONSULTA. Não deixar campo vazio se info já dada. Alteração humana prevalece.
+Conforme a info aparece, preencher: MÉDICOS, ESPECIALIDADE, UNIDADE, FORM PAGAMENTO, CONVÊNIO (ou Não se aplica), VALOR (R$450 Fabrício; R$611 Karla rotina/ped; R$800 SDP), Nº PACIENTES; por paciente N.NOME, N.DATA NASC, N.PERFIL, N.MOTIVO, N.DIA CONSULTA. Não deixar campo vazio se info já dada. Alteração humana prevalece.
 
 ## 19. DENOMINAÇÃO
 

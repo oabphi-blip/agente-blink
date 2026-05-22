@@ -68,7 +68,7 @@ da primeira parcela da cirurgia!
 🎁 É o nosso benefício para garantir seu cuidado integral.
 
 💰 O valor dessa avaliação completíssima (Dr. Fabrício Freitas + Dra. Kátia
-Delalíbera) é de R$ 297,00 (pagamento via Pix 💳 ou em 2x de R$ 168,50
+Delalíbera) é de R$ 450,00 (pagamento via Pix 💳 ou em 2x de R$ 225,00
 sem juros).
 
 📅 Para agendarmos e darmos o primeiro passo seguro, qual opção te facilita?

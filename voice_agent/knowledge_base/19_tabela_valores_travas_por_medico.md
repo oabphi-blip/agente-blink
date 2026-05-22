@@ -10,11 +10,12 @@ O agente DEVE consultar esta tabela antes de informar qualquer preço ao pacient
 *(Especialista em Catarata e Lentes)*
 
 ### 💵 Valor da Consulta (Agenda Inteligente)
-- **R$ 297,00 via Pix**
-- Ou **2x de R$ 168,50 sem juros no cartão**
+- **Valor normal: R$ 470,00**
+- **R$ 450,00 no Pix**
+- No cartão sem juros: **2x de R$ 225,00** ou **3x de R$ 150,00**
 
 ### 🚨 Trava Negativa
-Este valor de **R$ 297,00 é EXCLUSIVO do Dr. Fabrício Freitas**.
+Este valor de **R$ 450,00 é EXCLUSIVO do Dr. Fabrício Freitas**.
 
 ❌ **Proibido** aplicar este valor em:
 - Avaliações pediátricas
@@ -42,7 +43,7 @@ Este valor de **R$ 297,00 é EXCLUSIVO do Dr. Fabrício Freitas**.
 > "O valor depende da técnica necessária e será informado após avaliação da Dra. Karla Delalíbera."
 
 ### 🚨 Trava Negativa
-É **terminantemente proibido** oferecer a consulta da Dra. Karla pelo valor de **R$ 297,00** (esse é o valor exclusivo do Dr. Fabrício).
+É **terminantemente proibido** oferecer a consulta da Dra. Karla pelo valor de **R$ 450,00** (esse é o valor exclusivo do Dr. Fabrício).
 
 ---
 
@@ -79,7 +80,7 @@ Toda vez que o agente precisar informar valores, faz esta verificação em 3 pas
    → Consulta? Catarata? SDP? Pediatria? Estrabismo? Mapeamento?
 
 3️⃣ QUAL é a TRAVA associada?
-   → R$ 297 é só Fabrício
+   → R$ 450 é só Fabrício
    → R$ 611 é Karla (rotina/pedia) ou Kátia
    → R$ 800 é Karla SDP
    → Estrabismo: proibido informar
@@ -90,7 +91,7 @@ Toda vez que o agente precisar informar valores, faz esta verificação em 3 pas
 
 | Médico/Procedimento | Pix | Cartão | Observação |
 |---|---|---|---|
-| Dr. Fabrício — Avaliação Catarata | R$ 297,00 | 2x R$ 168,50 | EXCLUSIVO — não usar em outros |
+| Dr. Fabrício — Avaliação Catarata | R$ 450,00 (normal R$ 470,00) | 2x R$ 225,00 ou 3x R$ 150,00 | EXCLUSIVO — não usar em outros |
 | Dra. Karla — Oftalmopediatria/Rotina | R$ 611,00 | 2x R$ 335,00 (R$ 670 total) | — |
 | Dra. Karla — SDP | R$ 800,00 | 2x R$ 425,00 | Fechado, sem convênio |
 | Dra. Karla — Cirurgia Estrabismo | — | — | ❌ Não informar; "depende da técnica" |
@@ -99,8 +100,8 @@ Toda vez que o agente precisar informar valores, faz esta verificação em 3 pas
 
 ## ⚠️ ERROS PROIBIDOS
 
-- ❌ Dizer "consulta com a Dra. Karla custa R$ 297" (NÃO — só o Dr. Fabrício)
-- ❌ Dizer "consulta de pediatria custa R$ 297" (NÃO — pediatria = Dra. Karla = R$ 611)
+- ❌ Dizer "consulta com a Dra. Karla custa R$ 450" (NÃO — só o Dr. Fabrício)
+- ❌ Dizer "consulta de pediatria custa R$ 450" (NÃO — pediatria = Dra. Karla = R$ 611)
 - ❌ Dar preço de cirurgia de estrabismo
 - ❌ Misturar SDP com pediatria comum (SDP é R$ 800, pediatria é R$ 611)
 - ❌ Cobrar pela Dra. Kátia quando o paciente já fechou cirurgia com Fabrício (é isento/reembolsado)

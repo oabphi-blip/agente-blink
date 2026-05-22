@@ -61,6 +61,6 @@ dos seus olhos antes de definirmos os valores cirúrgicos?
 - **NÃO** disparar a faixa de R$ 5.800–15.000 espontaneamente.
 - **NÃO** induzir paciente a perguntar sobre lentes.
 - **Quando ele insistir**, usar o script acima — não dar valor direto.
-- **Conduzir** sempre para Consulta de Avaliação (R$ 297) como porta de entrada.
+- **Conduzir** sempre para Consulta de Avaliação (R$ 450) como porta de entrada.
 - Se ele responder "Sim, compreendo" → seguir para fluxo de avaliação (artigos 21, 23 ou 32).
 - Se responder "Ainda tenho dúvidas" → escalar para humano com tag "objeção preço pré-avaliação".
