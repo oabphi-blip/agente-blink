@@ -477,6 +477,11 @@ class Responder:
                         "type": "string",
                         "description": "Preferência do paciente em texto livre, ex: 'Segunda-feira — manhã — início (8h-9h)'",
                     },
+                    "acoes": {
+                        "type": "string",
+                        "enum": ["Agendar Encaixe", "Agendar Domiciliar"],
+                        "description": "Preencher SOMENTE se o atendimento virou um encaixe (paciente precisa de horário fora da grade normal / consulta já existente passou e quer novo atendimento rápido) ou consulta domiciliar. Caso contrário, NÃO incluir este campo.",
+                    },
                 },
             },
         }

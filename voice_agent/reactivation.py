@@ -86,28 +86,39 @@ def build_message(
     conv = (convenio or "").strip()
     tem_convenio = bool(conv) and conv.lower() not in _SEM_CONVENIO
 
-    # Abordagem conforme a etapa do funil
+    # Abordagem conforme a etapa do funil — acolhedora, sem promessa de data,
+    # terminando com pergunta aberta. A oferta de valor/campanha acontece na
+    # conversa real (a Lia, com contexto completo), não nesta abertura.
     if status_id == _ST_NO_SHOW:
         intro = (
-            "Notei que não conseguimos concluir a sua consulta no dia "
-            "marcado — acontece, e eu quero ajudar a resolver."
+            "Vi que não conseguimos concluir a sua consulta no dia marcado — "
+            "acontece, e eu fico feliz em te ajudar a remarcar sem complicação."
         )
-        cta = "Posso remarcar para um horário melhor para você?"
+        cta = "Quer que eu organize um novo horário? Me diga o melhor dia e turno para você."
     elif status_id == _ST_REAGENDAR:
-        intro = "Estou retomando o seu contato para reagendar a sua consulta."
-        cta = "Me diga um dia e turno de preferência que eu já organizo."
+        intro = (
+            "Passando para retomar o seu atendimento na Blink — a sua saúde "
+            "visual é importante e eu quero ajudar a resolver isso com você."
+        )
+        cta = "Me conta um dia e turno de preferência que eu já organizo tudo."
     elif status_id == _ST_AGENDAR:
-        intro = "Faltou pouco para concluir o seu agendamento na Blink."
-        cta = "Posso reservar um horário para você? É só me dizer o melhor dia."
+        intro = (
+            "Faltou pouco para concluirmos o seu agendamento na Blink. "
+            "Temos boas opções de horário e condições para facilitar."
+        )
+        cta = "Quer que eu te ajude a fechar isso? Me diga o melhor dia e turno."
     else:  # 0-ETAPA ENTRADA, 1.LEADS FRIO e demais
-        intro = "Estou retomando o nosso contato para cuidar da sua consulta."
-        cta = "Posso verificar uma data para você?"
+        intro = (
+            "Passando para retomar o nosso contato e cuidar da sua consulta "
+            "aqui na Blink Oftalmologia."
+        )
+        cta = "Posso te ajudar a organizar o seu atendimento? Me conta como prefere seguir."
 
-    disponibilidade = (
-        f"Atendemos pelo {conv} e temos horários próximos."
-        if tem_convenio else "Temos horários próximos."
-    )
-    return f"{saud} Aqui é a Lia, da Blink Oftalmologia. {intro} {disponibilidade} {cta}"
+    disp = f"Atendemos pelo {conv}." if tem_convenio else ""
+    partes = [
+        f"{saud} Aqui é a Lia, da Blink Oftalmologia.", intro, disp, cta,
+    ]
+    return " ".join(p for p in partes if p)
 
 
 @dataclass

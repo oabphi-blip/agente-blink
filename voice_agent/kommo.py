@@ -109,6 +109,12 @@ FIELD_PERFIL_PACIENTE_1 = (1257961, {
     "Acima de 50": 922315, "Idoso": 922315,
 })
 
+# Tipo MULTISELECT — campo AÇÕES (workflow interno da equipe)
+FIELD_ACOES = (1259312, {
+    "Agendar Encaixe": 925134, "Encaixe": 925134,
+    "Agendar Domiciliar": 925336, "Domiciliar": 925336,
+})
+
 # Textareas / textos livres
 FIELD_NOME_PACIENTE_1 = 1255757
 FIELD_MOTIVO_PACIENTE_1 = 1255727
@@ -254,6 +260,8 @@ class KommoClient:
         # e derrubava o PATCH inteiro com HTTP 400.
         add_select(FIELD_PERFIL_PACIENTE_1, fields.get("perfil_paciente"))
         add_select(FIELD_NUMERO_PACIENTES, fields.get("num_pacientes"))
+        # AÇÕES — só é gravado quando o atendimento virou encaixe/domiciliar.
+        add_select(FIELD_ACOES, fields.get("acoes"))
 
         if not cfs:
             return True
