@@ -602,6 +602,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         dry_run=settings.reconciliation_dry_run,
     )
 
+    @app.get("/reconciliation/status")
+    def reconciliation_status() -> dict:
+        """Estado + último relatório da reconciliação (consultável por GET)."""
+        return reconciliation.status()
+
     @app.post("/reconciliation/run")
     async def reconciliation_run(request: Request) -> JSONResponse:
         if settings.webhook_secret:
@@ -611,13 +616,24 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             )
             if got != settings.webhook_secret:
                 raise HTTPException(401, "Unauthorized")
+        if reconciliation.running:
+            return JSONResponse({"started": False, "reason": "já em execução"})
         dr_param = request.query_params.get("dry_run")
         dry_run: Optional[bool] = None
         if dr_param is not None:
             dry_run = str(dr_param).lower() not in ("0", "false", "no", "nao")
-        report = reconciliation.run(dry_run=dry_run)
-        log.info("[RECONCILIACAO] %s", report.as_dict())
-        return JSONResponse(report.as_dict())
+
+        # Roda em segundo plano — a varredura é longa; o resultado fica
+        # disponível em GET /reconciliation/status quando terminar.
+        def _run() -> None:
+            try:
+                rep = reconciliation.run(dry_run=dry_run)
+                log.info("[RECONCILIACAO] %s", rep.as_dict())
+            except Exception as e:  # noqa: BLE001
+                log.exception("Reconciliação falhou: %s", e)
+
+        threading.Thread(target=_run, daemon=True).start()
+        return JSONResponse({"started": True, "dry_run": dry_run})
 
     return app
 

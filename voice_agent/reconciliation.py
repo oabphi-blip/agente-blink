@@ -103,6 +103,19 @@ class ReconciliationEngine:
     medware: Any          # MedwareClient
     enabled: bool = False
     dry_run: bool = True
+    last_report: Optional[ReconciliationReport] = None
+    running: bool = False
+
+    def status(self) -> dict:
+        """Estado atual + último relatório — consultável por GET."""
+        return {
+            "enabled": self.enabled,
+            "dry_run_default": self.dry_run,
+            "running": self.running,
+            "last_report": (
+                self.last_report.as_dict() if self.last_report else None
+            ),
+        }
 
     # ----------------------------------------------- índice Medware 2026
 
@@ -145,6 +158,7 @@ class ReconciliationEngine:
             return ReconciliationReport(ran=False, dry_run=dr)
 
         rep = ReconciliationReport(ran=True, dry_run=dr)
+        self.running = True
         index = self._build_medware_index()
 
         leads = self.kommo.list_leads_by_status(
@@ -194,4 +208,6 @@ class ReconciliationEngine:
             "%d sem mudança, %d erros",
             dr, rep.to_proxima, rep.to_agendar, rep.unchanged, rep.errors,
         )
+        self.last_report = rep
+        self.running = False
         return rep
