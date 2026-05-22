@@ -124,8 +124,13 @@ FIELD_DIA_TURNO_PERIODO = 1259960  # "DIA/TURNO/PERÍODO ⚠️" — preferênci
 # Date (timestamp YYYY-MM-DDTHH:MM:SS-03:00)
 FIELD_DATA_NASCIMENTO_PACIENTE_1 = 1259984
 
-# Etapa do funil ATENDE em que o agente fica DESLIGADO (tratamento humano).
-ST_CIRURGIAS_ANDAMENTO = 106157139  # 7-CIRURGIAS ANDAMENTO
+# Etapas do funil ATENDE em que o agente fica DESLIGADO — tratamento
+# conduzido por humanos ou contato que não é paciente (fornecedor).
+ST_AGENT_OFF = frozenset({
+    106157139,  # 7-CIRURGIAS ANDAMENTO
+    106484343,  # 8-LENTES ANDAMENTO
+    106484347,  # 9-FORNECEDORES
+})
 
 
 def _format_date_iso(iso_yyyymmdd: str) -> Optional[str]:
@@ -517,14 +522,15 @@ class KommoClient:
     ) -> Optional[str]:
         """Decide se o agente deve ficar em SILÊNCIO para este lead.
 
-        Retorna o motivo ('cirurgias' | 'handoff') ou None se pode responder.
-          - 'cirurgias': lead na etapa 7-CIRURGIAS ANDAMENTO → agente desligado.
-          - 'handoff':   humano assumiu o chat há < window_min minutos.
+        Retorna o motivo ('etapa-humana' | 'handoff') ou None se pode responder.
+          - 'etapa-humana': lead em 7-CIRURGIAS, 8-LENTES ou 9-FORNECEDORES
+            → agente desligado (atendimento humano ou contato fornecedor).
+          - 'handoff':      humano assumiu o chat há < window_min minutos.
         """
         if not caller_context or not caller_context.get("found"):
             return None
-        if caller_context.get("status_id") == ST_CIRURGIAS_ANDAMENTO:
-            return "cirurgias"
+        if caller_context.get("status_id") in ST_AGENT_OFF:
+            return "etapa-humana"
         lead_id = caller_context.get("lead_id")
         if lead_id and self.recent_human_handoff(lead_id, window_min):
             return "handoff"
