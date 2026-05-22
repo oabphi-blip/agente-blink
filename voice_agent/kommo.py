@@ -12,6 +12,7 @@ se algum campo for renomeado no Kommo, atualizar aqui também.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -122,6 +123,9 @@ FIELD_DIA_TURNO_PERIODO = 1259960  # "DIA/TURNO/PERÍODO ⚠️" — preferênci
 
 # Date (timestamp YYYY-MM-DDTHH:MM:SS-03:00)
 FIELD_DATA_NASCIMENTO_PACIENTE_1 = 1259984
+
+# Etapa do funil ATENDE em que o agente fica DESLIGADO (tratamento humano).
+ST_CIRURGIAS_ANDAMENTO = 106157139  # 7-CIRURGIAS ANDAMENTO
 
 
 def _format_date_iso(iso_yyyymmdd: str) -> Optional[str]:
@@ -429,7 +433,8 @@ class KommoClient:
         """Onboarding por lead_id direto — usado no caminho Kommo (8133),
         onde o widget_request já entrega o lead_id."""
         out: dict = {
-            "found": True, "lead_id": int(lead_id), "name": None, "known": {},
+            "found": True, "lead_id": int(lead_id), "name": None,
+            "status_id": None, "known": {},
         }
         try:
             with httpx.Client(timeout=self.timeout) as c:
@@ -441,6 +446,7 @@ class KommoClient:
             if r.status_code != 200:
                 return out
             data = r.json() or {}
+            out["status_id"] = data.get("status_id")
             id_to_label = {
                 FIELD_NOME_PACIENTE_1: "nome_paciente",
                 FIELD_MOTIVO_PACIENTE_1: "motivo",
@@ -465,3 +471,61 @@ class KommoClient:
         except Exception as e:  # noqa: BLE001
             log.warning("Kommo get_caller_context_by_lead erro: %s", e)
         return out
+
+    # ----------------------- convivência humano × agente
+
+    def recent_human_handoff(self, lead_id: int | str, window_min: int) -> bool:
+        """True se um humano enviou mensagem manual no chat há < window_min.
+
+        O Kommo registra uma nota 'service_message' quando detecta uma
+        mensagem manual de saída ("Agentes de IA foram desativados neste
+        chat..."). Essa nota é o sinal de que um atendente assumiu a conversa.
+        """
+        if not lead_id or window_min <= 0:
+            return False
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.get(
+                    f"{self._base}/leads/{lead_id}/notes",
+                    params={"limit": 50, "order[created_at]": "desc"},
+                    headers=self._headers,
+                )
+            if r.status_code != 200:
+                return False
+            notes = ((r.json() or {}).get("_embedded") or {}).get("notes") or []
+            agora = time.time()
+            for nt in notes:
+                if nt.get("note_type") != "service_message":
+                    continue
+                txt = (
+                    (nt.get("params") or {}).get("text")
+                    or nt.get("text") or ""
+                ).lower()
+                if "desativ" not in txt:
+                    continue
+                created = float(nt.get("created_at") or 0)
+                if created and (agora - created) < window_min * 60:
+                    return True
+        except Exception as e:  # noqa: BLE001
+            log.warning(
+                "Kommo recent_human_handoff erro (lead %s): %s", lead_id, e
+            )
+        return False
+
+    def agent_paused_for_lead(
+        self, caller_context: Optional[dict], window_min: int,
+    ) -> Optional[str]:
+        """Decide se o agente deve ficar em SILÊNCIO para este lead.
+
+        Retorna o motivo ('cirurgias' | 'handoff') ou None se pode responder.
+          - 'cirurgias': lead na etapa 7-CIRURGIAS ANDAMENTO → agente desligado.
+          - 'handoff':   humano assumiu o chat há < window_min minutos.
+        """
+        if not caller_context or not caller_context.get("found"):
+            return None
+        if caller_context.get("status_id") == ST_CIRURGIAS_ANDAMENTO:
+            return "cirurgias"
+        lead_id = caller_context.get("lead_id")
+        if lead_id and self.recent_human_handoff(lead_id, window_min):
+            return "handoff"
+        return None

@@ -442,6 +442,16 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 caller_context = pipeline.kommo.get_caller_context(phone)
             except Exception as e:  # noqa: BLE001
                 log.warning("WA Cloud onboarding falhou: %s", e)
+        # Convivência humano × agente: silêncio em cirurgias / handoff humano.
+        if pipeline.kommo is not None and caller_context:
+            motivo = pipeline.kommo.agent_paused_for_lead(
+                caller_context, settings.agent_handoff_window_min,
+            )
+            if motivo:
+                log.info(
+                    "WA Cloud: agente em silêncio (%s) para %s", motivo, phone,
+                )
+                return
         try:
             result = responder.reply(
                 convo_key, user_text, caller_context=caller_context

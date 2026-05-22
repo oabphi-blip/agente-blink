@@ -141,6 +141,23 @@ class VoicePipeline:
                 log.warning("Onboarding lookup falhou: %s", e)
                 caller_context = None
 
+        # 2c) Convivência humano × agente: fica em silêncio se o lead está
+        # em cirurgias ou se um humano assumiu o chat há pouco (handoff).
+        if self.kommo is not None and caller_context:
+            try:
+                motivo = self.kommo.agent_paused_for_lead(
+                    caller_context, self.settings.agent_handoff_window_min,
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("Verificação de pausa falhou: %s", e)
+                motivo = None
+            if motivo:
+                log.info("Agente em silêncio (%s) para %s", motivo, reply_to_number)
+                return PipelineResult(
+                    transcript=user_text, answer="", sent=False,
+                    model_used="", articles_used=[],
+                )
+
         # 3) Resposta com Claude
         try:
             result = self.responder.reply(

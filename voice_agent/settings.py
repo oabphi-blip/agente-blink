@@ -75,6 +75,10 @@ class Settings:
     reconciliation_enabled: bool = False
     reconciliation_dry_run: bool = True
 
+    # Convivência humano × agente: minutos de silêncio do agente após um
+    # humano enviar mensagem no chat do Kommo (retomada automática depois).
+    agent_handoff_window_min: int = 6
+
     # WhatsApp Cloud API (Meta) — canal do número OFICIAL, direto (sem Kommo)
     whatsapp_cloud_token: str = ""
     whatsapp_cloud_phone_number_id: str = ""
@@ -167,6 +171,8 @@ class Settings:
             "RECONCILIATION_ENABLED", "reconciliation_enabled", False)
         reconciliation_dry_run = _flag(
             "RECONCILIATION_DRY_RUN", "reconciliation_dry_run", True)
+        agent_handoff_window_min = _intval(
+            "AGENT_HANDOFF_WINDOW_MIN", "agent_handoff_window_min", 6)
         reactivation_daily_cap = _intval("REACTIVATION_DAILY_CAP", "daily_cap", 30)
         reactivation_min_interval = _intval("REACTIVATION_MIN_INTERVAL_MIN", "min_interval_min", 8)
         reactivation_hour_start = _intval("REACTIVATION_HOUR_START", "hour_start", 8)
@@ -216,6 +222,7 @@ class Settings:
             reactivation_dry_run=reactivation_dry_run,
             reconciliation_enabled=reconciliation_enabled,
             reconciliation_dry_run=reconciliation_dry_run,
+            agent_handoff_window_min=agent_handoff_window_min,
             reactivation_daily_cap=reactivation_daily_cap,
             reactivation_min_interval_min=reactivation_min_interval,
             reactivation_hour_start=reactivation_hour_start,
