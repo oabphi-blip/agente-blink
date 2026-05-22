@@ -220,6 +220,8 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
         )
     known = ctx.get("known") or {}
     nome = ctx.get("name")
+    etapa = ctx.get("etapa")
+    ja_agendado = bool(ctx.get("ja_agendado"))
     linhas = []
     rotulos = {
         "nome_paciente": "Nome do paciente", "motivo": "Motivo registrado",
@@ -229,11 +231,26 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
     for k, label in rotulos.items():
         if known.get(k):
             linhas.append(f"- {label}: {known[k]}")
+    if etapa:
+        linhas.append(f"- Etapa atual no funil: {etapa}")
     dados = "\n".join(linhas) if linhas else "- (lead existe, mas sem campos preenchidos ainda)"
     saudacao = (
         f'Cumprimente pelo nome ("Olá, {nome}!") de forma calorosa.'
         if nome else "Há um lead existente para este contato."
     )
+    alerta = ""
+    if ja_agendado:
+        alerta = (
+            "\n"
+            "\n⚠️ ATENÇÃO — ESTE LEAD JÁ TEM CONSULTA MARCADA/REALIZADA."
+            f"\nA etapa do funil ({etapa}) confirma que o agendamento já existe."
+            "\nEsta conversa NÃO é um novo agendamento. É confirmação de presença,"
+            "\ndúvida ou ajuste sobre a consulta que JÁ ESTÁ marcada. É PROIBIDO"
+            "\nrefazer a triagem — não pergunte de novo motivo, convênio, médico,"
+            "\nunidade ou horário. Leia o histórico, entenda o que a pessoa precisa"
+            "\nAGORA e responda só isso. Se não tiver certeza de algum dado, NÃO"
+            "\nINVENTE — diga que vai verificar com a equipe."
+        )
     return (
         "\n\n================================================================"
         "\nONBOARDING — CONTATO JÁ CONHECIDO PELO CRM"
@@ -241,6 +258,7 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
         f"\n{saudacao}"
         "\nO CRM já tem estes dados deste contato:"
         f"\n{dados}"
+        f"{alerta}"
         "\n"
         "\nREGRA: É PROIBIDO reperguntar qualquer dado já listado acima. Trate-os"
         "\ncomo confirmados e avance direto para a próxima etapa pendente do"

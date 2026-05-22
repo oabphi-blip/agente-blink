@@ -132,6 +132,33 @@ ST_AGENT_OFF = frozenset({
     106484347,  # 9-FORNECEDORES
 })
 
+# Nomes legíveis das etapas do funil ATENDE (status_id → nome).
+ST_NAMES = {
+    96441724: "0-ETAPA ENTRADA",
+    101508307: "1.LEADS FRIO",
+    102560495: "2-AGENDAR",
+    106184631: "3.REAGENDAR",
+    101507507: "4-AGENDADO",
+    101109455: "5-CONFIRMAR OU CONFIRMADO",
+    106184983: "5.1-NO-SHOW",
+    91486864: "6-REALIZADO CONSULTA",
+    106157139: "7-CIRURGIAS ANDAMENTO",
+    106484343: "8-LENTES ANDAMENTO",
+    106484347: "9-FORNECEDORES",
+    106157327: "10-PRÓXIMA CONSULTA",
+    142: "Closed - won",
+    143: "Closed - lost",
+}
+
+# Etapas que significam que o lead JÁ TEM consulta marcada ou realizada —
+# a conversa é confirmação/dúvida, NUNCA um novo agendamento do zero.
+ST_JA_AGENDADO = frozenset({
+    101507507,  # 4-AGENDADO
+    101109455,  # 5-CONFIRMAR OU CONFIRMADO
+    91486864,   # 6-REALIZADO CONSULTA
+    106157327,  # 10-PRÓXIMA CONSULTA
+})
+
 
 def _format_date_iso(iso_yyyymmdd: str) -> Optional[str]:
     """Converte 'YYYY-MM-DD' em 'YYYY-MM-DDT00:00:00-03:00' (BRT)."""
@@ -439,7 +466,8 @@ class KommoClient:
         onde o widget_request já entrega o lead_id."""
         out: dict = {
             "found": True, "lead_id": int(lead_id), "name": None,
-            "status_id": None, "known": {},
+            "status_id": None, "etapa": None, "ja_agendado": False,
+            "known": {},
         }
         try:
             with httpx.Client(timeout=self.timeout) as c:
@@ -451,7 +479,10 @@ class KommoClient:
             if r.status_code != 200:
                 return out
             data = r.json() or {}
-            out["status_id"] = data.get("status_id")
+            sid = data.get("status_id")
+            out["status_id"] = sid
+            out["etapa"] = ST_NAMES.get(sid)
+            out["ja_agendado"] = sid in ST_JA_AGENDADO
             id_to_label = {
                 FIELD_NOME_PACIENTE_1: "nome_paciente",
                 FIELD_MOTIVO_PACIENTE_1: "motivo",
