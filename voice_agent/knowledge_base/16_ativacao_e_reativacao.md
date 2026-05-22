@@ -88,7 +88,7 @@ Após 24h da última mensagem do paciente, **só é possível enviar mensagem co
 Lead de catarata que sumiu requer abordagem mais robusta. Sequência:
 1. **Mensagem leve** ("voltando por aqui").
 2. Se não responder em 48h: **Autoridade médica** (recapitula Dr. Fabrício + Dra. Kátia + Johns Hopkins).
-3. Se não responder em 7d: **Novo gancho** (vaga exclusiva, oferta de avaliação a R$ 450).
+3. Se não responder em 7d: **Novo gancho** (vaga exclusiva, oferta de avaliação a R$ 445).
 4. Se não responder em 15d: pausa.
 
 NUNCA repetir o funil de 9 áudios do zero pra lead frio — comece de onde parou.

@@ -80,5 +80,5 @@ Imediatamente após o paciente responder se prefere Pix ou Cartão para um atend
 ## ⚠️ Regras adicionais
 
 - Esse roteiro de valor (R$ 611 / R$ 670) é para **consulta da Dra. Karla** (oftalmopediatria/rotina) ou **Dra. Kátia** (retina/vítreo). Ver tabela completa em artigo 19.
-- **NÃO** confunda com o valor exclusivo de **R$ 450** que é APENAS para o Dr. Fabrício (catarata).
+- **NÃO** confunda com o valor exclusivo de **R$ 445** que é APENAS para o Dr. Fabrício (catarata).
 - **NÃO** ofereça parcelamento maior que 2x sem juros — isso é trava da clínica.

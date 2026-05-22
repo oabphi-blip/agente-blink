@@ -106,5 +106,5 @@ Qual seria sua preferência na nossa unidade Águas Claras?
 - Pulando dados já coletados (não repergunte).
 - 3 balões em sequência sem aguardar resposta.
 - Após coleta de preferências → handoff para Concierge.
-- Valor R$ 450 (Pix) ou 2x R$ 225,00 (cartão) — ver tabela 19 e script avaliação 21.
+- Valor R$ 445 (Pix) ou 2x R$ 230,00 (cartão) — ver tabela 19 e script avaliação 21.
 - Se paciente pedir valor da cirurgia ANTES de aceitar avaliação → artigo 33 (bloqueio de preço).

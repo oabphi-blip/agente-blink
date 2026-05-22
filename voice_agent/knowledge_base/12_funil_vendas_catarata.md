@@ -18,7 +18,7 @@ Playbook completo usado pela equipe Blink para converter leads de catarata em co
 
 ## ⚠️ Regras-mãe do funil
 1. **NUNCA passe valor da cirurgia sem ter feito o AUDIO 3 (pergunta de bifurcação).** A lente define o investimento.
-2. **A "porta de entrada" é a CONSULTA de R$ 450, não a cirurgia.** Esse é o que você fecha primeiro.
+2. **A "porta de entrada" é a CONSULTA de R$ 445, não a cirurgia.** Esse é o que você fecha primeiro.
 3. **AUDIO 4 é crítico:** desloca o poder de decisão do paciente para o médico ("o exame define a lente, não seu desejo"). Reduz objeção de preço da lente premium.
 4. **Cite credenciais específicas** (Johns Hopkins, pós-doutorado, exclusividade da unidade). Bate diferenciação.
 
@@ -55,7 +55,7 @@ Playbook completo usado pela equipe Blink para converter leads de catarata em co
 > Para que esse resultado seja perfeito ✨👁️, reunimos dois grandes especialistas na Agenda Inteligente 🗓️💡. A sua avaliação inicial e a medição do olho serão feitas com o **Dr. Fabrício Freitas** 👨‍⚕️✅, nossa referência em catarata e lentes. E, havendo indicação 👌, em seguida será realizado o mapeamento de retina pela **Dra. Kátia Delalíbera** 🧠👁️. Ela possui **pós-doutorado pela Johns Hopkins University** 🎓🇺🇸, garantindo que o fundo do seu olho suportará a lente com segurança e tranquilidade 🤝🔒.
 
 ### AUDIO 6 — VALOR DA CONSULTA (porta de entrada)
-> O valor dessa avaliação completa ✅👁️, que já inclui os exames minuciosos com o Dr. Fabrício Freitas, especialista em catarata, e também com a Dra. Kátia Delalíbera, é de **R$ 450,00 no Pix** 💳⚡ ou em **2 vezes de R$ 225,00 sem juros** 🗓️💰.
+> O valor dessa avaliação completa ✅👁️, que já inclui os exames minuciosos com o Dr. Fabrício Freitas, especialista em catarata, e também com a Dra. Kátia Delalíbera, é de **R$ 445,00 no Pix** 💳⚡ ou em **2 vezes de R$ 230,00 sem juros** 🗓️💰.
 >
 > E o melhor: na consulta pré-cirurgia com a Dra. Kátia Delalíbera 🏥✨ (especialista em retina e vítreo), o custo do mapeamento da retina será **totalmente isento** ✅🤝🔄 — ou seja, neste caso a própria consulta com a Dra. Kátia também já está inclusa no valor da consulta avaliação de catarata. ✅📌
 
@@ -106,14 +106,14 @@ AUDIO 7 (oferta de horário Seg tarde / Sex manhã)
 | EDOF/intermediária | R$ 7.500 – R$ 14.000 | Independência parcial (~50%) |
 | Premium multifocal | R$ 13.000 – R$ 15.000 | Independência total |
 
-**Consulta de avaliação:** R$ 450 no Pix ou 2x de R$ 225,00 sem juros (inclui Dr. Fabrício + Dra. Kátia + mapeamento isento).
+**Consulta de avaliação:** R$ 445 no Pix ou 2x de R$ 230,00 sem juros (inclui Dr. Fabrício + Dra. Kátia + mapeamento isento).
 
 **Agenda:** Águas Claras, Segunda tarde ou Sexta manhã.
 
 ## Princípios de venda observados
 1. **Bifurcação antes do preço** — nunca passe valor de cirurgia sem qualificar objetivo.
 2. **Faixas, não valor único** — sempre apresente um range. O paciente escolhe.
-3. **Consulta como porta de entrada** — R$ 450 reduz fricção do "investimento de R$ 6-15k".
+3. **Consulta como porta de entrada** — R$ 445 reduz fricção do "investimento de R$ 6-15k".
 4. **Inversão (AUDIO 4)** — o médico decide a lente, não o paciente. Reduz objeção "vou pesquisar lente mais barata".
 5. **Autoridade quantificada** — "pós-doutorado Johns Hopkins" é mais forte que "muito experiente".
 6. **Inclusos visíveis** — listar o que está no pacote ANTES do preço.

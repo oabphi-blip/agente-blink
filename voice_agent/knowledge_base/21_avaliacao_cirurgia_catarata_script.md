@@ -75,7 +75,7 @@ feita pelo Dr. Fabrício Freitas poderia não corresponder com o que
 está buscando.
 
 💡 O primeiro passo é a Consulta de Avaliação (com valor especial de
-R$ 450,00, podendo ser no Pix ou em até 2x no cartão valor de R$ 225,00).
+R$ 445,00, podendo ser no Pix ou em até 2x no cartão valor de R$ 230,00).
 Nela o Dr. Fabrício define a lente ideal e nossa equipe monta o seu
 orçamento cirúrgico exato.
 
@@ -106,8 +106,8 @@ Um instante e já continuamos o seu atendimento! ✨
 ---
 
 ## ⚠️ Regras críticas
-1. **NUNCA** dar valor de cirurgia sem avaliação. A consulta de R$ 450 é a porta de entrada — ela leva ao orçamento exato.
-2. R$ 450 é EXCLUSIVO do Dr. Fabrício (ver trava no artigo 19).
+1. **NUNCA** dar valor de cirurgia sem avaliação. A consulta de R$ 445 é a porta de entrada — ela leva ao orçamento exato.
+2. R$ 445 é EXCLUSIVO do Dr. Fabrício (ver trava no artigo 19).
 3. Dr. Fabrício atende **apenas em Águas Claras**, **Segunda à tarde** e **Sexta de manhã** para catarata.
 4. Após dados completos, encaminhar para Concierge (humano) para fechar agenda.
 5. Cross-verificar convênio nas listas 17 (aceitos) e 18 (não aceitos) ANTES de dar resposta sobre cobertura.
