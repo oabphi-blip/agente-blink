@@ -670,6 +670,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": str(e)[:300]})
 
+    @app.get("/whatsapp/phone-info")
+    def whatsapp_phone_info() -> JSONResponse:
+        """Dados do número na Cloud API: limite de mensagens iniciadas
+        pela empresa (messaging_limit_tier) e qualidade."""
+        if wa_cloud is None:
+            return JSONResponse({"error": "WhatsApp Cloud não configurado"})
+        try:
+            return JSONResponse({"phone": wa_cloud.get_phone_info()})
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)[:300]})
+
     @app.get("/whatsapp/template-image")
     def whatsapp_template_image(name: str) -> JSONResponse:
         """Extrai a imagem de cabeçalho de um template aprovado.

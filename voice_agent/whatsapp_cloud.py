@@ -212,6 +212,33 @@ class WhatsAppCloudClient:
         ctype = r.headers.get("content-type") or "application/octet-stream"
         return r.content, ctype
 
+    def get_phone_info(self) -> dict:
+        """Lê os dados do número na Cloud API.
+
+        Inclui o limite de mensagens iniciadas pela empresa
+        (messaging_limit_tier) e a nota de qualidade (quality_rating).
+        Tiers possíveis: TIER_250, TIER_1K, TIER_10K, TIER_100K,
+        TIER_UNLIMITED — conversas iniciadas pela empresa por 24h.
+        """
+        fields = (
+            "display_phone_number,verified_name,quality_rating,"
+            "messaging_limit_tier,throughput,name_status,"
+            "code_verification_status,platform_type"
+        )
+        url = f"{self._base}/{self.phone_number_id}"
+        with httpx.Client(timeout=self.timeout) as c:
+            r = c.get(
+                url,
+                headers={"Authorization": f"Bearer {self.token}"},
+                params={"fields": fields},
+            )
+        if r.status_code >= 400:
+            raise WhatsAppCloudError(
+                f"get_phone_info falhou ({r.status_code}): "
+                f"{(r.text or '')[:300]}"
+            )
+        return r.json() or {}
+
     # --------------------------------------------------------------- mídia
 
     def get_media_bytes(self, media_id: str) -> tuple[bytes, str]:
