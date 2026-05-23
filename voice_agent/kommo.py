@@ -400,6 +400,37 @@ class KommoClient:
             log.warning("Kommo list_leads_by_status erro: %s", e)
             return []
 
+    def list_leads_recent(self, limit: int = 250, page: int = 1) -> list[dict]:
+        """Lista leads ordenados pela atividade MAIS RECENTE primeiro
+        (updated_at desc), com paginação.
+
+        Usado pelo disparo de unificação: avisa primeiro quem teve
+        contato mais recente (hoje, ontem) e vai descendo na base.
+        """
+        params: dict[str, Any] = {
+            "limit": min(int(limit), 250),
+            "page": max(int(page), 1),
+            "order[updated_at]": "desc",
+        }
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.get(f"{self._base}/leads", params=params, headers=self._headers)
+            if r.status_code == 204:
+                return []
+            if r.status_code != 200:
+                log.warning("Kommo list_leads_recent: HTTP %d", r.status_code)
+                return []
+            data = r.json() or {}
+            return [
+                {"id": ld["id"], "name": ld.get("name"),
+                 "status_id": ld.get("status_id"),
+                 "updated_at": ld.get("updated_at")}
+                for ld in ((data.get("_embedded") or {}).get("leads") or [])
+            ]
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo list_leads_recent erro: %s", e)
+            return []
+
     def get_lead_main_phone(self, lead_id: int | str) -> Optional[str]:
         """Retorna o telefone (só dígitos) do contato principal do lead."""
         try:

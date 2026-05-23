@@ -610,6 +610,41 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return JSONResponse(report.as_dict())
 
     # ================================================================
+    # DISPARO DE UNIFICAÇÃO (broadcast do aviso de número único 8133)
+    # ================================================================
+    # Envia o template de unificação para a base do Kommo, dos contatos
+    # mais recentes aos mais antigos, em lotes com teto diário.
+    # Acionar: POST /broadcast/tick (?force=true ignora o horário).
+    from .broadcast import BroadcastEngine
+
+    broadcast = BroadcastEngine(
+        settings=settings,
+        kommo=pipeline.kommo,
+        wa_cloud=wa_cloud,
+        store=conversation_store,
+    )
+
+    @app.get("/broadcast/status")
+    def broadcast_status() -> dict:
+        return broadcast.status()
+
+    @app.post("/broadcast/tick")
+    async def broadcast_tick(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        force = str(request.query_params.get("force", "")).lower() in (
+            "1", "true", "yes", "sim",
+        )
+        report = broadcast.tick(force=force)
+        log.info("[BROADCAST tick force=%s] %s", force, report.as_dict())
+        return JSONResponse(report.as_dict())
+
+    # ================================================================
     # RECONCILIAÇÃO DE ETAPAS (Medware × Kommo)
     # ================================================================
     # Cruza quem consultou em 2026 com os leads abertos e ajusta a etapa.

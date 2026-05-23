@@ -75,6 +75,16 @@ class Settings:
     reactivation_template_name: str = ""
     reactivation_template_lang: str = "pt_BR"
     slack_webhook_url: str = ""
+    # Disparo de unificação (broadcast do aviso de número único 8133).
+    # Duas travas: enabled liga o motor; dry_run impede o envio real.
+    broadcast_enabled: bool = False
+    broadcast_dry_run: bool = True
+    broadcast_daily_cap: int = 200
+    broadcast_batch_size: int = 25
+    broadcast_hour_start: int = 8
+    broadcast_hour_end: int = 20
+    broadcast_template_name: str = "atendimento_unificado_oficial"
+    broadcast_template_lang: str = "pt_BR"
 
     # Reconciliação de etapas (Medware × Kommo) — duas travas, igual reativação.
     reconciliation_enabled: bool = False
@@ -192,6 +202,16 @@ class Settings:
         reactivation_template_lang = (
             os.getenv("REACTIVATION_TEMPLATE_LANG") or rc.get("template_lang", "pt_BR") or "pt_BR"
         )
+        broadcast_enabled = _flag("BROADCAST_ENABLED", "broadcast_enabled", False)
+        broadcast_dry_run = _flag("BROADCAST_DRY_RUN", "broadcast_dry_run", True)
+        broadcast_daily_cap = _intval("BROADCAST_DAILY_CAP", "broadcast_daily_cap", 200)
+        broadcast_batch_size = _intval("BROADCAST_BATCH_SIZE", "broadcast_batch_size", 25)
+        broadcast_hour_start = _intval("BROADCAST_HOUR_START", "broadcast_hour_start", 8)
+        broadcast_hour_end = _intval("BROADCAST_HOUR_END", "broadcast_hour_end", 20)
+        broadcast_template_name = (
+            os.getenv("BROADCAST_TEMPLATE_NAME") or "atendimento_unificado_oficial"
+        )
+        broadcast_template_lang = os.getenv("BROADCAST_TEMPLATE_LANG") or "pt_BR"
 
         # WhatsApp Cloud API (Meta) — canal do número oficial
         wac = cfg.get("whatsapp_cloud", {}) if isinstance(cfg, dict) else {}
@@ -248,6 +268,14 @@ class Settings:
             reactivation_template_name=reactivation_template_name,
             reactivation_template_lang=reactivation_template_lang,
             slack_webhook_url=slack_webhook_url,
+            broadcast_enabled=broadcast_enabled,
+            broadcast_dry_run=broadcast_dry_run,
+            broadcast_daily_cap=broadcast_daily_cap,
+            broadcast_batch_size=broadcast_batch_size,
+            broadcast_hour_start=broadcast_hour_start,
+            broadcast_hour_end=broadcast_hour_end,
+            broadcast_template_name=broadcast_template_name,
+            broadcast_template_lang=broadcast_template_lang,
             whatsapp_cloud_token=whatsapp_cloud_token,
             whatsapp_cloud_phone_number_id=whatsapp_cloud_phone_number_id,
             whatsapp_cloud_waba_id=whatsapp_cloud_waba_id,
