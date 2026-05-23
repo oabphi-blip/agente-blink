@@ -139,6 +139,15 @@ FIELD_NAO_ACEITO_CONVENIO = (1175268, {
     "Outro": 926611,
 })
 
+# "MOTIVOS PERDA" (multiselect) — motivo do lead perdido.
+FIELD_MOTIVOS_PERDA = (1260434, {
+    "Somente Convênio": 926086, "Somente Convenio": 926086,
+    "Só Convênio": 926086, "Só com Convênio": 926086,
+})
+
+# Status "Closed - lost" (Venda perdida) — id reservado, vale em qualquer funil.
+STATUS_CLOSED_LOST = 143
+
 # Textareas / textos livres
 FIELD_NOME_PACIENTE_1 = 1255757
 FIELD_MOTIVO_PACIENTE_1 = 1255727
@@ -324,6 +333,8 @@ class KommoClient:
         # Ñ ACEITO CONVÊNIO — convênio que o paciente queria e a clínica
         # não credencia (preenchido quando o lead insiste nesse convênio).
         add_select(FIELD_NAO_ACEITO_CONVENIO, fields.get("nao_aceito_convenio"))
+        # MOTIVOS PERDA — motivo do lead perdido (ex.: "Somente Convênio").
+        add_select(FIELD_MOTIVOS_PERDA, fields.get("motivo_perda"))
 
         if not cfs:
             return True

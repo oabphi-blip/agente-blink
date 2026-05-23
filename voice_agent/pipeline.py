@@ -241,5 +241,13 @@ class VoicePipeline:
             fields = self.responder.extract_lead_fields(conversation_key)
             if fields:
                 self.kommo.update_lead_fields(lead_id, fields)
+                # Lead perdido por convênio não credenciado → fecha o card
+                # como "Closed - lost" (status 143, válido em qualquer funil).
+                if fields.get("motivo_perda"):
+                    try:
+                        self.kommo.update_lead_status(lead_id, 143)
+                        log.info("Kommo lead %s fechado como perdido", lead_id)
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("Kommo close-lost falhou (%s): %s", phone, e)
         except Exception as e:  # noqa: BLE001
             log.warning("Kommo sync falhou (%s): %s", phone, e)
