@@ -682,6 +682,41 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": str(e)[:300]})
 
+    @app.get("/whatsapp/submit-template")
+    def whatsapp_submit_template(name: str) -> JSONResponse:
+        """Submete um template à Meta para aprovação.
+
+        Lê a definição de voice_agent/templates/<name>.json (formato da
+        Graph API: name/language/category/components) e cria o template
+        na WABA. Uso: GET /whatsapp/submit-template?name=atendimento_unificado_oficial
+        """
+        if wa_cloud is None:
+            return JSONResponse({"error": "WhatsApp Cloud não configurado"})
+        safe = "".join(ch for ch in name if ch.isalnum() or ch in ("_", "-"))
+        if not safe or safe != name:
+            return JSONResponse({"ok": False, "error": "nome de template inválido"})
+        path = _os.path.join(_os.path.dirname(__file__), "templates", f"{safe}.json")
+        if not _os.path.exists(path):
+            return JSONResponse(
+                {"ok": False, "error": f"arquivo não encontrado: {safe}.json"}
+            )
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                spec = json.load(fh)
+            resp = wa_cloud.create_template(
+                name=spec["name"],
+                category=spec["category"],
+                components=spec["components"],
+                language=spec.get("language", "pt_BR"),
+            )
+            log.info("[WA TEMPLATE] submetido '%s'", spec.get("name"))
+            return JSONResponse(
+                {"ok": True, "submitted": spec.get("name"), "response": resp}
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("submit-template falhou: %s", e)
+            return JSONResponse({"ok": False, "error": str(e)[:400]})
+
     @app.get("/whatsapp/template-image")
     def whatsapp_template_image(name: str) -> JSONResponse:
         """Extrai a imagem de cabeçalho de um template aprovado.

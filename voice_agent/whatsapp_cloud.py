@@ -212,6 +212,37 @@ class WhatsAppCloudClient:
         ctype = r.headers.get("content-type") or "application/octet-stream"
         return r.content, ctype
 
+    def create_template(
+        self,
+        name: str,
+        category: str,
+        components: list,
+        language: str = "pt_BR",
+    ) -> dict:
+        """Cria (submete para aprovação) um template na WABA.
+
+        components — lista no formato da Graph API (HEADER/BODY/FOOTER/
+        BUTTONS). A Meta revisa e aprova/reprova depois. Precisa do
+        waba_id configurado.
+        """
+        if not self.waba_id:
+            raise WhatsAppCloudError("waba_id não configurado")
+        url = f"{self._base}/{self.waba_id}/message_templates"
+        payload = {
+            "name": name,
+            "language": language,
+            "category": category,
+            "components": components,
+        }
+        with httpx.Client(timeout=self.timeout) as c:
+            r = c.post(url, headers=self._headers(), json=payload)
+        if r.status_code >= 400:
+            raise WhatsAppCloudError(
+                f"create_template '{name}' falhou ({r.status_code}): "
+                f"{(r.text or '')[:400]}"
+            )
+        return r.json() if r.content else {}
+
     def get_phone_info(self) -> dict:
         """Lê os dados do número na Cloud API.
 

@@ -1,0 +1,25 @@
+{
+  "name": "atendimento_unificado_oficial",
+  "language": "pt_BR",
+  "category": "UTILITY",
+  "components": [
+    {
+      "type": "HEADER",
+      "format": "TEXT",
+      "text": "Blink Oftalmologia"
+    },
+    {
+      "type": "BODY",
+      "text": "Olá, {{1}}! A Blink Oftalmologia unificou todo o seu atendimento neste número oficial do WhatsApp, seguindo os padrões oficiais da plataforma. Pode continuar a sua conversa por aqui normalmente — o seu histórico de atendimento foi mantido. Seguimos à disposição para cuidar da sua visão.",
+      "example": {
+        "body_text": [
+          ["Maria"]
+        ]
+      }
+    },
+    {
+      "type": "FOOTER",
+      "text": "Responsável Técnica: Dra. Karla Delalíbera — CRM-DF 16497"
+    }
+  ]
+}
