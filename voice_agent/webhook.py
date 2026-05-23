@@ -780,6 +780,31 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         threading.Thread(target=_run_dry, daemon=True).start()
         return JSONResponse({"started": True, "dry_run": True})
 
+    @app.get("/reconciliation/apply")
+    def reconciliation_apply_get(request: Request) -> JSONResponse:
+        """Aciona a reconciliação APLICANDO de verdade as mudanças de etapa
+        (dry_run=false). Exige ?confirmar=sim para não disparar por engano.
+        O resultado fica em GET /reconciliation/status quando terminar.
+        """
+        confirmar = str(request.query_params.get("confirmar", "")).lower()
+        if confirmar not in ("sim", "yes", "true", "1"):
+            return JSONResponse({
+                "started": False,
+                "reason": "para aplicar de verdade, chame com ?confirmar=sim",
+            })
+        if reconciliation.running:
+            return JSONResponse({"started": False, "reason": "já em execução"})
+
+        def _run_apply() -> None:
+            try:
+                rep = reconciliation.run(dry_run=False)
+                log.info("[RECONCILIACAO apply] %s", rep.as_dict())
+            except Exception as e:  # noqa: BLE001
+                log.exception("Reconciliação apply falhou: %s", e)
+
+        threading.Thread(target=_run_apply, daemon=True).start()
+        return JSONResponse({"started": True, "dry_run": False})
+
     # ================================================================
     # TEMPLATES DO WHATSAPP OFICIAL (8133)
     # ================================================================
