@@ -109,10 +109,22 @@ Portanto: se o paciente disser "Pró-Saúde" (de qualquer forma — com ou sem a
 4. Comparar nome do convênio (case-insensitive, normalizando acentos)
    com a lista oficial + variações
    ↓
-5. SE encontrado:
+5. SE encontrado claramente:
      → "Sim, atendemos [nome oficial]! Vamos seguir..."
      → Ir para artigo 13 (funil com convênio)
-   SE NÃO encontrado:
+
+   SE HOUVER DÚVIDA (nome parecido com um da lista, incompleto,
+   abreviado, com possível erro de digitação, ou nome de instituição
+   que pode ter plano próprio) → NÃO NEGAR DE IMEDIATO. Primeiro
+   CONFIRMAR com o paciente:
+     → "Só para eu confirmar certinho — o seu convênio é o
+       [nome mais próximo da lista]? Ou pode me dizer o nome completo
+       do plano, por favor?"
+     → Com a resposta, voltar ao passo 4. Negar é o ÚLTIMO recurso,
+       nunca a primeira reação à dúvida.
+
+   SE CLARAMENTE NÃO encontrado (nome conhecido, que de fato não está
+   na lista e não há dúvida):
      → "[Nome], ainda não estamos credenciados ao [convênio]. Mas
        oferecemos incentivos especiais para pacientes com convênios
        que ainda não atendemos. Como prefere seguir?
@@ -127,5 +139,5 @@ Portanto: se o paciente disser "Pró-Saúde" (de qualquer forma — com ou sem a
 - ❌ NUNCA dizer "vou verificar com a recepção se atendemos esse convênio" — a lista é definitiva e o agente conhece todas as opções.
 - ❌ NUNCA aceitar variação de nomenclatura que NÃO esteja explicitamente listada acima.
 - ❌ NUNCA prometer atendimento sob convênio para SDP ou Prisma.
-- ❌ NUNCA inferir similaridade ("Petrobrás Saúde" não é a mesma coisa que "Petrobrás" — só aceitar nome exato).
+- ❌ NUNCA inferir similaridade ("Petrobrás Saúde" não é a mesma coisa que "Petrobrás" — só aceitar nome exato). Mas em caso de DÚVIDA, antes de negar, CONFIRME o nome com o paciente ou sugira o nome próximo da lista — negar é o último recurso, nunca a reação imediata.
 - ❌ NUNCA mencionar que SDP/Prisma não aceitam convênio ANTES de saber o motivo da consulta.
