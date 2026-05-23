@@ -515,6 +515,10 @@ class Responder:
                         "enum": ["Somente Convênio"],
                         "description": "Preencher SOMENTE quando o paciente deixou CLARO que NÃO vai prosseguir com o atendimento porque só aceita ser atendido por um convênio que a clínica não credencia — ou seja, o lead foi perdido por causa do convênio. Se o paciente ainda está decidindo, negociando, ou aberto ao atendimento particular, NÃO incluir este campo.",
                     },
+                    "denominacao": {
+                        "type": "string",
+                        "description": "Rótulo CURTO (3 a 8 palavras) que resume a situação ATUAL do lead com base na última mensagem, para dar visibilidade rápida à equipe humana. Ex.: 'viu valor estrabismo, decidindo', 'quer pediatria sábado de manhã', 'pediu localização Águas Claras', 'aguardando data de nascimento'. Preencher sempre que houver conversa. Não incluir o nome do paciente nem prefixo de etapa.",
+                    },
                 },
             },
         }

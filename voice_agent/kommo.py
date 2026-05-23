@@ -527,6 +527,30 @@ class KommoClient:
             log.warning("Kommo update_lead_status erro: %s", e)
         return False
 
+    def rename_lead(self, lead_id: int, name: str) -> bool:
+        """Atualiza a denominação (nome/título) do card do lead.
+
+        Usado para dar visibilidade rápida à equipe humana — o título do
+        card passa a refletir a situação atual do atendimento.
+        """
+        if not name or not str(name).strip():
+            return False
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.patch(
+                    f"{self._base}/leads/{lead_id}",
+                    json={"name": str(name).strip()[:250]},
+                    headers=self._headers,
+                )
+            if r.status_code // 100 == 2:
+                return True
+            log.warning(
+                "Kommo rename_lead %s falhou: HTTP %d", lead_id, r.status_code
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo rename_lead erro: %s", e)
+        return False
+
     # ----------------------- enriquecimento de contexto (onboarding)
 
     def get_caller_context_by_lead(self, lead_id: int | str) -> dict:

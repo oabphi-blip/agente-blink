@@ -249,5 +249,31 @@ class VoicePipeline:
                         log.info("Kommo lead %s fechado como perdido", lead_id)
                     except Exception as e:  # noqa: BLE001
                         log.warning("Kommo close-lost falhou (%s): %s", phone, e)
+                else:
+                    # Lead interagiu (e não foi perdido): se está numa etapa
+                    # inicial do funil, move para 2-AGENDAR; e dá uma
+                    # denominação ao card refletindo a última mensagem, para
+                    # visibilidade da equipe humana.
+                    try:
+                        ctx = self.kommo.get_caller_context_by_lead(lead_id)
+                        st = ctx.get("status_id")
+                        # 0-ENTRADA, 1-FRIO, 2-AGENDAR, 3-REAGENDAR, 5.1-NO-SHOW
+                        if st in (96441724, 101508307, 102560495,
+                                  106184631, 106184983):
+                            if st != 102560495:
+                                self.kommo.update_lead_status(lead_id, 102560495)
+                                log.info(
+                                    "Kommo lead %s movido para 2-AGENDAR",
+                                    lead_id,
+                                )
+                            denom = fields.get("denominacao")
+                            if denom:
+                                self.kommo.rename_lead(
+                                    lead_id, f"AGENDAR_ {denom}"
+                                )
+                    except Exception as e:  # noqa: BLE001
+                        log.warning(
+                            "Kommo etapa/denominação falhou (%s): %s", phone, e
+                        )
         except Exception as e:  # noqa: BLE001
             log.warning("Kommo sync falhou (%s): %s", phone, e)
