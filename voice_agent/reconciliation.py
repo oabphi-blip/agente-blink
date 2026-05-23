@@ -120,14 +120,15 @@ class ReconciliationEngine:
     # ----------------------------------------------- índice Medware 2026
 
     def _build_medware_index(self) -> set[str]:
-        """Conjunto de chaves de telefone com consulta registrada em 2026.
+        """Conjunto de chaves de telefone com agendamento/consulta em 2026.
 
-        Varre mês a mês (jan → mês corrente) os agendamentos da Medware.
+        Varre o ANO INTEIRO (jan → dez) — assim pega tanto a consulta já
+        realizada quanto o agendamento FUTURO marcado para este ano.
         """
         keys: set[str] = set()
         hoje = datetime.now(_TZ)
         ano = hoje.year
-        for mes in range(1, hoje.month + 1):
+        for mes in range(1, 13):
             ini = f"01/{mes:02d}/{ano}"
             # último dia do mês: usa 31 — a Medware aceita e ignora o excedente
             fim = f"31/{mes:02d}/{ano}"
@@ -161,9 +162,17 @@ class ReconciliationEngine:
         self.running = True
         index = self._build_medware_index()
 
-        leads = self.kommo.list_leads_by_status(
-            PIPELINE_ATENDE, OPEN_STAGES, limit=250,
-        )
+        # Pagina a base inteira de leads abertos (250 por página).
+        leads: list = []
+        page = 1
+        while page <= 40:  # teto de segurança: 40 x 250 = 10.000 leads
+            batch = self.kommo.list_leads_by_status(
+                PIPELINE_ATENDE, OPEN_STAGES, limit=250, page=page,
+            )
+            if not batch:
+                break
+            leads.extend(batch)
+            page += 1
         rep.leads_total = len(leads)
         log.info("Reconciliação: %d leads abertos para avaliar", len(leads))
 
@@ -173,8 +182,14 @@ class ReconciliationEngine:
             try:
                 phone = self.kommo.get_lead_main_phone(lead_id)
                 consultou = bool(phone) and _phone_key(phone) in index
-                alvo = ST_PROXIMA_CONSULTA if consultou else ST_AGENDAR
 
+                # Sem agendamento/consulta em 2026 → continua frio. NÃO
+                # move: fica onde está, disponível para a reativação.
+                if not consultou:
+                    rep.unchanged += 1
+                    continue
+
+                alvo = ST_PROXIMA_CONSULTA
                 if status_atual == alvo:
                     rep.unchanged += 1
                     continue
@@ -195,10 +210,7 @@ class ReconciliationEngine:
                 else:
                     item["aplicado"] = False
                 rep.detail.append(item)
-                if alvo == ST_PROXIMA_CONSULTA:
-                    rep.to_proxima += 1
-                else:
-                    rep.to_agendar += 1
+                rep.to_proxima += 1
             except Exception as e:  # noqa: BLE001
                 log.warning("Reconciliação: lead %s falhou: %s", lead_id, e)
                 rep.errors += 1

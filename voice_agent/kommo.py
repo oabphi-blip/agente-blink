@@ -414,15 +414,18 @@ class KommoClient:
 
     def list_leads_by_status(
         self, pipeline_id: int, status_ids: list[int], limit: int = 200,
+        page: int = 1,
     ) -> list[dict]:
         """Lista leads de um pipeline que estejam em qualquer uma das etapas
         informadas. Ordenado por updated_at asc (mais parados primeiro).
 
         Usa a API REST direta do Kommo (filter[statuses]) — diferente da
         busca textual, aqui o filtro por etapa funciona de fato.
+        `page` permite paginar (Kommo entrega no máximo 250 por página).
         """
         params: dict[str, Any] = {
             "limit": min(int(limit), 250),
+            "page": max(int(page), 1),
             "order[updated_at]": "asc",
         }
         for i, sid in enumerate(status_ids):
