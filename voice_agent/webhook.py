@@ -89,6 +89,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         wa_cloud = WhatsAppCloudClient(
             token=settings.whatsapp_cloud_token,
             phone_number_id=settings.whatsapp_cloud_phone_number_id,
+            waba_id=settings.whatsapp_cloud_waba_id,
             api_version=settings.whatsapp_cloud_api_version,
         )
 
@@ -644,6 +645,54 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         threading.Thread(target=_run, daemon=True).start()
         return JSONResponse({"started": True, "dry_run": dry_run})
+
+    # ================================================================
+    # TEMPLATES DO WHATSAPP OFICIAL (8133)
+    # ================================================================
+    # GET  /whatsapp/templates       → lista os templates aprovados da WABA
+    # POST /whatsapp/send-template   → envia um template (teste/disparo)
+    @app.get("/whatsapp/templates")
+    def whatsapp_list_templates() -> JSONResponse:
+        if wa_cloud is None:
+            return JSONResponse({"error": "WhatsApp Cloud não configurado"})
+        try:
+            return JSONResponse({"templates": wa_cloud.list_templates()})
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)[:300]})
+
+    @app.post("/whatsapp/send-template")
+    async def whatsapp_send_template(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        if wa_cloud is None:
+            return JSONResponse({"error": "WhatsApp Cloud não configurado"})
+        try:
+            data = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse({"error": "body inválido (esperado JSON)"})
+        data = data or {}
+        to = data.get("to") or ""
+        name = data.get("name") or ""
+        if not to or not name:
+            return JSONResponse({"error": "informe 'to' e 'name'"})
+        try:
+            resp = wa_cloud.send_template(
+                to=to,
+                name=name,
+                language=(data.get("language") or "pt_BR"),
+                body_params=data.get("body_params"),
+                header_image_url=data.get("header_image_url"),
+            )
+            log.info("[WA TEMPLATE] enviado '%s' para %s", name, to)
+            return JSONResponse({"ok": True, "response": resp})
+        except Exception as e:  # noqa: BLE001
+            log.warning("send_template falhou: %s", e)
+            return JSONResponse({"ok": False, "error": str(e)[:300]})
 
     return app
 

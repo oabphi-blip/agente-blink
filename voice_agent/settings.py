@@ -82,6 +82,7 @@ class Settings:
     # WhatsApp Cloud API (Meta) — canal do número OFICIAL, direto (sem Kommo)
     whatsapp_cloud_token: str = ""
     whatsapp_cloud_phone_number_id: str = ""
+    whatsapp_cloud_waba_id: str = ""
     whatsapp_cloud_verify_token: str = ""
     whatsapp_cloud_api_version: str = "v21.0"
     whatsapp_cloud_enabled: bool = False
@@ -187,6 +188,9 @@ class Settings:
         whatsapp_cloud_phone_number_id = (
             os.getenv("WHATSAPP_CLOUD_PHONE_NUMBER_ID") or wac.get("phone_number_id", "")
         )
+        whatsapp_cloud_waba_id = (
+            os.getenv("WHATSAPP_CLOUD_WABA_ID") or wac.get("waba_id", "")
+        )
         whatsapp_cloud_verify_token = (
             os.getenv("WHATSAPP_CLOUD_VERIFY_TOKEN") or wac.get("verify_token", "")
         )
@@ -233,6 +237,7 @@ class Settings:
             slack_webhook_url=slack_webhook_url,
             whatsapp_cloud_token=whatsapp_cloud_token,
             whatsapp_cloud_phone_number_id=whatsapp_cloud_phone_number_id,
+            whatsapp_cloud_waba_id=whatsapp_cloud_waba_id,
             whatsapp_cloud_verify_token=whatsapp_cloud_verify_token,
             whatsapp_cloud_api_version=whatsapp_cloud_api_version,
             whatsapp_cloud_enabled=whatsapp_cloud_enabled,

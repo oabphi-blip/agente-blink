@@ -38,6 +38,7 @@ class WhatsAppCloudClient:
 
     token: str
     phone_number_id: str
+    waba_id: str = ""
     api_version: str = "v21.0"
     timeout: float = 30.0
 
@@ -70,6 +71,91 @@ class WhatsAppCloudClient:
                 f"send_text falhou ({r.status_code}): {(r.text or '')[:300]}"
             )
         return r.json() if r.content else {}
+
+    # ----------------------------------------------------------- templates
+
+    def send_template(
+        self,
+        to: str,
+        name: str,
+        language: str = "pt_BR",
+        body_params: Optional[list] = None,
+        header_image_url: Optional[str] = None,
+    ) -> dict:
+        """Envia uma mensagem de TEMPLATE aprovado pela Meta.
+
+        Usado para iniciar contato ou falar FORA da janela de 24h
+        (aniversário, reativação, lembretes). O template precisa estar
+        APROVADO no WhatsApp Manager.
+
+        body_params       — valores das variáveis {{1}}, {{2}}... do corpo.
+        header_image_url  — URL da imagem, se o template tiver cabeçalho
+                            de imagem.
+        """
+        components: list = []
+        if header_image_url:
+            components.append({
+                "type": "header",
+                "parameters": [
+                    {"type": "image", "image": {"link": header_image_url}}
+                ],
+            })
+        if body_params:
+            components.append({
+                "type": "body",
+                "parameters": [
+                    {"type": "text", "text": str(p)} for p in body_params
+                ],
+            })
+        template: dict = {"name": name, "language": {"code": language}}
+        if components:
+            template["components"] = components
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": _digits(to),
+            "type": "template",
+            "template": template,
+        }
+        url = f"{self._base}/{self.phone_number_id}/messages"
+        with httpx.Client(timeout=self.timeout) as c:
+            r = c.post(url, headers=self._headers(), json=payload)
+        if r.status_code >= 400:
+            raise WhatsAppCloudError(
+                f"send_template '{name}' falhou ({r.status_code}): "
+                f"{(r.text or '')[:300]}"
+            )
+        return r.json() if r.content else {}
+
+    def list_templates(self) -> list:
+        """Lista os templates da WABA (nome, idioma, status, categoria).
+
+        Precisa do waba_id configurado. Permite carregar TODOS os templates
+        aprovados de uma vez, sem cadastrar um a um no código.
+        """
+        if not self.waba_id:
+            return []
+        url = f"{self._base}/{self.waba_id}/message_templates"
+        with httpx.Client(timeout=self.timeout) as c:
+            r = c.get(
+                url,
+                headers={"Authorization": f"Bearer {self.token}"},
+                params={"limit": 200},
+            )
+        if r.status_code >= 400:
+            raise WhatsAppCloudError(
+                f"list_templates falhou ({r.status_code}): "
+                f"{(r.text or '')[:300]}"
+            )
+        out: list = []
+        for t in ((r.json() or {}).get("data") or []):
+            out.append({
+                "name": t.get("name"),
+                "language": t.get("language"),
+                "status": t.get("status"),
+                "category": t.get("category"),
+            })
+        return out
 
     # --------------------------------------------------------------- mídia
 
