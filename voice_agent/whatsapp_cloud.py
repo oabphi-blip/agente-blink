@@ -135,26 +135,32 @@ class WhatsAppCloudClient:
         """
         if not self.waba_id:
             return []
-        url = f"{self._base}/{self.waba_id}/message_templates"
-        with httpx.Client(timeout=self.timeout) as c:
-            r = c.get(
-                url,
-                headers={"Authorization": f"Bearer {self.token}"},
-                params={"limit": 200},
-            )
-        if r.status_code >= 400:
-            raise WhatsAppCloudError(
-                f"list_templates falhou ({r.status_code}): "
-                f"{(r.text or '')[:300]}"
-            )
         out: list = []
-        for t in ((r.json() or {}).get("data") or []):
-            out.append({
-                "name": t.get("name"),
-                "language": t.get("language"),
-                "status": t.get("status"),
-                "category": t.get("category"),
-            })
+        url = f"{self._base}/{self.waba_id}/message_templates"
+        params = {"limit": 200}
+        headers = {"Authorization": f"Bearer {self.token}"}
+        with httpx.Client(timeout=self.timeout) as c:
+            for _ in range(25):  # teto de páginas, segurança
+                r = c.get(url, headers=headers, params=params)
+                if r.status_code >= 400:
+                    raise WhatsAppCloudError(
+                        f"list_templates falhou ({r.status_code}): "
+                        f"{(r.text or '')[:300]}"
+                    )
+                data = r.json() or {}
+                for t in (data.get("data") or []):
+                    out.append({
+                        "name": t.get("name"),
+                        "language": t.get("language"),
+                        "status": t.get("status"),
+                        "category": t.get("category"),
+                    })
+                nxt = ((data.get("paging") or {}).get("next"))
+                if not nxt:
+                    break
+                # A URL 'next' já traz todos os parâmetros (cursor incluído).
+                url = nxt
+                params = None
         return out
 
     def get_template(self, name: str) -> dict:

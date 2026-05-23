@@ -70,7 +70,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         api_key=settings.evolution_api_key,
         instance=settings.evolution_default_instance,
     )
-    pipeline = VoicePipeline(transcriber, responder, evolution, settings)
+    pipeline = VoicePipeline(
+        transcriber, responder, evolution, settings,
+        conversation_store=conversation_store,
+    )
 
     # Cliente Medware (opcional) — usado pelo /health e futura integração de agenda.
     medware = None
@@ -642,6 +645,41 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
         report = broadcast.tick(force=force)
         log.info("[BROADCAST tick force=%s] %s", force, report.as_dict())
+        return JSONResponse(report.as_dict())
+
+    # ================================================================
+    # FOLLOW-UP PÓS-VALOR (retomada quando o paciente some após o valor)
+    # ================================================================
+    # O pipeline marca quando o agente apresenta o valor; este motor
+    # dispara o template de retomada após o tempo de silêncio.
+    # Acionar: POST /followup/tick a cada poucos minutos.
+    from .followup import FollowupEngine
+
+    followup_engine = FollowupEngine(
+        settings=settings,
+        kommo=pipeline.kommo,
+        wa_cloud=wa_cloud,
+        store=conversation_store,
+    )
+
+    @app.get("/followup/status")
+    def followup_status() -> dict:
+        return followup_engine.status()
+
+    @app.post("/followup/tick")
+    async def followup_tick(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        force = str(request.query_params.get("force", "")).lower() in (
+            "1", "true", "yes", "sim",
+        )
+        report = followup_engine.tick(force=force)
+        log.info("[FOLLOWUP tick force=%s] %s", force, report.as_dict())
         return JSONResponse(report.as_dict())
 
     # ================================================================

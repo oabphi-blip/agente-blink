@@ -11,6 +11,7 @@ import threading
 from dataclasses import dataclass
 from typing import Optional
 
+from . import followup
 from .evolution import EvolutionClient, EvolutionError
 from .kommo import KommoClient
 from .responder import Responder
@@ -38,11 +39,14 @@ class VoicePipeline:
         responder: Responder,
         evolution: EvolutionClient,
         settings: Settings,
+        conversation_store=None,
     ):
         self.transcriber = transcriber
         self.responder = responder
         self.evolution = evolution
         self.settings = settings
+        self.store = conversation_store
+        self._redis = getattr(conversation_store, "_redis", None)
         self.kommo: Optional[KommoClient] = (
             KommoClient(subdomain=settings.kommo_subdomain, token=settings.kommo_token)
             if settings.kommo_enabled
@@ -123,6 +127,13 @@ class VoicePipeline:
                 error="entrada vazia",
             )
 
+        # Follow-up pós-valor: o paciente acabou de interagir → limpa
+        # qualquer marcador de follow-up pendente desta conversa.
+        try:
+            followup.clear_pending(self._redis, conversation_key)
+        except Exception:  # noqa: BLE001
+            pass
+
         # 2b) Onboarding orquestrado — busca no Kommo o que já se sabe deste
         # contato. Feito em TODA mensagem (não só na primeira): assim o agente
         # nunca "esquece" os dados do lead no meio da conversa, e enxerga
@@ -194,6 +205,15 @@ class VoicePipeline:
                 model_used=model_used, articles_used=articles_used,
                 error=f"evolution: {e}",
             )
+
+        # 4b) Follow-up pós-valor: se a resposta apresentou o valor da
+        # consulta, arma o marcador — se o paciente sumir, o motor de
+        # follow-up dispara o template de retomada.
+        try:
+            if followup.answer_has_value(answer):
+                followup.set_pending(self._redis, conversation_key)
+        except Exception:  # noqa: BLE001
+            pass
 
         # 5) Auto-preenchimento do Kommo CRM (best-effort, em background)
         # — não bloqueia a resposta do WhatsApp se Kommo demorar/falhar.

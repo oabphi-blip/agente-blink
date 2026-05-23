@@ -85,6 +85,15 @@ class Settings:
     broadcast_hour_end: int = 20
     broadcast_template_name: str = "atendimento_unificado_oficial"
     broadcast_template_lang: str = "pt_BR"
+    # Follow-up pós-valor — dispara um template quando o paciente some
+    # depois de o agente apresentar o valor. Duas travas: enabled e dry_run.
+    followup_enabled: bool = False
+    followup_dry_run: bool = True
+    followup_silence_min: int = 15
+    followup_daily_cap: int = 100
+    followup_template_convenio: str = ""
+    followup_template_particular: str = "1078_sem_resposta_valor_consulta_xs9jqe"
+    followup_template_lang: str = "pt_BR"
 
     # Reconciliação de etapas (Medware × Kommo) — duas travas, igual reativação.
     reconciliation_enabled: bool = False
@@ -212,6 +221,16 @@ class Settings:
             os.getenv("BROADCAST_TEMPLATE_NAME") or "atendimento_unificado_oficial"
         )
         broadcast_template_lang = os.getenv("BROADCAST_TEMPLATE_LANG") or "pt_BR"
+        followup_enabled = _flag("FOLLOWUP_ENABLED", "followup_enabled", False)
+        followup_dry_run = _flag("FOLLOWUP_DRY_RUN", "followup_dry_run", True)
+        followup_silence_min = _intval("FOLLOWUP_SILENCE_MIN", "followup_silence_min", 15)
+        followup_daily_cap = _intval("FOLLOWUP_DAILY_CAP", "followup_daily_cap", 100)
+        followup_template_convenio = os.getenv("FOLLOWUP_TEMPLATE_CONVENIO") or ""
+        followup_template_particular = (
+            os.getenv("FOLLOWUP_TEMPLATE_PARTICULAR")
+            or "1078_sem_resposta_valor_consulta_xs9jqe"
+        )
+        followup_template_lang = os.getenv("FOLLOWUP_TEMPLATE_LANG") or "pt_BR"
 
         # WhatsApp Cloud API (Meta) — canal do número oficial
         wac = cfg.get("whatsapp_cloud", {}) if isinstance(cfg, dict) else {}
@@ -276,6 +295,13 @@ class Settings:
             broadcast_hour_end=broadcast_hour_end,
             broadcast_template_name=broadcast_template_name,
             broadcast_template_lang=broadcast_template_lang,
+            followup_enabled=followup_enabled,
+            followup_dry_run=followup_dry_run,
+            followup_silence_min=followup_silence_min,
+            followup_daily_cap=followup_daily_cap,
+            followup_template_convenio=followup_template_convenio,
+            followup_template_particular=followup_template_particular,
+            followup_template_lang=followup_template_lang,
             whatsapp_cloud_token=whatsapp_cloud_token,
             whatsapp_cloud_phone_number_id=whatsapp_cloud_phone_number_id,
             whatsapp_cloud_waba_id=whatsapp_cloud_waba_id,
