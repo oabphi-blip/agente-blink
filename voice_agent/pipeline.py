@@ -40,12 +40,14 @@ class VoicePipeline:
         evolution: EvolutionClient,
         settings: Settings,
         conversation_store=None,
+        medware=None,
     ):
         self.transcriber = transcriber
         self.responder = responder
         self.evolution = evolution
         self.settings = settings
         self.store = conversation_store
+        self.medware = medware
         self._redis = getattr(conversation_store, "_redis", None)
         self.kommo: Optional[KommoClient] = (
             KommoClient(subdomain=settings.kommo_subdomain, token=settings.kommo_token)
@@ -168,6 +170,27 @@ class VoicePipeline:
                     transcript=user_text, answer="", sent=False,
                     model_used="", articles_used=[],
                 )
+
+        # 2d) Agenda Medware: se o lead já tem médico definido, busca os
+        # horários reais para o agente poder oferecer vagas concretas.
+        if (
+            self.medware is not None
+            and caller_context
+            and (caller_context.get("known") or {}).get("medico")
+        ):
+            try:
+                known = caller_context["known"]
+                slots = self.medware.horarios_para_agente(
+                    known.get("medico"), known.get("unidade"),
+                )
+                if slots:
+                    caller_context["agenda"] = slots
+                    log.info(
+                        "Medware: %d horários para %s",
+                        len(slots), known.get("medico"),
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning("Medware horários falhou: %s", e)
 
         # 3) Resposta com Claude
         try:

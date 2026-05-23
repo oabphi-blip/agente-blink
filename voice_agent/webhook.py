@@ -83,6 +83,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             identificacao=settings.medware_user,
             senha=settings.medware_password,
         )
+    # Liga o Medware ao pipeline — o agente consulta a agenda real e
+    # oferece horários concretos quando o lead já tem médico definido.
+    pipeline.medware = medware
 
     # Cliente WhatsApp Cloud API (Meta) — canal do número OFICIAL (8133).
     # Só é criado quando as credenciais estiverem nas variáveis de ambiente.

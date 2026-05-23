@@ -23,13 +23,41 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 
 log = logging.getLogger(__name__)
 
 MEDWARE_BASE = "https://medware.blinkoftalmologia.com.br/api"
+_TZ = ZoneInfo("America/Sao_Paulo")
+_DIAS_SEMANA = [
+    "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+    "sexta-feira", "sábado", "domingo",
+]
+
+# Mapa médico/unidade → códigos do Medware. Por ora só os dois confirmados;
+# os demais médicos entram quando os códigos forem validados.
+MEDICO_CODES = {
+    "dra. karla delalibera": 12080, "dra karla": 12080,
+    "karla delalibera": 12080, "karla delalíbera": 12080,
+    "dra karla delalíbera": 12080, "dra. karla delalíbera": 12080,
+    "dr. fabrício freitas": 12081, "dr fabricio": 12081,
+    "fabricio freitas": 12081, "fabrício freitas": 12081,
+    "dr fabrício": 12081, "dr. fabricio": 12081,
+}
+UNIDADE_CODES = {
+    "asa norte": 5,
+    "águas claras": 3, "aguas claras": 3,
+}
+
+
+def _code_lookup(table: dict, name: Optional[str]) -> int:
+    if not name:
+        return 0
+    return table.get(str(name).strip().lower(), 0)
 
 
 @dataclass
@@ -147,6 +175,46 @@ class MedwareClient:
         if isinstance(data, list):
             return data
         return []
+
+    def horarios_para_agente(
+        self, medico_nome: str, unidade_nome: Optional[str] = None,
+        dias: int = 21,
+    ) -> list[dict]:
+        """Vagas livres reais para o agente OFERECER ao paciente.
+
+        Mapeia o nome do médico/unidade para os códigos do Medware,
+        consulta as vagas dos próximos `dias` e devolve uma lista limpa:
+          {data_iso, data_br, dia_semana, hora}
+        Devolve [] se o médico não estiver mapeado ou não houver vaga.
+        """
+        cod_medico = _code_lookup(MEDICO_CODES, medico_nome)
+        if not cod_medico:
+            return []
+        cod_unidade = _code_lookup(UNIDADE_CODES, unidade_nome)
+        hoje = datetime.now(_TZ)
+        ini = (hoje + timedelta(days=1)).strftime("%d/%m/%Y")
+        fim = (hoje + timedelta(days=dias)).strftime("%d/%m/%Y")
+        raw = self.listar_horarios_livres(
+            data_inicio=ini, data_fim=fim,
+            cod_medico=cod_medico, cod_unidade=cod_unidade,
+        )
+        out: list[dict] = []
+        for s in raw:
+            d = str(s.get("data") or "")[:10]   # YYYY-MM-DD
+            h = str(s.get("horario") or "")[:5]  # HH:MM
+            if not d or not h:
+                continue
+            try:
+                dt = datetime.strptime(d, "%Y-%m-%d")
+            except ValueError:
+                continue
+            out.append({
+                "data_iso": d,
+                "data_br": dt.strftime("%d/%m"),
+                "dia_semana": _DIAS_SEMANA[dt.weekday()],
+                "hora": h,
+            })
+        return out
 
 
 def _jwt_exp(token: Optional[str]) -> Optional[float]:

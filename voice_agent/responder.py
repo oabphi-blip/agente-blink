@@ -203,6 +203,40 @@ SONNET_TRIGGERS = {
 }
 
 
+def _agenda_block(ctx: Optional[dict]) -> str:
+    """Bloco de HORÁRIOS REAIS — vagas livres consultadas no Medware."""
+    agenda = (ctx or {}).get("agenda") or []
+    if not agenda:
+        return ""
+    por_dia: dict = {}
+    ordem: list = []
+    for s in agenda:
+        key = (s.get("dia_semana", ""), s.get("data_br", ""))
+        if key not in por_dia:
+            por_dia[key] = []
+            ordem.append(key)
+        por_dia[key].append(s.get("hora", ""))
+    linhas = []
+    for (dia, dbr) in ordem[:8]:
+        horas = ", ".join([h for h in por_dia[(dia, dbr)] if h])
+        linhas.append(f"- {dia} {dbr}: {horas}")
+    return (
+        "\n\n----------------------------------------------------------------"
+        "\nAGENDA REAL — HORÁRIOS DISPONÍVEIS (consultados agora no Medware)"
+        "\n----------------------------------------------------------------"
+        "\nOs horários abaixo são vagas LIVRES de verdade na agenda do médico."
+        "\nQuando o paciente já tiver dado a preferência de dia/turno, OFEREÇA"
+        "\na ele 2 ou 3 destes horários concretos que combinem com a"
+        "\npreferência — diga o dia e a hora com clareza. NUNCA invente nem"
+        "\nprometa um horário fora desta lista. Esta seção TEM PRECEDÊNCIA: se"
+        "\nhá horários aqui, o agente OFERECE horário (não apenas coleta a"
+        "\npreferência). Depois que o paciente escolher, confirme os dados e"
+        "\ninforme que a recepção finaliza o agendamento."
+        f"\n{chr(10).join(linhas)}"
+        "\n----------------------------------------------------------------"
+    )
+
+
 def _caller_context_block(ctx: Optional[dict]) -> str:
     """Bloco de ONBOARDING — o que o CRM já sabe sobre quem está conversando.
 
@@ -217,7 +251,7 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
             "\nNão há registro anterior deste contato no CRM. Trate como primeiro"
             "\ncontato: boas-vindas padrão e triagem normal."
             "\n================================================================"
-        )
+        ) + _agenda_block(ctx)
     known = ctx.get("known") or {}
     nome = ctx.get("name")
     etapa = ctx.get("etapa")
@@ -266,7 +300,7 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
         '("Você quer seguir com [convênio/médico] como da outra vez?"), mas'
         "\nnunca recolha de novo o que já está aqui."
         "\n================================================================"
-    )
+    ) + _agenda_block(ctx)
 
 
 def _route_model(user_text: str, history_len: int, sonnet: str, haiku: str) -> str:
