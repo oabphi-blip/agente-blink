@@ -12,7 +12,7 @@ SEGURANÇA — disparo desligado por padrão. São duas travas:
   E reactivation_dry_run=False ao mesmo tempo.
 
 RITMO (tudo configurável em settings):
-  - só horário comercial (seg–sex, faixa de horas BRT)
+  - só horário comercial (seg–sáb, faixa de horas BRT)
   - teto diário de disparos
   - intervalo mínimo entre disparos
 
@@ -251,7 +251,7 @@ class ReactivationEngine:
             "daily_count": self._daily_count(),
             "min_interval_min": s.reactivation_min_interval_min,
             "business_hours": (
-                f"{s.reactivation_hour_start}h-{s.reactivation_hour_end}h seg-sex BRT"
+                f"{s.reactivation_hour_start}h-{s.reactivation_hour_end}h seg-sáb BRT"
             ),
             "pipeline_id": s.reactivation_pipeline_id,
             "cold_status_ids": list(s.reactivation_cold_status_ids),
@@ -278,8 +278,8 @@ class ReactivationEngine:
 
         now = datetime.now(_TZ)
         if not force:
-            if now.weekday() > 4:
-                return ReactivationReport(False, "skipped", "fim de semana — fora do horário")
+            if now.weekday() > 5:
+                return ReactivationReport(False, "skipped", "domingo — fora do horário")
             if not (s.reactivation_hour_start <= now.hour < s.reactivation_hour_end):
                 return ReactivationReport(False, "skipped", "fora do horário comercial")
 
