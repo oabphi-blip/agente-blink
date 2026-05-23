@@ -102,6 +102,16 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         ),
     )
 
+    # Arquivos estáticos — imagens de cabeçalho de templates do WhatsApp etc.
+    # Coloque o arquivo em voice_agent/static/ e ele fica público em /static.
+    # Ex.: voice_agent/static/2020_feliz.jpg
+    #      → https://blink-agent.6prkfn.easypanel.host/static/2020_feliz.jpg
+    import os as _os
+    from fastapi.staticfiles import StaticFiles
+    _static_dir = _os.path.join(_os.path.dirname(__file__), "static")
+    _os.makedirs(_static_dir, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
     @app.get("/health")
     def health() -> dict:
         # Redis: tenta um round-trip rápido pelo store
@@ -659,6 +669,46 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return JSONResponse({"templates": wa_cloud.list_templates()})
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": str(e)[:300]})
+
+    @app.get("/whatsapp/template-image")
+    def whatsapp_template_image(name: str) -> JSONResponse:
+        """Extrai a imagem de cabeçalho de um template aprovado.
+
+        Baixa a imagem-amostra direto da Meta, salva em /static e devolve
+        a URL pública + o conteúdo em base64 (para arquivar no repo).
+        Uso: GET /whatsapp/template-image?name=2020_feliz_xxxxxx
+        """
+        if wa_cloud is None:
+            return JSONResponse({"error": "WhatsApp Cloud não configurado"})
+        try:
+            img_url = wa_cloud.get_template_header_image_url(name)
+            if not img_url:
+                return JSONResponse({
+                    "ok": False,
+                    "error": f"template '{name}' não tem cabeçalho de imagem",
+                })
+            content, ctype = wa_cloud.fetch_url_bytes(img_url)
+            ext = "jpg"
+            if "png" in ctype:
+                ext = "png"
+            elif "webp" in ctype:
+                ext = "webp"
+            fname = f"{name}.{ext}"
+            fpath = _os.path.join(_static_dir, fname)
+            with open(fpath, "wb") as fh:
+                fh.write(content)
+            import base64 as _b64
+            return JSONResponse({
+                "ok": True,
+                "name": name,
+                "content_type": ctype,
+                "size": len(content),
+                "saved_as": fname,
+                "public_url": f"/static/{fname}",
+                "base64": _b64.b64encode(content).decode("ascii"),
+            })
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"ok": False, "error": str(e)[:300]})
 
     @app.post("/whatsapp/send-template")
     async def whatsapp_send_template(request: Request) -> JSONResponse:

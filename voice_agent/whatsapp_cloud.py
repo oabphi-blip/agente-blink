@@ -157,6 +157,61 @@ class WhatsAppCloudClient:
             })
         return out
 
+    def get_template(self, name: str) -> dict:
+        """Busca a definição COMPLETA de um template pelo nome.
+
+        Retorna o objeto do template (com 'components'), ou {} se não achar.
+        Precisa do waba_id configurado.
+        """
+        if not self.waba_id:
+            return {}
+        url = f"{self._base}/{self.waba_id}/message_templates"
+        with httpx.Client(timeout=self.timeout) as c:
+            r = c.get(
+                url,
+                headers={"Authorization": f"Bearer {self.token}"},
+                params={"name": name, "limit": 50},
+            )
+        if r.status_code >= 400:
+            raise WhatsAppCloudError(
+                f"get_template falhou ({r.status_code}): {(r.text or '')[:300]}"
+            )
+        data = (r.json() or {}).get("data") or []
+        for t in data:
+            if t.get("name") == name:
+                return t
+        return data[0] if data else {}
+
+    def get_template_header_image_url(self, name: str) -> str:
+        """Devolve a URL da imagem-amostra do cabeçalho de um template.
+
+        Procura o componente HEADER com format IMAGE e lê o
+        example.header_handle. Devolve '' se o template não tiver
+        cabeçalho de imagem.
+        """
+        tpl = self.get_template(name)
+        for comp in (tpl.get("components") or []):
+            if (comp.get("type") or "").upper() != "HEADER":
+                continue
+            if (comp.get("format") or "").upper() != "IMAGE":
+                continue
+            example = comp.get("example") or {}
+            handles = example.get("header_handle") or []
+            if handles:
+                return handles[0]
+        return ""
+
+    def fetch_url_bytes(self, url: str) -> tuple[bytes, str]:
+        """Baixa os bytes de uma URL pública (ex.: imagem-amostra da Meta)."""
+        with httpx.Client(timeout=self.timeout, follow_redirects=True) as c:
+            r = c.get(url)
+        if r.status_code >= 400:
+            raise WhatsAppCloudError(
+                f"download da URL falhou ({r.status_code})"
+            )
+        ctype = r.headers.get("content-type") or "application/octet-stream"
+        return r.content, ctype
+
     # --------------------------------------------------------------- mídia
 
     def get_media_bytes(self, media_id: str) -> tuple[bytes, str]:
