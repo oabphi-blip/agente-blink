@@ -583,6 +583,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         kommo=pipeline.kommo,
         evolution=evolution,
         store=conversation_store,
+        wa_cloud=wa_cloud,
     )
 
     @app.get("/reactivation/status")

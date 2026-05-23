@@ -69,6 +69,11 @@ class Settings:
         106184983,  # 5.1-NO-SHOW (ATIVAR)
     )
     reactivation_target_status_id: int = 102560495  # 2-AGENDAR
+    # Canal da reativação: se reactivation_template_name estiver preenchido
+    # E o WhatsApp Cloud estiver ativo, a reativação sai via TEMPLATE pelo
+    # 8133 (oficial). Sem template configurado, cai no Evolution (0710).
+    reactivation_template_name: str = ""
+    reactivation_template_lang: str = "pt_BR"
     slack_webhook_url: str = ""
 
     # Reconciliação de etapas (Medware × Kommo) — duas travas, igual reativação.
@@ -181,6 +186,12 @@ class Settings:
         reactivation_pipeline_id = _intval("REACTIVATION_PIPELINE_ID", "pipeline_id", 8601819)
         reactivation_target_status = _intval("REACTIVATION_TARGET_STATUS_ID", "target_status_id", 102560495)
         slack_webhook_url = os.getenv("SLACK_WEBHOOK_URL") or rc.get("slack_webhook_url", "") or ""
+        reactivation_template_name = (
+            os.getenv("REACTIVATION_TEMPLATE_NAME") or rc.get("template_name", "") or ""
+        )
+        reactivation_template_lang = (
+            os.getenv("REACTIVATION_TEMPLATE_LANG") or rc.get("template_lang", "pt_BR") or "pt_BR"
+        )
 
         # WhatsApp Cloud API (Meta) — canal do número oficial
         wac = cfg.get("whatsapp_cloud", {}) if isinstance(cfg, dict) else {}
@@ -234,6 +245,8 @@ class Settings:
             reactivation_pipeline_id=reactivation_pipeline_id,
             reactivation_cold_status_ids=cold_ids,
             reactivation_target_status_id=reactivation_target_status,
+            reactivation_template_name=reactivation_template_name,
+            reactivation_template_lang=reactivation_template_lang,
             slack_webhook_url=slack_webhook_url,
             whatsapp_cloud_token=whatsapp_cloud_token,
             whatsapp_cloud_phone_number_id=whatsapp_cloud_phone_number_id,

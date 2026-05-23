@@ -146,11 +146,12 @@ class ReactivationReport:
 class ReactivationEngine:
     """Motor de reativação. Um `tick()` processa no máximo um lead."""
 
-    def __init__(self, settings, kommo, evolution, store):
+    def __init__(self, settings, kommo, evolution, store, wa_cloud=None):
         self.s = settings
         self.kommo = kommo
         self.evolution = evolution
         self.store = store
+        self.wa_cloud = wa_cloud
         self._redis = getattr(store, "_redis", None)
         # Fallback em memória (não sobrevive a restart — Redis é o correto)
         self._mem_done: set[int] = set()
@@ -242,11 +243,21 @@ class ReactivationEngine:
 
     # ------------------------------------------------- API pública
 
+    def _use_cloud(self) -> bool:
+        """True quando a reativação deve sair via TEMPLATE pelo 8133.
+
+        Exige um template configurado E o cliente WhatsApp Cloud ativo.
+        Sem isso, o envio cai no Evolution (0710) — comportamento legado.
+        """
+        return bool(self.s.reactivation_template_name) and self.wa_cloud is not None
+
     def status(self) -> dict:
         s = self.s
         return {
             "enabled": s.reactivation_enabled,
             "dry_run": s.reactivation_dry_run,
+            "channel": "whatsapp_cloud_8133" if self._use_cloud() else "evolution_0710",
+            "template_name": s.reactivation_template_name or None,
             "daily_cap": s.reactivation_daily_cap,
             "daily_count": self._daily_count(),
             "min_interval_min": s.reactivation_min_interval_min,
@@ -355,8 +366,10 @@ class ReactivationEngine:
             self._incr_daily()
             self._set_last_send(time.time())
             log.info(
-                "[REATIVACAO dry-run] lead %s (%s) — ENVIARIA: %s",
-                lead_id, name or "s/ nome", message,
+                "[REATIVACAO dry-run] lead %s (%s) — canal %s — ENVIARIA: %s",
+                lead_id, name or "s/ nome",
+                "8133 (template)" if self._use_cloud() else "0710 (evolution)",
+                message,
             )
             self._slack(
                 f"[dry-run] Reativação simulada — lead {lead_id} "
@@ -369,11 +382,25 @@ class ReactivationEngine:
             )
 
         # ---- LIVE: envia de verdade
+        # Canal preferencial: TEMPLATE pelo 8133 (oficial). A reativação
+        # acontece FORA da janela de 24h, então só um template aprovado
+        # pode iniciar a conversa. O template precisa ter UMA variável de
+        # corpo {{1}} — preenchida com o primeiro nome do lead.
+        # Fallback (sem template configurado): Evolution / 0710 (legado).
+        channel = "8133 (template)" if self._use_cloud() else "0710 (evolution)"
         try:
-            self.evolution.send_text(number=phone, text=message)
+            if self._use_cloud():
+                self.wa_cloud.send_template(
+                    to=phone,
+                    name=self.s.reactivation_template_name,
+                    language=self.s.reactivation_template_lang,
+                    body_params=[_first_name(name) or "paciente"],
+                )
+            else:
+                self.evolution.send_text(number=phone, text=message)
         except Exception as e:  # noqa: BLE001
             return ReactivationReport(
-                True, "skipped", f"falha no envio: {e}",
+                True, "skipped", f"falha no envio [{channel}]: {e}",
                 lead_id=lead_id, lead_name=name, daily_count=count,
             )
 
