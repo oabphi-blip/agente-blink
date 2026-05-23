@@ -20,6 +20,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from . import followup
 from .evolution import EvolutionClient
 from .pipeline import VoicePipeline
 from .responder import Responder
@@ -469,6 +470,26 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     "WA Cloud: agente em silêncio (%s) para %s", motivo, phone,
                 )
                 return
+        # Follow-up pós-valor: o paciente interagiu → limpa o marcador.
+        try:
+            followup.clear_pending(pipeline._redis, convo_key)
+        except Exception:  # noqa: BLE001
+            pass
+        # Agenda Medware: injeta horários reais se o lead já tem médico.
+        if (
+            pipeline.medware is not None
+            and caller_context
+            and (caller_context.get("known") or {}).get("medico")
+        ):
+            try:
+                known = caller_context["known"]
+                slots = pipeline.medware.horarios_para_agente(
+                    known.get("medico"), known.get("unidade"),
+                )
+                if slots:
+                    caller_context["agenda"] = slots
+            except Exception as e:  # noqa: BLE001
+                log.warning("WA Cloud Medware horários falhou: %s", e)
         try:
             result = responder.reply(
                 convo_key, user_text, caller_context=caller_context
@@ -487,12 +508,18 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception as e:  # noqa: BLE001
             log.warning("WA Cloud envio falhou: %s", e)
             return
-        # Sincroniza o lead no Kommo (best-effort, em background):
-        # grava a nota da conversa + atualiza os campos extraídos.
+        # Follow-up pós-valor: se a resposta apresentou o valor, arma o marcador.
+        try:
+            if followup.answer_has_value(answer):
+                followup.set_pending(pipeline._redis, convo_key)
+        except Exception:  # noqa: BLE001
+            pass
+        # Sincroniza o lead no Kommo (best-effort, em background): grava a
+        # nota, atualiza os campos extraídos e carimba o canal 8133.
         if pipeline.kommo is not None and phone:
             threading.Thread(
                 target=pipeline._sync_kommo_safely,
-                args=(phone, convo_key, user_text, answer),
+                args=(phone, convo_key, user_text, answer, "81331005"),
                 daemon=True,
             ).start()
 

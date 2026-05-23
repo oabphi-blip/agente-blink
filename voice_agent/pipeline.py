@@ -243,7 +243,8 @@ class VoicePipeline:
         if self.kommo is not None and reply_to_number:
             threading.Thread(
                 target=self._sync_kommo_safely,
-                args=(reply_to_number, conversation_key, user_text, answer),
+                args=(reply_to_number, conversation_key, user_text, answer,
+                      "96630710"),
                 daemon=True,
             ).start()
 
@@ -258,6 +259,7 @@ class VoicePipeline:
         conversation_key: str,
         user_text: str | None = None,
         answer: str | None = None,
+        channel: str = "",
     ) -> None:
         """Sincroniza o lead do Kommo: grava a nota da conversa e atualiza
         os campos extraídos.
@@ -281,7 +283,10 @@ class VoicePipeline:
                 except Exception as e:  # noqa: BLE001
                     log.warning("Kommo nota falhou (%s): %s", phone, e)
             # Campos extraídos da conversa.
-            fields = self.responder.extract_lead_fields(conversation_key)
+            fields = self.responder.extract_lead_fields(conversation_key) or {}
+            # Carimba o canal de entrada (8133 ou 0710) no campo do lead.
+            if channel:
+                fields["numero_telefone"] = channel
             if fields:
                 self.kommo.update_lead_fields(lead_id, fields)
                 # Lead perdido por convênio não credenciado → fecha o card

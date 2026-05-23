@@ -145,6 +145,13 @@ FIELD_MOTIVOS_PERDA = (1260434, {
     "Só Convênio": 926086, "Só com Convênio": 926086,
 })
 
+# "NUMERO TELEFONE" (multiselect) — canal por onde o lead fala com a
+# clínica. Carimbado pelo agente conforme a porta de entrada da mensagem.
+FIELD_NUMERO_TELEFONE = (1260633, {
+    "81331005": 926673, "8133": 926673, "8133-1005": 926673,
+    "96630710": 926675, "0710": 926675, "9663-0710": 926675,
+})
+
 # Status "Closed - lost" (Venda perdida) — id reservado, vale em qualquer funil.
 STATUS_CLOSED_LOST = 143
 
@@ -335,6 +342,8 @@ class KommoClient:
         add_select(FIELD_NAO_ACEITO_CONVENIO, fields.get("nao_aceito_convenio"))
         # MOTIVOS PERDA — motivo do lead perdido (ex.: "Somente Convênio").
         add_select(FIELD_MOTIVOS_PERDA, fields.get("motivo_perda"))
+        # NUMERO TELEFONE — canal de entrada do lead (8133 ou 0710).
+        add_select(FIELD_NUMERO_TELEFONE, fields.get("numero_telefone"))
 
         if not cfs:
             return True
