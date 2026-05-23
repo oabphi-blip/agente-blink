@@ -4,7 +4,7 @@
 
 Esta lista é **FECHADA E TAXATIVA**. Somente os convênios expressamente listados abaixo (com suas respectivas variações de nomenclatura) possuem atendimento na clínica.
 
-O agente está programado com **"Tolerância Zero" para presunção de cobertura**. Caso o paciente informe um plano que não se encontre, **letra por letra**, nesta lista oficial, o agente deve informar taxativamente que não atendemos a rede credenciada solicitada, acionando o script de transição para atendimento sem convênio sem convênio (ver artigo 14).
+O agente está programado com **"Tolerância Zero" para presunção de cobertura**. Caso o paciente informe um plano que não se encontre nesta lista oficial — a comparação é feita de forma flexível, **ignorando maiúsculas/minúsculas, acentos e espaços** (ex.: "Pró-Saúde", "Pro Saude" e "ProSaúde" são o MESMO convênio) — o agente deve informar taxativamente que não atendemos a rede credenciada solicitada, acionando o script de transição para atendimento sem convênio (ver artigo 14).
 
 A política é **única para toda a clínica e para todos os profissionais**. Sem diferenciação por médico. Sem exceção.
 
@@ -68,7 +68,7 @@ Ordem alfabética. Cada item lista o nome OFICIAL e todas as variações que o p
 - **Plan Assiste-MPF** — também: MPU, MPF, MPT, MPDFT
 - **Petrobrás** — também: PETROBRAS, Petrobras
 - **Plas/JMU** — também: STM, Plas JMU
-- **ProSaúde / Câmara dos Deputados** — também: Pro Saúde, Pro-Saúde, Câmara dos Deputados, ProSaude
+- **ProSaúde / Câmara dos Deputados** — também: Pro Saúde, Pró-Saúde, Pró Saúde, Pro-Saúde, Pró-Saude, Câmara dos Deputados, Câmara, Pró-Saúde da Câmara, ProSaude
 - **Proasa** — também: PROASA
 - **Pro Ser STJ** — também: ProSer, Proser, Pro-Ser, STJ, STJ Pro Ser, STJ Proser, STJ Pro-Ser, Proser STJ
 - **Pro-social TRF** — também: TRF
@@ -81,12 +81,18 @@ Ordem alfabética. Cada item lista o nome OFICIAL e todas as variações que o p
 - **STM Plas** — também: STM, Jmu, STM-Plas
 
 ### T
-- **TJ DFT** — também: TJ, TJDFT, TJ-DFT
+- **TJ DFT** — também: TJ, TJDFT, TJ-DFT, TJDFT Pró-Saúde, Pró-Saúde do TJDFT, Pró-Saúde TJDFT, Pró-Saúde do Tribunal, Tribunal de Justiça do DF
 - **TRE Saúde** — também: TRE SAÚDE, TRE
 - **TRT Saúde** — também: TRT SAÚDE, TRT
 - **TST** — também: tst
 
 ---
+
+## ⚠️ Atenção — "Pró-Saúde" é nome compartilhado
+
+"Pró-Saúde" é o nome do plano usado por **DUAS instituições diferentes**: a **Câmara dos Deputados** e o **TJDFT**. **As duas são ACEITAS.**
+
+Portanto: se o paciente disser "Pró-Saúde" (de qualquer forma — com ou sem acento, com ou sem hífen), o convênio é **ACEITO**. Nunca negue "Pró-Saúde". Se quiser, confirme de qual instituição é (Câmara ou TJDFT) para o registro — mas em nenhuma hipótese diga que não atende.
 
 ## 📋 Fluxo operacional padrão
 
