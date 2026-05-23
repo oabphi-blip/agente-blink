@@ -500,6 +500,16 @@ class Responder:
                         "enum": ["Agendar Encaixe", "Agendar Domiciliar"],
                         "description": "Preencher SOMENTE se o atendimento virou um encaixe (paciente precisa de horário fora da grade normal / consulta já existente passou e quer novo atendimento rápido) ou consulta domiciliar. Caso contrário, NÃO incluir este campo.",
                     },
+                    "nao_aceito_convenio": {
+                        "type": "string",
+                        "enum": [
+                            "Afeb", "Amil", "Assefaz", "Bradesco", "BRB",
+                            "Cassi", "Fusex", "GEAP", "HAP VIDA", "Inas GDF",
+                            "Notre Dame", "PM", "Porto Seguro", "SUS",
+                            "Sul América", "Unimed", "Outro",
+                        ],
+                        "description": "Preencher SOMENTE quando o paciente quis usar um convênio que a clínica NÃO credencia/aceita e, por causa disso, hesitou ou não seguiu com o agendamento. Informe qual convênio o paciente queria. Use 'Outro' se o convênio citado não estiver na lista. Se o paciente não citou convênio não aceito, NÃO incluir este campo.",
+                    },
                 },
             },
         }

@@ -116,6 +116,29 @@ FIELD_ACOES = (1259312, {
     "Agendar Domiciliar": 925336, "Domiciliar": 925336,
 })
 
+# "Ñ ACEITO CONVÊNIO" — convênio que o paciente queria usar mas a clínica
+# NÃO credencia. Preenchido quando o lead insiste no convênio não aceito.
+FIELD_NAO_ACEITO_CONVENIO = (1175268, {
+    "Afeb": 897198,
+    "Amil": 843464,
+    "Assefaz": 843504,
+    "Bradesco": 902366, "Bradesco Saúde": 902366,
+    "Bradesco Top Nacional": 902366, "Bradesco Saude": 902366,
+    "BRB": 902824, "BRB Saúde": 902824, "BRB Saude": 902824,
+    "Cassi": 841860,
+    "Fusex": 919143,
+    "GEAP": 898162,
+    "HAP VIDA": 898284, "Hapvida": 898284, "Hap Vida": 898284, "HapVida": 898284,
+    "Inas GDF": 923352, "Inas": 923352,
+    "Notre Dame": 921367, "NotreDame": 921367, "Notredame": 921367,
+    "PM": 921427, "Polícia Militar": 921427, "Policia Militar": 921427,
+    "Porto Seguro": 895650,
+    "SUS": 921395,
+    "Sul América": 843502, "Sul America": 843502, "SulAmérica": 843502,
+    "Unimed": 898838,
+    "Outro": 926611,
+})
+
 # Textareas / textos livres
 FIELD_NOME_PACIENTE_1 = 1255757
 FIELD_MOTIVO_PACIENTE_1 = 1255727
@@ -298,6 +321,9 @@ class KommoClient:
         add_select(FIELD_NUMERO_PACIENTES, fields.get("num_pacientes"))
         # AÇÕES — só é gravado quando o atendimento virou encaixe/domiciliar.
         add_select(FIELD_ACOES, fields.get("acoes"))
+        # Ñ ACEITO CONVÊNIO — convênio que o paciente queria e a clínica
+        # não credencia (preenchido quando o lead insiste nesse convênio).
+        add_select(FIELD_NAO_ACEITO_CONVENIO, fields.get("nao_aceito_convenio"))
 
         if not cfs:
             return True
