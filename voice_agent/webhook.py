@@ -760,6 +760,26 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         threading.Thread(target=_run, daemon=True).start()
         return JSONResponse({"started": True, "dry_run": dry_run})
 
+    @app.get("/reconciliation/run")
+    def reconciliation_run_get() -> JSONResponse:
+        """Atalho SEGURO por GET — aciona a reconciliação sempre em
+        DRY-RUN (só monta o relatório, não altera nenhuma etapa).
+        O resultado fica em GET /reconciliation/status quando terminar.
+        Para aplicar de verdade, use POST /reconciliation/run?dry_run=false.
+        """
+        if reconciliation.running:
+            return JSONResponse({"started": False, "reason": "já em execução"})
+
+        def _run_dry() -> None:
+            try:
+                rep = reconciliation.run(dry_run=True)
+                log.info("[RECONCILIACAO dry-run] %s", rep.as_dict())
+            except Exception as e:  # noqa: BLE001
+                log.exception("Reconciliação dry-run falhou: %s", e)
+
+        threading.Thread(target=_run_dry, daemon=True).start()
+        return JSONResponse({"started": True, "dry_run": True})
+
     # ================================================================
     # TEMPLATES DO WHATSAPP OFICIAL (8133)
     # ================================================================
