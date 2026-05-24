@@ -377,6 +377,55 @@ class KommoClient:
             log.warning("Kommo update error: %s", e)
         return False
 
+    def update_leads_field_batch(
+        self, field_def: tuple[int, dict], pairs: list[tuple[int, str]],
+    ) -> dict:
+        """Atualiza UM campo select em vários leads de uma vez (PATCH em lote).
+
+        O Kommo aceita PATCH /leads com um array de leads (até 250 por
+        requisição) — muito mais rápido que um PATCH por lead.
+
+        `pairs` = lista de (lead_id, valor_textual). Retorna
+        {ok, fail} com a contagem de leads atualizados.
+        """
+        field_id, table = field_def
+        ok = 0
+        fail = 0
+        chunk = 250
+        for i in range(0, len(pairs), chunk):
+            bloco = pairs[i:i + chunk]
+            body: list[dict] = []
+            for lead_id, val in bloco:
+                enum_id = _pick_enum(table, val)
+                if enum_id is None:
+                    fail += 1
+                    continue
+                body.append({
+                    "id": int(lead_id),
+                    "custom_fields_values": [
+                        {"field_id": field_id, "values": [{"enum_id": enum_id}]},
+                    ],
+                })
+            if not body:
+                continue
+            try:
+                with httpx.Client(timeout=self.timeout) as c:
+                    r = c.patch(
+                        f"{self._base}/leads", json=body, headers=self._headers,
+                    )
+                if r.status_code // 100 == 2:
+                    ok += len(body)
+                else:
+                    fail += len(body)
+                    log.warning(
+                        "Kommo batch update falhou: HTTP %d — %s",
+                        r.status_code, (r.text or "")[:300],
+                    )
+            except Exception as e:  # noqa: BLE001
+                fail += len(body)
+                log.warning("Kommo batch update error: %s", e)
+        return {"ok": ok, "fail": fail}
+
     # ----------------------- nota (registro da conversa)
 
     def add_note(self, lead_id: int, text: str) -> bool:
