@@ -269,7 +269,12 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
         linhas.append(f"- Etapa atual no funil: {etapa}")
     dados = "\n".join(linhas) if linhas else "- (lead existe, mas sem campos preenchidos ainda)"
     saudacao = (
-        f'Cumprimente pelo nome ("Olá, {nome}!") de forma calorosa.'
+        f'O CONTATO que está escrevendo se chama {nome}. Cumprimente '
+        f'SEMPRE por esse nome — "Olá, {nome}!" — de forma calorosa. '
+        f'ATENÇÃO: {nome} é o nome de QUEM ESCREVE; o paciente pode ser '
+        f'outra pessoa (ex.: a mãe escreve, a consulta é do filho). '
+        f'NUNCA cumprimente nem se dirija à pessoa usando o nome do '
+        f'paciente — para isso, use só o nome do contato ({nome}).'
         if nome else "Há um lead existente para este contato."
     )
     alerta = ""

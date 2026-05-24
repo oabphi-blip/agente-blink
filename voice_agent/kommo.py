@@ -606,8 +606,28 @@ class KommoClient:
                     v = vals[0].get("value")
                     if v:
                         out["known"][label] = v
-                        if label == "nome_paciente":
-                            out["name"] = v
+
+            # 'name' = nome do CONTATO (quem escreve no WhatsApp) — é esse
+            # que o agente usa para CUMPRIMENTAR. NUNCA usar o nome do
+            # paciente aqui: o paciente pode ser outra pessoa (ex.: a mãe
+            # escreve, a consulta é do filho). O nome do paciente fica
+            # separado, em known['nome_paciente'].
+            contatos = (data.get("_embedded") or {}).get("contacts") or []
+            main = next(
+                (ct for ct in contatos if ct.get("is_main")),
+                contatos[0] if contatos else None,
+            )
+            cid = (main or {}).get("id")
+            if cid:
+                with httpx.Client(timeout=self.timeout) as cc:
+                    rc = cc.get(
+                        f"{self._base}/contacts/{cid}",
+                        headers=self._headers,
+                    )
+                if rc.status_code == 200:
+                    cname = (rc.json() or {}).get("name")
+                    if cname and str(cname).strip():
+                        out["name"] = str(cname).strip()
         except Exception as e:  # noqa: BLE001
             log.warning("Kommo get_caller_context_by_lead erro: %s", e)
         return out
