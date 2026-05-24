@@ -900,18 +900,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     @app.get("/pagamento/link")
     def pagamento_link(request: Request) -> JSONResponse:
-        if settings.webhook_secret:
-            got = (
-                request.headers.get("x-webhook-secret")
-                or request.query_params.get("secret")
-            )
-            if got != settings.webhook_secret:
-                raise HTTPException(401, "Unauthorized")
+        # Sempre responde 200 com {ok: bool} — facilita diagnóstico.
         if asaas is None or not asaas.configured:
             return JSONResponse(
                 {"ok": False,
                  "erro": "Asaas não configurado (ASAAS_ENABLED / ASAAS_API_KEY)."},
-                status_code=400,
             )
         qp = request.query_params
         try:
@@ -919,9 +912,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except (TypeError, ValueError):
             lead_id = 0
         if not lead_id:
-            return JSONResponse(
-                {"ok": False, "erro": "informe ?lead_id="}, status_code=400,
-            )
+            return JSONResponse({"ok": False, "erro": "informe ?lead_id="})
         metodo = (qp.get("metodo") or "cartao").lower()
         try:
             parcelas = int(qp.get("parcelas") or 3)
@@ -954,9 +945,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             valor = valor_consulta(medico, metodo, parcelas)
         if not valor or valor <= 0:
             return JSONResponse(
-                {"ok": False,
+                {"ok": False, "medico": medico,
                  "erro": "valor não determinado para este médico — informe ?valor="},
-                status_code=400,
             )
 
         descricao = "Consulta de avaliação oftalmológica"
@@ -968,8 +958,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
         if not res or not res.get("url"):
             return JSONResponse(
-                {"ok": False, "erro": "falha ao criar o link no Asaas"},
-                status_code=502,
+                {"ok": False, "valor": valor,
+                 "erro": "falha ao criar o link no Asaas (ver logs)"},
             )
         url = res["url"]
         valor_fmt = f"{valor:.2f}".replace(".", ",")
