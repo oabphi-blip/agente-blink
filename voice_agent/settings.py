@@ -99,6 +99,10 @@ class Settings:
     reconciliation_enabled: bool = False
     reconciliation_dry_run: bool = True
 
+    # Carimbo do campo "ATIVADO IA?" no Kommo — duas travas, igual reativação.
+    ia_status_enabled: bool = False
+    ia_status_dry_run: bool = True
+
     # Convivência humano × agente: minutos de silêncio do agente após um
     # humano enviar mensagem no chat do Kommo (retomada automática depois).
     agent_handoff_window_min: int = 6
@@ -196,6 +200,10 @@ class Settings:
             "RECONCILIATION_ENABLED", "reconciliation_enabled", False)
         reconciliation_dry_run = _flag(
             "RECONCILIATION_DRY_RUN", "reconciliation_dry_run", True)
+        ia_status_enabled = _flag(
+            "IA_STATUS_ENABLED", "ia_status_enabled", False)
+        ia_status_dry_run = _flag(
+            "IA_STATUS_DRY_RUN", "ia_status_dry_run", True)
         agent_handoff_window_min = _intval(
             "AGENT_HANDOFF_WINDOW_MIN", "agent_handoff_window_min", 6)
         reactivation_daily_cap = _intval("REACTIVATION_DAILY_CAP", "daily_cap", 30)
@@ -276,6 +284,8 @@ class Settings:
             reactivation_dry_run=reactivation_dry_run,
             reconciliation_enabled=reconciliation_enabled,
             reconciliation_dry_run=reconciliation_dry_run,
+            ia_status_enabled=ia_status_enabled,
+            ia_status_dry_run=ia_status_dry_run,
             agent_handoff_window_min=agent_handoff_window_min,
             reactivation_daily_cap=reactivation_daily_cap,
             reactivation_min_interval_min=reactivation_min_interval,

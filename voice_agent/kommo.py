@@ -152,6 +152,14 @@ FIELD_NUMERO_TELEFONE = (1260633, {
     "96630710": 926675, "0710": 926675, "9663-0710": 926675,
 })
 
+# "ATIVADO IA?" (multiselect) — indica se a IA está conduzindo o lead.
+# ATIVADO: a Lia acabou de processar uma mensagem neste lead.
+# DESATIVADO: handoff humano detectado (mensagem manual / pausa de handoff).
+FIELD_ATIVADO_IA = (1260635, {
+    "ATIVADO": 926677, "ATIVA": 926677, "ATIVO": 926677, "ON": 926677,
+    "DESATIVADO": 926679, "DESATIVADA": 926679, "OFF": 926679,
+})
+
 # Status "Closed - lost" (Venda perdida) — id reservado, vale em qualquer funil.
 STATUS_CLOSED_LOST = 143
 
@@ -344,6 +352,8 @@ class KommoClient:
         add_select(FIELD_MOTIVOS_PERDA, fields.get("motivo_perda"))
         # NUMERO TELEFONE — canal de entrada do lead (8133 ou 0710).
         add_select(FIELD_NUMERO_TELEFONE, fields.get("numero_telefone"))
+        # ATIVADO IA? — estado da IA no lead (ATIVADO / DESATIVADO).
+        add_select(FIELD_ATIVADO_IA, fields.get("ativado_ia"))
 
         if not cfs:
             return True
@@ -671,6 +681,49 @@ class KommoClient:
                 "Kommo recent_human_handoff erro (lead %s): %s", lead_id, e
             )
         return False
+
+    def ia_status_from_notes(self, lead_id: int | str) -> Optional[str]:
+        """Lê as notas do lead e deduz o estado da IA: 'ATIVADO' / 'DESATIVADO'.
+
+        Sinal de DESATIVADO: nota service_message do Kommo com 'desativ'
+        ('Agentes de IA foram desativados neste chat...').
+        Sinal de ATIVADO: nota da própria Lia ('🤖 Lia (WhatsApp)') ou uma
+        service_message de reativação — mais recente que o último desativar.
+        Retorna None quando não há nenhum sinal nas notas.
+        """
+        if not lead_id:
+            return None
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.get(
+                    f"{self._base}/leads/{lead_id}/notes",
+                    params={"limit": 100, "order[created_at]": "desc"},
+                    headers=self._headers,
+                )
+            if r.status_code != 200:
+                return None
+            notes = ((r.json() or {}).get("_embedded") or {}).get("notes") or []
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo ia_status_from_notes erro (lead %s): %s", lead_id, e)
+            return None
+        ts_off = 0.0   # último 'IA desativada'
+        ts_on = 0.0    # última atividade da Lia / reativação
+        for nt in notes:
+            created = float(nt.get("created_at") or 0)
+            txt = (
+                (nt.get("params") or {}).get("text")
+                or nt.get("text") or ""
+            ).lower()
+            if nt.get("note_type") == "service_message":
+                if "desativ" in txt:
+                    ts_off = max(ts_off, created)
+                elif "ativ" in txt:  # 'agentes de IA foram ativados'
+                    ts_on = max(ts_on, created)
+            elif "lia (whatsapp)" in txt:
+                ts_on = max(ts_on, created)
+        if ts_off == 0.0 and ts_on == 0.0:
+            return None
+        return "DESATIVADO" if ts_off > ts_on else "ATIVADO"
 
     def agent_paused_for_lead(
         self, caller_context: Optional[dict], window_min: int,

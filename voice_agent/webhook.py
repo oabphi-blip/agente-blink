@@ -469,6 +469,15 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 log.info(
                     "WA Cloud: agente em silêncio (%s) para %s", motivo, phone,
                 )
+                # Handoff humano → carimba a IA como DESATIVADA no lead.
+                lid = caller_context.get("lead_id")
+                if lid:
+                    try:
+                        pipeline.kommo.update_lead_fields(
+                            lid, {"ativado_ia": "DESATIVADO"}
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("WA Cloud carimbo ATIVADO IA? (off): %s", e)
                 return
         # Follow-up pós-valor: o paciente interagiu → limpa o marcador.
         try:
@@ -804,6 +813,62 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         threading.Thread(target=_run_apply, daemon=True).start()
         return JSONResponse({"started": True, "dry_run": False})
+
+    # ================================================================
+    # CAMPO "ATIVADO IA?" — carimbo do estado da IA nos leads
+    # ================================================================
+    # sweep   → varre só os leads recentes (leve; ideal como tarefa agendada)
+    # backfill→ varre a base inteira uma vez
+    from .ia_status import IaStatusEngine
+
+    ia_status_engine = IaStatusEngine(
+        kommo=pipeline.kommo,
+        enabled=settings.ia_status_enabled,
+        dry_run=settings.ia_status_dry_run,
+    )
+
+    @app.get("/ia-status/status")
+    def ia_status_status() -> dict:
+        """Estado + último relatório do carimbo ATIVADO IA?."""
+        return ia_status_engine.status()
+
+    @app.get("/ia-status/sweep")
+    def ia_status_sweep(request: Request) -> JSONResponse:
+        """Varredura dos leads recentes. Sem ?confirmar=sim roda em dry-run.
+        O resultado fica em GET /ia-status/status quando terminar."""
+        confirmar = str(request.query_params.get("confirmar", "")).lower()
+        aplica = confirmar in ("sim", "yes", "true", "1")
+        if ia_status_engine.running:
+            return JSONResponse({"started": False, "reason": "já em execução"})
+
+        def _run() -> None:
+            try:
+                rep = ia_status_engine.run(dry_run=not aplica, mode="sweep")
+                log.info("[IA-STATUS sweep] %s", rep.as_dict())
+            except Exception as e:  # noqa: BLE001
+                log.exception("IA-status sweep falhou: %s", e)
+
+        threading.Thread(target=_run, daemon=True).start()
+        return JSONResponse({"started": True, "dry_run": not aplica})
+
+    @app.get("/ia-status/backfill")
+    def ia_status_backfill(request: Request) -> JSONResponse:
+        """Varredura da base inteira. Sem ?confirmar=sim roda em dry-run.
+        O resultado fica em GET /ia-status/status quando terminar."""
+        confirmar = str(request.query_params.get("confirmar", "")).lower()
+        aplica = confirmar in ("sim", "yes", "true", "1")
+        if ia_status_engine.running:
+            return JSONResponse({"started": False, "reason": "já em execução"})
+
+        def _run() -> None:
+            try:
+                rep = ia_status_engine.run(dry_run=not aplica, mode="backfill")
+                log.info("[IA-STATUS backfill] %s", rep.as_dict())
+            except Exception as e:  # noqa: BLE001
+                log.exception("IA-status backfill falhou: %s", e)
+
+        threading.Thread(target=_run, daemon=True).start()
+        return JSONResponse({"started": True, "dry_run": not aplica})
 
     # ================================================================
     # TEMPLATES DO WHATSAPP OFICIAL (8133)

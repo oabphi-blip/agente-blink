@@ -166,6 +166,16 @@ class VoicePipeline:
                 motivo = None
             if motivo:
                 log.info("Agente em silêncio (%s) para %s", motivo, reply_to_number)
+                # Handoff humano detectado → carimba a IA como DESATIVADA
+                # no lead, para a equipe enxergar pelo campo "ATIVADO IA?".
+                lid = caller_context.get("lead_id")
+                if lid:
+                    try:
+                        self.kommo.update_lead_fields(
+                            lid, {"ativado_ia": "DESATIVADO"}
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("Carimbo ATIVADO IA? (off) falhou: %s", e)
                 return PipelineResult(
                     transcript=user_text, answer="", sent=False,
                     model_used="", articles_used=[],
@@ -287,6 +297,8 @@ class VoicePipeline:
             # Carimba o canal de entrada (8133 ou 0710) no campo do lead.
             if channel:
                 fields["numero_telefone"] = channel
+            # Se a Lia processou esta mensagem, a IA está ATIVADA neste lead.
+            fields["ativado_ia"] = "ATIVADO"
             if fields:
                 self.kommo.update_lead_fields(lead_id, fields)
                 # Lead perdido por convênio não credenciado → fecha o card
