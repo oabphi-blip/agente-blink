@@ -130,7 +130,10 @@ class IaStatusEngine:
         rep.ran = True
         self.running = True
         try:
-            teto = 60 if mode == "backfill" else max(1, int(max_pages))
+            # backfill: teto alto — a base inteira. A parada real é a
+            # detecção de página vazia (fim dos dados); o teto é só
+            # uma trava de segurança contra loop infinito.
+            teto = 600 if mode == "backfill" else max(1, int(max_pages))
             pares: list[tuple[int, str]] = []
 
             page = 1
