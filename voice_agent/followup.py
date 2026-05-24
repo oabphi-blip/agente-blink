@@ -52,6 +52,36 @@ def _first_name(full: str) -> str:
     return full.strip().split()[0].capitalize()
 
 
+# Vídeo educacional de catarata (Dr. Fabrício) — catálogo do canal
+# #atendimento-com-multimidia, item 0009 "Surgimento da Catarata".
+_VIDEO_CATARATA = "https://youtube.com/shorts/zy41CUVhVD8"
+
+
+def _firstcontact_msg(
+    nome: str, especialidade: str = "", motivo: str = "",
+) -> str:
+    """Monta a mensagem de reengajamento de primeiro contato.
+
+    Para leads de CATARATA, inclui o vídeo educacional do Dr. Fabrício
+    junto com o convite — explica a doença para quem veio do anúncio.
+    """
+    contexto = f"{especialidade} {motivo}".lower()
+    if "catarata" in contexto:
+        return (
+            f"Oi, {nome}! 😊 Vi que você nos chamou aqui na Blink "
+            "Oftalmologia sobre catarata.\n\n"
+            "Enquanto isso, o Dr. Fabrício Freitas preparou um vídeo "
+            "rapidinho explicando como a catarata surge — vale muito a "
+            f"pena assistir 👇\n🎥 {_VIDEO_CATARATA}\n\n"
+            "Posso te ajudar a agendar a sua avaliação? É só me contar 💙"
+        )
+    return (
+        f"Oi, {nome}! 😊 Vi que você nos chamou aqui na Blink "
+        "Oftalmologia. Posso te ajudar a agendar a sua consulta? É só me "
+        "contar o que você precisa que eu cuido de tudo por aqui 💙"
+    )
+
+
 def answer_has_value(answer: str) -> bool:
     """True quando a resposta do agente apresentou o valor da consulta
     (bloco de formas de pagamento: R$ junto de Pix/Cartão)."""
@@ -272,22 +302,22 @@ class FollowupEngine:
                 self._clear_firstcontact(ckey)
                 continue
             name, phone = "", ckey
+            especialidade = ""
+            motivo = ""
             try:
                 lead_id = self.kommo.find_lead_id_by_phone(ckey)
                 if lead_id:
                     ctx = self.kommo.get_caller_context_by_lead(lead_id)
                     name = ctx.get("name") or ""
+                    known = ctx.get("known") or {}
+                    especialidade = str(known.get("especialidade") or "")
+                    motivo = str(known.get("motivo") or "")
                     p = self.kommo.get_lead_main_phone(lead_id)
                     if p:
                         phone = p
             except Exception as e:  # noqa: BLE001
                 log.warning("followup-fc: contexto falhou (%s): %s", ckey, e)
-            msg = (
-                f"Oi, {_first_name(name)}! 😊 Vi que você nos chamou aqui na "
-                "Blink Oftalmologia. Posso te ajudar a agendar a sua "
-                "consulta? É só me contar o que você precisa que eu cuido "
-                "de tudo por aqui 💙"
-            )
+            msg = _firstcontact_msg(_first_name(name), especialidade, motivo)
             if dry:
                 self._fc_mark_done(ckey)
                 self._clear_firstcontact(ckey)
