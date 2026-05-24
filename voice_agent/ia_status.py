@@ -20,6 +20,7 @@ A gravação real só acontece com dry_run=False.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -134,14 +135,25 @@ class IaStatusEngine:
 
             page = 1
             while page <= teto:
-                try:
-                    batch = self.kommo.list_leads_recent(
-                        limit=page_size, page=page,
-                    )
-                except Exception as e:  # noqa: BLE001
-                    log.warning("IA status: página %d falhou: %s", page, e)
-                    break
+                # Busca a página; uma página vazia pode ser FIM DE DADOS ou
+                # um rate-limit (429) momentâneo do Kommo — então, se vier
+                # vazia, espera e tenta de novo antes de concluir o fim.
+                batch: list = []
+                for tentativa in range(3):
+                    try:
+                        batch = self.kommo.list_leads_recent(
+                            limit=page_size, page=page,
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        log.warning(
+                            "IA status: página %d erro: %s", page, e,
+                        )
+                        batch = []
+                    if batch:
+                        break
+                    time.sleep(3.0 * (tentativa + 1))
                 if not batch:
+                    log.info("IA status: fim dos dados na página %d", page)
                     break
                 for ld in batch:
                     rep.leads_total += 1
@@ -163,6 +175,8 @@ class IaStatusEngine:
                         log.warning("IA status: lead %s falhou: %s", lead_id, e)
                         rep.errors += 1
                 page += 1
+                # Controle de ritmo — respeita o rate limit do Kommo.
+                time.sleep(0.5)
 
             # Gravação em LOTE (PATCH de até 250 leads por requisição).
             if pares and not dr:

@@ -424,6 +424,8 @@ class KommoClient:
             except Exception as e:  # noqa: BLE001
                 fail += len(body)
                 log.warning("Kommo batch update error: %s", e)
+            # Controle de ritmo — respeita o rate limit do Kommo.
+            time.sleep(0.5)
         return {"ok": ok, "fail": fail}
 
     # ----------------------- nota (registro da conversa)
