@@ -886,6 +886,136 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return JSONResponse({"started": True, "dry_run": not aplica})
 
     # ================================================================
+    # ASAAS — LINK DE PAGAMENTO DA CONSULTA
+    # ================================================================
+    # GET /pagamento/link?lead_id=123&metodo=cartao&parcelas=3[&valor=480]
+    #   Gera um link de pagamento no Asaas e envia ao paciente (8133).
+    #   metodo: cartao (parcelado) | pix | flexivel
+    from .asaas import AsaasClient, valor_consulta
+
+    asaas = (
+        AsaasClient(api_key=settings.asaas_api_key, env=settings.asaas_env)
+        if settings.asaas_enabled else None
+    )
+
+    @app.get("/pagamento/link")
+    def pagamento_link(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        if asaas is None or not asaas.configured:
+            return JSONResponse(
+                {"ok": False,
+                 "erro": "Asaas não configurado (ASAAS_ENABLED / ASAAS_API_KEY)."},
+                status_code=400,
+            )
+        qp = request.query_params
+        try:
+            lead_id = int(qp.get("lead_id") or 0)
+        except (TypeError, ValueError):
+            lead_id = 0
+        if not lead_id:
+            return JSONResponse(
+                {"ok": False, "erro": "informe ?lead_id="}, status_code=400,
+            )
+        metodo = (qp.get("metodo") or "cartao").lower()
+        try:
+            parcelas = int(qp.get("parcelas") or 3)
+        except (TypeError, ValueError):
+            parcelas = 3
+        enviar = str(qp.get("enviar", "sim")).lower() not in (
+            "0", "false", "nao", "no",
+        )
+
+        # Contexto do lead no Kommo (médico, nomes).
+        ctx: dict = {}
+        if pipeline.kommo is not None:
+            try:
+                ctx = pipeline.kommo.get_caller_context_by_lead(lead_id) or {}
+            except Exception as e:  # noqa: BLE001
+                log.warning("Pagamento: contexto lead %s falhou: %s", lead_id, e)
+        known = ctx.get("known") or {}
+        medico = known.get("medico") or ""
+        nome_paciente = known.get("nome_paciente") or ""
+        nome_contato = ctx.get("name") or nome_paciente or "paciente"
+
+        # Valor: parâmetro explícito tem prioridade; senão, tabela (artigo 19).
+        valor = None
+        if qp.get("valor"):
+            try:
+                valor = float(str(qp.get("valor")).replace(",", "."))
+            except ValueError:
+                valor = None
+        if valor is None:
+            valor = valor_consulta(medico, metodo, parcelas)
+        if not valor or valor <= 0:
+            return JSONResponse(
+                {"ok": False,
+                 "erro": "valor não determinado para este médico — informe ?valor="},
+                status_code=400,
+            )
+
+        descricao = "Consulta de avaliação oftalmológica"
+        if medico:
+            descricao += f" — {medico}"
+        res = asaas.criar_link_pagamento(
+            nome=f"Consulta {nome_paciente or nome_contato}".strip(),
+            valor=valor, metodo=metodo, parcelas=parcelas, descricao=descricao,
+        )
+        if not res or not res.get("url"):
+            return JSONResponse(
+                {"ok": False, "erro": "falha ao criar o link no Asaas"},
+                status_code=502,
+            )
+        url = res["url"]
+        valor_fmt = f"{valor:.2f}".replace(".", ",")
+
+        if metodo == "cartao":
+            forma = f"💳 Cartão em até {parcelas}x"
+        elif metodo == "pix":
+            forma = "🔑 Pix"
+        else:
+            forma = "💳 Cartão, Pix ou boleto (você escolhe no link)"
+        msg = (
+            f"Olá, {nome_contato}! 😊 Aqui está o link de pagamento da sua "
+            f"consulta:\n\n{forma}\n💰 Valor: R$ {valor_fmt}\n🔗 {url}\n\n"
+            "Assim que o pagamento for concluído, sua consulta fica "
+            "confirmada. Qualquer dúvida, é só chamar por aqui!"
+        )
+
+        sent = False
+        if enviar and wa_cloud is not None and pipeline.kommo is not None:
+            try:
+                phone = pipeline.kommo.get_lead_main_phone(lead_id)
+                if phone:
+                    wa_cloud.send_text(phone, msg)
+                    sent = True
+            except Exception as e:  # noqa: BLE001
+                log.warning("Pagamento: envio ao paciente falhou: %s", e)
+        if pipeline.kommo is not None:
+            try:
+                obs = " — enviado ao paciente" if sent else (
+                    " — NÃO enviado (envie o link manualmente)"
+                )
+                pipeline.kommo.add_note(
+                    lead_id,
+                    f"💳 Link de pagamento gerado (Asaas)\n"
+                    f"Valor: R$ {valor_fmt} ({metodo}"
+                    + (f" {parcelas}x" if metodo == "cartao" else "")
+                    + f"){obs}\n{url}",
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("Pagamento: nota no Kommo falhou: %s", e)
+
+        return JSONResponse(
+            {"ok": True, "url": url, "valor": valor, "enviado": sent},
+        )
+
+    # ================================================================
     # TEMPLATES DO WHATSAPP OFICIAL (8133)
     # ================================================================
     # GET  /whatsapp/templates       → lista os templates aprovados da WABA

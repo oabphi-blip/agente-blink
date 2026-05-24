@@ -121,6 +121,11 @@ class Settings:
     whatsapp_cloud_api_version: str = "v21.0"
     whatsapp_cloud_enabled: bool = False
 
+    # Asaas — geração de links de pagamento da consulta.
+    asaas_enabled: bool = False
+    asaas_api_key: str = ""
+    asaas_env: str = "production"  # "production" ou "sandbox"
+
     @classmethod
     def load(cls) -> "Settings":
         load_dotenv()
@@ -248,6 +253,11 @@ class Settings:
         )
         followup_template_lang = os.getenv("FOLLOWUP_TEMPLATE_LANG") or "pt_BR"
 
+        # Asaas — links de pagamento da consulta.
+        asaas_enabled = _flag("ASAAS_ENABLED", "asaas_enabled", False)
+        asaas_api_key = os.getenv("ASAAS_API_KEY") or rc.get("asaas_api_key", "") or ""
+        asaas_env = os.getenv("ASAAS_ENV") or rc.get("asaas_env", "production") or "production"
+
         # WhatsApp Cloud API (Meta) — canal do número oficial
         wac = cfg.get("whatsapp_cloud", {}) if isinstance(cfg, dict) else {}
         whatsapp_cloud_token = os.getenv("WHATSAPP_CLOUD_TOKEN") or wac.get("token", "")
@@ -327,6 +337,9 @@ class Settings:
             whatsapp_cloud_verify_token=whatsapp_cloud_verify_token,
             whatsapp_cloud_api_version=whatsapp_cloud_api_version,
             whatsapp_cloud_enabled=whatsapp_cloud_enabled,
+            asaas_enabled=asaas_enabled,
+            asaas_api_key=asaas_api_key,
+            asaas_env=asaas_env,
         )
 
     def is_whitelisted(self, number: str) -> bool:
