@@ -723,6 +723,24 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         log.info("[FOLLOWUP tick force=%s] %s", force, report.as_dict())
         return JSONResponse(report.as_dict())
 
+    # Agendador interno do follow-up — chama tick() a cada 2 min, sem
+    # depender de cron externo. Liga se o follow-up (pós-valor OU primeiro
+    # contato) estiver habilitado.
+    if settings.followup_enabled or settings.followup_firstcontact_enabled:
+        def _followup_scheduler() -> None:
+            import time as _t
+            _t.sleep(20)  # espera o app subir
+            while True:
+                try:
+                    rep = followup_engine.tick()
+                    if rep.sent:
+                        log.info("[FOLLOWUP auto] %s", rep.as_dict())
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Follow-up scheduler erro: %s", e)
+                _t.sleep(120)
+
+        threading.Thread(target=_followup_scheduler, daemon=True).start()
+
     # ================================================================
     # RECONCILIAÇÃO DE ETAPAS (Medware × Kommo)
     # ================================================================
