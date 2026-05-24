@@ -124,11 +124,12 @@ class AsaasClient:
                     log.info("Asaas: link de pagamento criado (id=%s)", data.get("id"))
                     return {"url": url, "id": data.get("id")}
                 log.warning("Asaas: resposta sem url — %s", str(data)[:300])
-            else:
-                log.warning(
-                    "Asaas link falhou: HTTP %d — %s",
-                    r.status_code, (r.text or "")[:400],
-                )
+                return {"erro": "Asaas respondeu sem url"}
+            detalhe = (r.text or "")[:400]
+            log.warning(
+                "Asaas link falhou: HTTP %d — %s", r.status_code, detalhe,
+            )
+            return {"erro": f"HTTP {r.status_code}: {detalhe}"}
         except Exception as e:  # noqa: BLE001
             log.warning("Asaas erro ao criar link: %s", e)
-        return None
+            return {"erro": f"exceção: {e}"}

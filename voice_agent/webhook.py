@@ -959,7 +959,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if not res or not res.get("url"):
             return JSONResponse(
                 {"ok": False, "valor": valor,
-                 "erro": "falha ao criar o link no Asaas (ver logs)"},
+                 "erro": (res or {}).get("erro")
+                 or "falha ao criar o link no Asaas"},
             )
         url = res["url"]
         valor_fmt = f"{valor:.2f}".replace(".", ",")
