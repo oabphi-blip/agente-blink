@@ -109,7 +109,7 @@ class Settings:
     # Convivência humano × agente: minutos de silêncio do agente após um
     # humano enviar mensagem no chat do Kommo. Passado esse tempo sem nova
     # mensagem manual, o agente volta a responder automaticamente.
-    agent_handoff_window_min: int = 3
+    agent_handoff_window_min: int = 5
 
     # WhatsApp Cloud API (Meta) — canal do número OFICIAL, direto (sem Kommo)
     whatsapp_cloud_token: str = ""
@@ -211,7 +211,7 @@ class Settings:
         ia_status_backfill_on_boot = _flag(
             "IA_STATUS_BACKFILL_ON_BOOT", "ia_status_backfill_on_boot", False)
         agent_handoff_window_min = _intval(
-            "AGENT_HANDOFF_WINDOW_MIN", "agent_handoff_window_min", 3)
+            "AGENT_HANDOFF_WINDOW_MIN", "agent_handoff_window_min", 5)
         reactivation_daily_cap = _intval("REACTIVATION_DAILY_CAP", "daily_cap", 30)
         reactivation_min_interval = _intval("REACTIVATION_MIN_INTERVAL_MIN", "min_interval_min", 8)
         reactivation_hour_start = _intval("REACTIVATION_HOUR_START", "hour_start", 8)
