@@ -77,6 +77,30 @@ Imediatamente após o paciente responder se prefere Pix ou Cartão para um atend
 
 ---
 
+## ✅ ENCERRAMENTO — EXTRATO DO AGENDAMENTO
+
+Assim que o paciente escolher o dia/turno/período, **antes de encerrar**, o
+agente deve **OBRIGATORIAMENTE enviar UMA mensagem de extrato** consolidando
+tudo que foi levantado (ver artigo 13 — seção Encerramento). Para o
+atendimento sem convênio, na linha do convênio escrever **"Particular"** e
+incluir a forma de pagamento escolhida:
+
+```
+📋 Resumo do seu agendamento:
+
+👤 Paciente: [nome do paciente] ([idade], se souber)
+🩺 Profissional: [médico] — [especialidade]
+🏥 Unidade: [unidade]
+💳 Pagamento: Particular — [Pix / Cartão]
+📅 Preferência: [dia da semana] — [turno] — [período do turno]
+📝 Motivo: [motivo da consulta]
+
+Está tudo certo? Nossa equipe confirma o horário exato e envia o
+detalhamento em horário comercial (segunda a sexta, das 8h às 18h).
+```
+
+É **uma mensagem só**. Se o paciente corrigir algo, ajustar e reenviar.
+
 ## ⚠️ Regras adicionais
 
 - Esse roteiro de valor (R$ 611 / R$ 670) é para **consulta da Dra. Karla** (oftalmopediatria/rotina) ou **Dra. Kátia** (retina/vítreo). Ver tabela completa em artigo 19.
