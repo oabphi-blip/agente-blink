@@ -517,10 +517,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception as e:  # noqa: BLE001
             log.warning("WA Cloud envio falhou: %s", e)
             return
-        # Follow-up pós-valor: se a resposta apresentou o valor, arma o marcador.
+        # Follow-up: valor → marcador pós-valor; senão → primeiro contato.
         try:
             if followup.answer_has_value(answer):
                 followup.set_pending(pipeline._redis, convo_key)
+            else:
+                followup.set_firstcontact(pipeline._redis, convo_key)
         except Exception:  # noqa: BLE001
             pass
         # Sincroniza o lead no Kommo (best-effort, em background): grava a

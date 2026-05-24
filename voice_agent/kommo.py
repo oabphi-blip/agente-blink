@@ -160,6 +160,10 @@ FIELD_ATIVADO_IA = (1260635, {
     "DESATIVADO": 926679, "DESATIVADA": 926679, "OFF": 926679,
 })
 
+# "HORA ATIVAÇÃO" (date_time) — momento em que a IA foi REATIVADA, ou seja,
+# voltou a atuar depois de ter estado DESATIVADA (após atendimento humano).
+FIELD_HORA_ATIVACAO = 1260639
+
 # Status "Closed - lost" (Venda perdida) — id reservado, vale em qualquer funil.
 STATUS_CLOSED_LOST = 143
 
@@ -333,6 +337,13 @@ class KommoClient:
             if iso:
                 cfs.append({"field_id": field_id, "values": [{"value": iso}]})
 
+        def add_datetime(field_id: int, ts: Optional[int]):
+            """Campo date_time do Kommo — valor é timestamp Unix (segundos)."""
+            if ts:
+                cfs.append(
+                    {"field_id": field_id, "values": [{"value": int(ts)}]}
+                )
+
         add_text(FIELD_NOME_PACIENTE_1, fields.get("name"))
         add_text(FIELD_MOTIVO_PACIENTE_1, fields.get("reason"))
         add_text(FIELD_DIA_TURNO_PERIODO, fields.get("dia_turno_periodo"))
@@ -356,6 +367,8 @@ class KommoClient:
         add_select(FIELD_NUMERO_TELEFONE, fields.get("numero_telefone"))
         # ATIVADO IA? — estado da IA no lead (ATIVADO / DESATIVADO).
         add_select(FIELD_ATIVADO_IA, fields.get("ativado_ia"))
+        # HORA ATIVAÇÃO — timestamp de quando a IA voltou a atuar (reativação).
+        add_datetime(FIELD_HORA_ATIVACAO, fields.get("hora_ativacao_ts"))
 
         if not cfs:
             return True
@@ -658,6 +671,7 @@ class KommoClient:
                 FIELD_MEDICOS[0]: "medico",
                 FIELD_ESPECIALIDADE[0]: "especialidade",
                 FIELD_DIA_TURNO_PERIODO: "dia_turno",
+                FIELD_ATIVADO_IA[0]: "ativado_ia",
             }
             for cf in (data.get("custom_fields_values") or []):
                 fid = cf.get("field_id")

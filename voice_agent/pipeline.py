@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -239,12 +240,14 @@ class VoicePipeline:
                 error=f"evolution: {e}",
             )
 
-        # 4b) Follow-up pós-valor: se a resposta apresentou o valor da
-        # consulta, arma o marcador — se o paciente sumir, o motor de
-        # follow-up dispara o template de retomada.
+        # 4b) Follow-up: se a resposta apresentou o VALOR, arma o marcador
+        # pós-valor (template). Caso contrário, arma o de PRIMEIRO CONTATO
+        # — se o paciente não responder, a Lia manda um nudge de retomada.
         try:
             if followup.answer_has_value(answer):
                 followup.set_pending(self._redis, conversation_key)
+            else:
+                followup.set_firstcontact(self._redis, conversation_key)
         except Exception:  # noqa: BLE001
             pass
 
@@ -292,6 +295,12 @@ class VoicePipeline:
                     self.kommo.add_note(lead_id, note)
                 except Exception as e:  # noqa: BLE001
                     log.warning("Kommo nota falhou (%s): %s", phone, e)
+            # Contexto atual do lead (etapa + estado da IA) — uma leitura só.
+            try:
+                ctx = self.kommo.get_caller_context_by_lead(lead_id)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Kommo ctx falhou (%s): %s", phone, e)
+                ctx = {}
             # Campos extraídos da conversa.
             fields = self.responder.extract_lead_fields(conversation_key) or {}
             # Carimba o canal de entrada (8133 ou 0710) no campo do lead.
@@ -299,6 +308,13 @@ class VoicePipeline:
                 fields["numero_telefone"] = channel
             # Se a Lia processou esta mensagem, a IA está ATIVADA neste lead.
             fields["ativado_ia"] = "ATIVADO"
+            # HORA ATIVAÇÃO: se a IA estava DESATIVADA e voltou a atuar agora,
+            # carimba o momento da reativação (não mexe se já estava ATIVADA).
+            estado_anterior = str(
+                (ctx.get("known") or {}).get("ativado_ia") or ""
+            ).upper()
+            if estado_anterior == "DESATIVADO":
+                fields["hora_ativacao_ts"] = int(time.time())
             if fields:
                 self.kommo.update_lead_fields(lead_id, fields)
                 # Lead perdido por convênio não credenciado → fecha o card
@@ -315,7 +331,6 @@ class VoicePipeline:
                     # denominação ao card refletindo a última mensagem, para
                     # visibilidade da equipe humana.
                     try:
-                        ctx = self.kommo.get_caller_context_by_lead(lead_id)
                         st = ctx.get("status_id")
                         # 0-ENTRADA, 1-FRIO, 2-AGENDAR, 3-REAGENDAR, 5.1-NO-SHOW
                         if st in (96441724, 101508307, 102560495,

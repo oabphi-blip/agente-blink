@@ -30,11 +30,15 @@ _TZ = ZoneInfo("America/Sao_Paulo")
 
 _PENDING_PREFIX = "blink:followup:pending:"
 _DONE_PREFIX = "blink:followup:done:"
+# Follow-up de PRIMEIRO CONTATO: a Lia mandou mensagem e o paciente ainda
+# não respondeu. Armado em toda resposta da Lia que NÃO apresentou valor.
+_FIRSTCONTACT_PREFIX = "blink:followup:firstcontact:"
 
 # Fallback em memória — pipeline e motor rodam no MESMO processo, então
 # um dict de módulo é compartilhado entre eles quando não há Redis.
 _MEM_PENDING: dict[str, float] = {}
 _MEM_DONE: set[str] = set()
+_MEM_FIRSTCONTACT: dict[str, float] = {}
 
 _SEM_CONVENIO = {
     "", "não se aplica", "nao se aplica", "particular",
@@ -71,17 +75,35 @@ def set_pending(redis, ckey: str) -> None:
     _MEM_PENDING[ckey] = now
 
 
+def set_firstcontact(redis, ckey: str) -> None:
+    """Arma o marcador de follow-up de PRIMEIRO CONTATO — a Lia respondeu
+    e está aguardando o paciente. Disparado se o paciente não responder."""
+    if not ckey:
+        return
+    now = time.time()
+    if redis is not None:
+        try:
+            redis.set(_FIRSTCONTACT_PREFIX + ckey, str(now), ex=26 * 3600)
+            return
+        except Exception:  # noqa: BLE001
+            pass
+    _MEM_FIRSTCONTACT[ckey] = now
+
+
 def clear_pending(redis, ckey: str) -> None:
-    """Remove o marcador — o paciente respondeu, não precisa follow-up."""
+    """Remove os marcadores — o paciente respondeu, não precisa follow-up.
+    Limpa tanto o follow-up pós-valor quanto o de primeiro contato."""
     if not ckey:
         return
     if redis is not None:
         try:
             redis.delete(_PENDING_PREFIX + ckey)
+            redis.delete(_FIRSTCONTACT_PREFIX + ckey)
             return
         except Exception:  # noqa: BLE001
             pass
     _MEM_PENDING.pop(ckey, None)
+    _MEM_FIRSTCONTACT.pop(ckey, None)
 
 
 @dataclass
@@ -181,6 +203,111 @@ class FollowupEngine:
                 return []
         return list(_MEM_PENDING.items())
 
+    # ----------------------- follow-up de primeiro contato
+
+    def _firstcontact_items(self) -> list[tuple[str, float]]:
+        if self._redis is not None:
+            out: list[tuple[str, float]] = []
+            try:
+                for k in self._redis.scan_iter(match=_FIRSTCONTACT_PREFIX + "*"):
+                    key = k.decode() if isinstance(k, bytes) else str(k)
+                    ckey = key[len(_FIRSTCONTACT_PREFIX):]
+                    v = self._redis.get(k)
+                    try:
+                        ts = float(v) if v else 0.0
+                    except (TypeError, ValueError):
+                        ts = 0.0
+                    out.append((ckey, ts))
+                return out
+            except Exception as e:  # noqa: BLE001
+                log.warning("followup firstcontact scan falhou: %s", e)
+                return []
+        return list(_MEM_FIRSTCONTACT.items())
+
+    def _fc_done_key(self, ckey: str) -> str:
+        return f"{_DONE_PREFIX}fc:{self._mode()}:{ckey}"
+
+    def _fc_is_done(self, ckey: str) -> bool:
+        if self._redis is not None:
+            try:
+                return bool(self._redis.exists(self._fc_done_key(ckey)))
+            except Exception:  # noqa: BLE001
+                pass
+        return f"fc:{self._mode()}:{ckey}" in _MEM_DONE
+
+    def _fc_mark_done(self, ckey: str) -> None:
+        if self._redis is not None:
+            try:
+                self._redis.set(self._fc_done_key(ckey), "1", ex=7 * 86400)
+                return
+            except Exception:  # noqa: BLE001
+                pass
+        _MEM_DONE.add(f"fc:{self._mode()}:{ckey}")
+
+    def _clear_firstcontact(self, ckey: str) -> None:
+        if self._redis is not None:
+            try:
+                self._redis.delete(_FIRSTCONTACT_PREFIX + ckey)
+                return
+            except Exception:  # noqa: BLE001
+                pass
+        _MEM_FIRSTCONTACT.pop(ckey, None)
+
+    def _tick_firstcontact(self) -> int:
+        """Dispara o nudge de primeiro contato (mensagem livre, dentro das
+        24h) para leads que não responderam a Lia. Uma vez por lead."""
+        s = self.s
+        if not getattr(s, "followup_firstcontact_enabled", False):
+            return 0
+        threshold = getattr(s, "followup_firstcontact_min", 5) * 60
+        now = time.time()
+        due = [
+            (ck, ts) for ck, ts in self._firstcontact_items()
+            if (now - ts) >= threshold
+        ]
+        dry = getattr(s, "followup_firstcontact_dry_run", True)
+        sent = 0
+        for ckey, _ts in due:
+            if self._fc_is_done(ckey):
+                self._clear_firstcontact(ckey)
+                continue
+            name, phone = "", ckey
+            try:
+                lead_id = self.kommo.find_lead_id_by_phone(ckey)
+                if lead_id:
+                    ctx = self.kommo.get_caller_context_by_lead(lead_id)
+                    name = ctx.get("name") or ""
+                    p = self.kommo.get_lead_main_phone(lead_id)
+                    if p:
+                        phone = p
+            except Exception as e:  # noqa: BLE001
+                log.warning("followup-fc: contexto falhou (%s): %s", ckey, e)
+            msg = (
+                f"Oi, {_first_name(name)}! 😊 Vi que você nos chamou aqui na "
+                "Blink Oftalmologia. Posso te ajudar a agendar a sua "
+                "consulta? É só me contar o que você precisa que eu cuido "
+                "de tudo por aqui 💙"
+            )
+            if dry:
+                self._fc_mark_done(ckey)
+                self._clear_firstcontact(ckey)
+                sent += 1
+                continue
+            try:
+                self.wa_cloud.send_text(phone, msg)
+            except Exception as e:  # noqa: BLE001
+                log.warning("followup-fc: envio falhou (%s): %s", ckey, e)
+                continue
+            self._fc_mark_done(ckey)
+            self._clear_firstcontact(ckey)
+            sent += 1
+        if sent:
+            log.info(
+                "[FOLLOWUP-FC] %d nudge(s) de primeiro contato (dry=%s)",
+                sent, dry,
+            )
+        return sent
+
     def status(self) -> dict:
         s = self.s
         return {
@@ -193,6 +320,12 @@ class FollowupEngine:
             "pending": len(self._pending_items()),
             "template_convenio": s.followup_template_convenio or None,
             "template_particular": s.followup_template_particular or None,
+            "firstcontact_enabled": getattr(
+                s, "followup_firstcontact_enabled", False),
+            "firstcontact_dry_run": getattr(
+                s, "followup_firstcontact_dry_run", True),
+            "firstcontact_min": getattr(s, "followup_firstcontact_min", 5),
+            "firstcontact_pending": len(self._firstcontact_items()),
             "wa_cloud_ready": self.wa_cloud is not None,
             "kommo_ready": self.kommo is not None,
         }
@@ -200,10 +333,6 @@ class FollowupEngine:
     def tick(self, force: bool = False) -> FollowupReport:
         s = self.s
 
-        if not s.followup_enabled:
-            return FollowupReport(
-                False, "skipped", "motor desligado (followup_enabled=false)"
-            )
         if self.wa_cloud is None:
             return FollowupReport(
                 False, "skipped", "WhatsApp Cloud não configurado"
@@ -211,12 +340,27 @@ class FollowupEngine:
         if self.kommo is None:
             return FollowupReport(False, "skipped", "Kommo não configurado")
 
+        # Follow-up de primeiro contato — roda independente do pós-valor.
+        fc_sent = 0
+        try:
+            fc_sent = self._tick_firstcontact()
+        except Exception as e:  # noqa: BLE001
+            log.warning("followup-fc tick falhou: %s", e)
+
+        if not s.followup_enabled:
+            return FollowupReport(
+                True, "sent" if fc_sent else "skipped",
+                f"primeiro-contato: {fc_sent} enviado(s); "
+                "pós-valor desligado (followup_enabled=false)",
+                sent=fc_sent,
+            )
+
         count = self._daily_count()
         if count >= s.followup_daily_cap:
             return FollowupReport(
                 False, "skipped",
                 f"teto diário atingido ({count}/{s.followup_daily_cap})",
-                daily_count=count,
+                sent=fc_sent, daily_count=count,
             )
 
         now = time.time()
@@ -227,8 +371,9 @@ class FollowupEngine:
         ]
         if not due:
             return FollowupReport(
-                True, "skipped", "nenhum lead no tempo de follow-up",
-                daily_count=count,
+                True, "sent" if fc_sent else "skipped",
+                "nenhum lead no tempo de follow-up pós-valor",
+                sent=fc_sent, daily_count=count,
             )
 
         sent = 0
@@ -306,8 +451,13 @@ class FollowupEngine:
             })
 
         action = "dry_run" if s.followup_dry_run else "sent"
-        log.info("[FOLLOWUP] tick (%s): %d processado(s)", action, sent)
+        log.info(
+            "[FOLLOWUP] tick (%s): %d pós-valor + %d primeiro-contato",
+            action, sent, fc_sent,
+        )
         return FollowupReport(
-            True, action, f"{sent} follow-up(s) processado(s)",
-            sent=sent, daily_count=self._daily_count(), details=details,
+            True, action,
+            f"{sent} follow-up(s) pós-valor + {fc_sent} primeiro-contato",
+            sent=sent + fc_sent, daily_count=self._daily_count(),
+            details=details,
         )

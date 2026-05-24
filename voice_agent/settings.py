@@ -94,6 +94,10 @@ class Settings:
     followup_template_convenio: str = ""
     followup_template_particular: str = "1078_sem_resposta_valor_consulta_xs9jqe"
     followup_template_lang: str = "pt_BR"
+    # Follow-up de primeiro contato — nudge livre se o paciente não responde.
+    followup_firstcontact_enabled: bool = False
+    followup_firstcontact_dry_run: bool = True
+    followup_firstcontact_min: int = 5
 
     # Reconciliação de etapas (Medware × Kommo) — duas travas, igual reativação.
     reconciliation_enabled: bool = False
@@ -252,6 +256,12 @@ class Settings:
             or "1078_sem_resposta_valor_consulta_xs9jqe"
         )
         followup_template_lang = os.getenv("FOLLOWUP_TEMPLATE_LANG") or "pt_BR"
+        followup_firstcontact_enabled = _flag(
+            "FOLLOWUP_FIRSTCONTACT_ENABLED", "followup_firstcontact_enabled", False)
+        followup_firstcontact_dry_run = _flag(
+            "FOLLOWUP_FIRSTCONTACT_DRY_RUN", "followup_firstcontact_dry_run", True)
+        followup_firstcontact_min = _intval(
+            "FOLLOWUP_FIRSTCONTACT_MIN", "followup_firstcontact_min", 5)
 
         # Asaas — links de pagamento da consulta.
         asaas_enabled = _flag("ASAAS_ENABLED", "asaas_enabled", False)
@@ -331,6 +341,9 @@ class Settings:
             followup_template_convenio=followup_template_convenio,
             followup_template_particular=followup_template_particular,
             followup_template_lang=followup_template_lang,
+            followup_firstcontact_enabled=followup_firstcontact_enabled,
+            followup_firstcontact_dry_run=followup_firstcontact_dry_run,
+            followup_firstcontact_min=followup_firstcontact_min,
             whatsapp_cloud_token=whatsapp_cloud_token,
             whatsapp_cloud_phone_number_id=whatsapp_cloud_phone_number_id,
             whatsapp_cloud_waba_id=whatsapp_cloud_waba_id,
