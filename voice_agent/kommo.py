@@ -174,6 +174,7 @@ FIELD_DATA_NASCIMENTO_PACIENTE_1 = 1259984
 # Etapas do funil ATENDE em que o agente fica DESLIGADO — tratamento
 # conduzido por humanos ou contato que não é paciente (fornecedor).
 ST_AGENT_OFF = frozenset({
+    106563343,  # 0-ATENDIMENTO HUMANO — atendente assumiu de propósito
     106157139,  # 7-CIRURGIAS ANDAMENTO
     106484343,  # 8-LENTES ANDAMENTO
     106484347,  # 9-FORNECEDORES
@@ -182,6 +183,7 @@ ST_AGENT_OFF = frozenset({
 # Nomes legíveis das etapas do funil ATENDE (status_id → nome).
 ST_NAMES = {
     96441724: "0-ETAPA ENTRADA",
+    106563343: "0-ATENDIMENTO HUMANO",
     101508307: "1.LEADS FRIO",
     102560495: "2-AGENDAR",
     106184631: "3.REAGENDAR",

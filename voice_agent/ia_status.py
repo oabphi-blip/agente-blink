@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 # Etapas do funil ATENDE em que a IA fica DESLIGADA (atendimento humano /
 # contato fornecedor). Espelha kommo.ST_AGENT_OFF.
 ST_AGENT_OFF = frozenset({
+    106563343,  # 0-ATENDIMENTO HUMANO
     106157139,  # 7-CIRURGIAS ANDAMENTO
     106484343,  # 8-LENTES ANDAMENTO
     106484347,  # 9-FORNECEDORES
