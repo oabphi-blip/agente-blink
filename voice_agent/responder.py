@@ -517,7 +517,8 @@ class Responder:
                             "(mapa fixo da clínica), mesmo sem o paciente "
                             "nomear: Catarata / Refrativa / Lentes → "
                             "'Dr. Fabricio Freitas'; Oftalmopediatria / "
-                            "Estrabismo / SDP → 'Dra. Karla Delalibera'; "
+                            "Estrabismo / SDP / Oftalmologia Geral / consulta "
+                            "de rotina → 'Dra. Karla Delalibera'; "
                             "Retina → 'Dra. Katia Delalibera'."
                         ),
                     },
