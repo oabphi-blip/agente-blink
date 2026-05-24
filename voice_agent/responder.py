@@ -484,7 +484,14 @@ class Responder:
             "description": (
                 "Salva os dados estruturados do paciente extraídos da conversa. "
                 "Só preencha um campo se a informação foi DITA EXPLICITAMENTE "
-                "pelo paciente ou pelo agente. Não invente."
+                "pelo paciente ou pelo agente. Não invente. "
+                "EXCEÇÃO — 'especialidade' e 'medico' DEVEM ser inferidos "
+                "(não é inventar, é regra fixa da clínica): assim que o "
+                "ASSUNTO ficar claro (anúncio, queixa ou motivo), preencha a "
+                "especialidade; e, com a especialidade, preencha o médico "
+                "correspondente pelo mapa fixo — mesmo que o paciente não "
+                "tenha nomeado o médico. Isso vale já na PRIMEIRA mensagem "
+                "de um lead de anúncio."
             ),
             "input_schema": {
                 "type": "object",
@@ -505,10 +512,26 @@ class Responder:
                     },
                     "medico": {
                         "type": "string",
-                        "description": "Nome do médico (Dra. Karla Delalibera, Dr. Fabricio Freitas, Dra. Katia Delalibera, etc.)",
+                        "description": (
+                            "Nome do médico. INFERIR pela especialidade "
+                            "(mapa fixo da clínica), mesmo sem o paciente "
+                            "nomear: Catarata / Refrativa / Lentes → "
+                            "'Dr. Fabricio Freitas'; Oftalmopediatria / "
+                            "Estrabismo / SDP → 'Dra. Karla Delalibera'; "
+                            "Retina → 'Dra. Katia Delalibera'."
+                        ),
                     },
                     "especialidade": {
                         "type": "string",
+                        "description": (
+                            "Inferir pelo assunto/anúncio/queixa já no "
+                            "início: catarata, cirurgia de catarata, lente "
+                            "intraocular → 'Catarata'; estrabismo → "
+                            "'Estrabismo'; retina, mancha/sombra na visão → "
+                            "'Retina'; criança/bebê/pediatria → "
+                            "'Oftalmopediatria'; cirurgia para parar de usar "
+                            "óculos → 'Refrativa'."
+                        ),
                         "enum": [
                             "Oftalmopediatria", "Estrabismo", "SDP",
                             "Catarata", "Retina", "Oftalmologia Geral",
