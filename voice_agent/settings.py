@@ -102,6 +102,9 @@ class Settings:
     # Carimbo do campo "ATIVADO IA?" no Kommo — duas travas, igual reativação.
     ia_status_enabled: bool = False
     ia_status_dry_run: bool = True
+    # Quando true, roda o backfill do campo "ATIVADO IA?" automaticamente
+    # na inicialização do app (cada réplica roda; é idempotente).
+    ia_status_backfill_on_boot: bool = False
 
     # Convivência humano × agente: minutos de silêncio do agente após um
     # humano enviar mensagem no chat do Kommo (retomada automática depois).
@@ -204,6 +207,8 @@ class Settings:
             "IA_STATUS_ENABLED", "ia_status_enabled", False)
         ia_status_dry_run = _flag(
             "IA_STATUS_DRY_RUN", "ia_status_dry_run", True)
+        ia_status_backfill_on_boot = _flag(
+            "IA_STATUS_BACKFILL_ON_BOOT", "ia_status_backfill_on_boot", False)
         agent_handoff_window_min = _intval(
             "AGENT_HANDOFF_WINDOW_MIN", "agent_handoff_window_min", 6)
         reactivation_daily_cap = _intval("REACTIVATION_DAILY_CAP", "daily_cap", 30)
@@ -286,6 +291,7 @@ class Settings:
             reconciliation_dry_run=reconciliation_dry_run,
             ia_status_enabled=ia_status_enabled,
             ia_status_dry_run=ia_status_dry_run,
+            ia_status_backfill_on_boot=ia_status_backfill_on_boot,
             agent_handoff_window_min=agent_handoff_window_min,
             reactivation_daily_cap=reactivation_daily_cap,
             reactivation_min_interval_min=reactivation_min_interval,

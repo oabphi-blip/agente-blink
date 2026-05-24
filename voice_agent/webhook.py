@@ -827,6 +827,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         dry_run=settings.ia_status_dry_run,
     )
 
+    # Backfill na inicialização — contorna a coordenação por endpoint
+    # (que sofre com múltiplas réplicas). Cada réplica roda o backfill uma
+    # vez ao subir; como é idempotente, rodar em várias réplicas é inócuo.
+    if settings.ia_status_enabled and settings.ia_status_backfill_on_boot:
+        def _backfill_on_boot() -> None:
+            try:
+                import time as _t
+                _t.sleep(8)  # deixa o app terminar de subir
+                rep = ia_status_engine.run(dry_run=False, mode="backfill")
+                log.info("[IA-STATUS backfill-on-boot] %s", rep.as_dict())
+            except Exception as e:  # noqa: BLE001
+                log.exception("IA-status backfill-on-boot falhou: %s", e)
+
+        threading.Thread(target=_backfill_on_boot, daemon=True).start()
+
     @app.get("/ia-status/status")
     def ia_status_status() -> dict:
         """Estado + último relatório do carimbo ATIVADO IA?."""
