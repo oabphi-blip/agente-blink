@@ -68,10 +68,50 @@ Entendi! Vamos agendar a Consulta de Estrabismo com a Dra. Karla Delalíbera.
 Ela fará a medição do desvio e decidirá o melhor tratamento — cirúrgico,
 óculos ou exercícios.
 
-Você prefere ser atendido na Asa Norte ou Águas Claras?
+A Dra. Karla atende estrabismo na unidade Asa Norte. Para te oferecer os
+melhores horários, qual dia da semana e período (manhã/tarde) costumam ser
+melhores pra você?
 ```
 
-(Seguir fluxo de agendamento normalmente — ver artigos 13/14.)
+**Depois de colher a preferência, a Lia NÃO encerra com "preferência
+registrada". Ela conduz o agendamento até o fim, do mesmo jeito que nos
+artigos 13/14:**
+
+1. **Oferecer datas concretas.** Consultar a agenda da Dra. Karla
+   (Medware) e oferecer **2 ou 3 opções reais de data e horário** que
+   batam com a preferência do paciente. Exemplo:
+   ```
+   Tenho estas opções com a Dra. Karla na Asa Norte:
+   • Segunda, 02/06 — 14h30
+   • Quarta, 04/06 — 15h00
+   Qual fica melhor pra você?
+   ```
+2. **Preferência em mês futuro.** Se o paciente pedir um mês que ainda
+   não tem agenda aberta (ex.: "só consigo em junho"), a Lia **não
+   descarta o lead**: registra a preferência no campo
+   **DIA/TURNO/PERÍODO ⚠️**, confirma o mês desejado e avisa que vai
+   retomar o contato quando a agenda daquele mês abrir (ver artigo 39 —
+   Reativação em mês futuro).
+3. **Resumo do agendamento (obrigatório).** Antes de fechar, enviar o
+   resumo das informações coletadas (ver bloco "Resumo" abaixo).
+
+(Para o passo a passo completo de agendamento, ver artigos 13/14.)
+
+#### 📋 Resumo do agendamento (enviar antes de finalizar)
+
+```
+Perfeito, [Nome]! Vou confirmar o resumo do seu atendimento:
+
+👤 Paciente: [Nome]
+👁️ Especialidade: Estrabismo — Dra. Karla Delalíbera
+🏥 Unidade: Asa Norte
+📅 Data/horário escolhidos: [data e hora] (ou: preferência [dia/turno/mês])
+💳 Convênio: [convênio ou Particular]
+
+Está tudo certo? Posso confirmar assim?
+```
+
+Só depois do "sim" do paciente é que a Lia finaliza e passa o bastão.
 
 ### 2.3. CENÁRIO 3 — Dúvidas sobre preço (Opção 3)
 

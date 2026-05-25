@@ -164,6 +164,12 @@ FIELD_ATIVADO_IA = (1260635, {
 # voltou a atuar depois de ter estado DESATIVADA (após atendimento humano).
 FIELD_HORA_ATIVACAO = 1260639
 
+# "ATENDENTE (s)" (multiselect) — quem está conduzindo o atendimento.
+# A Lia carimba "Lia" sempre que a IA processa uma mensagem do lead.
+FIELD_ATENDENTE = (1246419, {
+    "LIA": 926681, "IA": 926681, "AGENTE": 926681,
+})
+
 # Status "Closed - lost" (Venda perdida) — id reservado, vale em qualquer funil.
 STATUS_CLOSED_LOST = 143
 
@@ -369,6 +375,8 @@ class KommoClient:
         add_select(FIELD_ATIVADO_IA, fields.get("ativado_ia"))
         # HORA ATIVAÇÃO — timestamp de quando a IA voltou a atuar (reativação).
         add_datetime(FIELD_HORA_ATIVACAO, fields.get("hora_ativacao_ts"))
+        # ATENDENTE — carimba "Lia" quando a IA conduz o atendimento.
+        add_select(FIELD_ATENDENTE, fields.get("atendente"))
 
         if not cfs:
             return True

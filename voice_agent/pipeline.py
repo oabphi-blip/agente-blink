@@ -308,6 +308,8 @@ class VoicePipeline:
                 fields["numero_telefone"] = channel
             # Se a Lia processou esta mensagem, a IA está ATIVADA neste lead.
             fields["ativado_ia"] = "ATIVADO"
+            # ATENDENTE: a IA conduziu o atendimento → carimba "Lia".
+            fields["atendente"] = "Lia"
             # HORA ATIVAÇÃO: se a IA estava DESATIVADA e voltou a atuar agora,
             # carimba o momento da reativação (não mexe se já estava ATIVADA).
             estado_anterior = str(
