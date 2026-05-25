@@ -1246,6 +1246,26 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return {"ran": True, "sent": sent, "skipped": skipped,
                 "total_entrada": len(leads)}
 
+    @app.get("/diag/anthropic")
+    def diag_anthropic() -> JSONResponse:
+        """Diagnóstico: chama a API Anthropic com os modelos configurados
+        e devolve o erro EXATO de cada um (status HTTP + mensagem). É o
+        que revela se o responder.reply está falhando por modelo inválido,
+        chave/billing ou rate-limit."""
+        out: dict = {}
+        for label, model in (("sonnet", getattr(responder, "_sonnet", "?")),
+                              ("haiku", getattr(responder, "_haiku", "?"))):
+            try:
+                responder._client.messages.create(
+                    model=model, max_tokens=16,
+                    messages=[{"role": "user", "content": "ping"}],
+                )
+                out[label] = {"model": model, "ok": True}
+            except Exception as e:  # noqa: BLE001
+                out[label] = {"model": model, "ok": False,
+                              "erro": f"{type(e).__name__}: {str(e)[:400]}"}
+        return JSONResponse(out)
+
     @app.api_route("/unificacao/entrada/scan", methods=["GET", "POST"])
     def unificacao_entrada_scan() -> JSONResponse:
         """Diagnóstico/disparo manual da varredura de 0-ENTRADA."""
