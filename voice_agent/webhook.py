@@ -158,6 +158,38 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "whatsapp_cloud": {"configured": settings.whatsapp_cloud_enabled},
         }
 
+    # Aviso de unificação enviado a leads NOVOS que chegam no número antigo
+    # (0710). É enviado UMA única vez por contato; depois segue o
+    # atendimento normal no 0710 (não abandona o lead).
+    _UNIF_AVISO_0710 = (
+        "Olá! 😊 Aqui é da Blink Oftalmologia.\n\n"
+        "Pra te atender com toda a atenção que você merece, nosso "
+        "atendimento agora é unificado no número oficial: "
+        "*(61) 98133-1005*.\n\n"
+        "👉 É só me chamar por lá: https://wa.me/5561981331005\n\n"
+        "Pode mandar sua dúvida por aqui também que eu já te ajudo. 💙"
+    )
+
+    def _aviso_unificacao_se_novo(convo_key: str, remote_jid: str,
+                                  msg_type: str) -> None:
+        """Lead NOVO no 0710 → envia o aviso de número único UMA vez."""
+        try:
+            if conversation_store.get(convo_key):
+                return  # já tem histórico — não é contato novo
+            notified_key = f"blink:unif:notified:{convo_key}"
+            r = getattr(conversation_store, "_redis", None)
+            if r is not None:
+                try:
+                    if not r.set(notified_key, "1", nx=True, ex=180 * 86400):
+                        return  # já foi avisado antes
+                except Exception:  # noqa: BLE001
+                    pass
+            evolution.send_text(number=remote_jid, text=_UNIF_AVISO_0710)
+            log.info("[UNIF] aviso de numero unico enviado a %s (%s)",
+                     convo_key, msg_type)
+        except Exception:  # noqa: BLE001
+            log.exception("[UNIF] falha no aviso de unificacao")
+
     @app.post("/webhook")
     @app.post("/webhook/{instance}")
     async def webhook(request: Request, instance: Optional[str] = None) -> JSONResponse:
@@ -212,6 +244,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         # Chave de conversa ESTÁVEL (só dígitos do telefone) — garante que
         # o histórico não se perca quando o WhatsApp alterna @lid/@s.whatsapp.net.
         convo_key = _conversation_key(remote_jid)
+
+        # UNIFICAÇÃO — lead novo no 0710 recebe o aviso do número único
+        # ANTES da resposta normal. Roda só para tipos de mensagem reais.
+        if msg_type in (
+            "audioMessage", "pttMessage", "conversation",
+            "extendedTextMessage", "imageMessage", "documentMessage",
+        ):
+            _aviso_unificacao_se_novo(convo_key, remote_jid, msg_type)
 
         # ÁUDIO → transcrever + responder
         if msg_type in ("audioMessage", "pttMessage"):
