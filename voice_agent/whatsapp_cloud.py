@@ -72,6 +72,28 @@ class WhatsAppCloudClient:
             )
         return r.json() if r.content else {}
 
+    def mark_read_typing(self, message_id: str) -> dict:
+        """Marca a mensagem como lida E acende o indicador 'digitando…'
+        na tela do paciente. O 'digitando…' fica visível por até ~25s ou
+        até a empresa enviar a próxima mensagem. Best-effort."""
+        if not message_id:
+            return {}
+        url = f"{self._base}/{self.phone_number_id}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "status": "read",
+            "message_id": message_id,
+            "typing_indicator": {"type": "text"},
+        }
+        with httpx.Client(timeout=self.timeout) as c:
+            r = c.post(url, headers=self._headers(), json=payload)
+        if r.status_code >= 400:
+            raise WhatsAppCloudError(
+                f"mark_read_typing falhou ({r.status_code}): "
+                f"{(r.text or '')[:200]}"
+            )
+        return r.json() if r.content else {}
+
     def send_audio(self, to: str, link: str) -> dict:
         """Envia uma mensagem de áudio (ex.: áudio gravado da Dra. Karla).
 

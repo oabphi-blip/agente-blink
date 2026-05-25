@@ -108,6 +108,14 @@ class Settings:
     # o 8133 durante o modo de ingestão. Ninguém mais é ingerido.
     audio_ingest_admin: str = ""
 
+    # Humanização da resposta — "digitando…" + pausa natural + debounce.
+    # debounce: janela (s) para juntar mensagens seguidas do paciente.
+    # delay_min/max: pausa antes de enviar, proporcional ao tamanho do texto.
+    humanize_enabled: bool = True
+    humanize_debounce_sec: int = 7
+    humanize_delay_min_sec: int = 2
+    humanize_delay_max_sec: int = 9
+
     # Reconciliação de etapas (Medware × Kommo) — duas travas, igual reativação.
     reconciliation_enabled: bool = False
     reconciliation_dry_run: bool = True
@@ -281,6 +289,14 @@ class Settings:
                 or rc.get("audio_ingest_admin", "") or ""
             ) if ch.isdigit()
         )
+        humanize_enabled = _flag(
+            "HUMANIZE_ENABLED", "humanize_enabled", True)
+        humanize_debounce_sec = _intval(
+            "HUMANIZE_DEBOUNCE_SEC", "humanize_debounce_sec", 7)
+        humanize_delay_min_sec = _intval(
+            "HUMANIZE_DELAY_MIN_SEC", "humanize_delay_min_sec", 2)
+        humanize_delay_max_sec = _intval(
+            "HUMANIZE_DELAY_MAX_SEC", "humanize_delay_max_sec", 9)
 
         # Asaas — links de pagamento da consulta.
         asaas_enabled = _flag("ASAAS_ENABLED", "asaas_enabled", False)
@@ -366,6 +382,10 @@ class Settings:
             followup_audio_enabled=followup_audio_enabled,
             audio_base_url=audio_base_url,
             audio_ingest_admin=audio_ingest_admin,
+            humanize_enabled=humanize_enabled,
+            humanize_debounce_sec=humanize_debounce_sec,
+            humanize_delay_min_sec=humanize_delay_min_sec,
+            humanize_delay_max_sec=humanize_delay_max_sec,
             whatsapp_cloud_token=whatsapp_cloud_token,
             whatsapp_cloud_phone_number_id=whatsapp_cloud_phone_number_id,
             whatsapp_cloud_waba_id=whatsapp_cloud_waba_id,

@@ -499,6 +499,15 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     caller_context["agenda"] = slots
             except Exception as e:  # noqa: BLE001
                 log.warning("WA Cloud Medware horários falhou: %s", e)
+        # Humanização: acende "digitando…" + marca como lida antes de
+        # gerar a resposta. O paciente vê "lida" → "digitando…".
+        import time as _time
+        _t0 = _time.time()
+        if settings.humanize_enabled and msg_id:
+            try:
+                wa_cloud.mark_read_typing(msg_id)
+            except Exception as e:  # noqa: BLE001
+                log.debug("WA Cloud typing falhou: %s", e)
         try:
             result = responder.reply(
                 convo_key, user_text, caller_context=caller_context
@@ -512,6 +521,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             )
         if not answer:
             return
+        # Pausa natural — tempo total proporcional ao tamanho da resposta
+        # (descontando o que o modelo já levou para gerar). Evita resposta
+        # instantânea, que entrega que é um robô.
+        if settings.humanize_enabled:
+            try:
+                alvo = min(
+                    float(settings.humanize_delay_max_sec),
+                    max(float(settings.humanize_delay_min_sec),
+                        len(answer) / 20.0),
+                )
+                resto = alvo - (_time.time() - _t0)
+                if resto > 0:
+                    _time.sleep(resto)
+            except Exception:  # noqa: BLE001
+                pass
         try:
             wa_cloud.send_text(phone, answer)
         except Exception as e:  # noqa: BLE001
@@ -533,6 +557,48 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 args=(phone, convo_key, user_text, answer, "81331005"),
                 daemon=True,
             ).start()
+
+    # Debounce — junta mensagens seguidas do mesmo paciente numa janela
+    # curta antes de processar, para a Lia ler tudo e responder uma vez só.
+    _debounce: dict = {}
+    _debounce_lock = threading.Lock()
+
+    def _flush_debounce_cloud(ckey: str) -> None:
+        with _debounce_lock:
+            entry = _debounce.pop(ckey, None)
+        if not entry:
+            return
+        texto = "\n".join(t for t in entry["texts"] if t)
+        if texto.strip():
+            _process_whatsapp_cloud(texto, entry["phone"], entry["msg_id"])
+
+    def _enqueue_cloud(text: str, phone: str, msg_id: str) -> None:
+        """Coloca a mensagem na janela de debounce; mensagens que chegam
+        dentro da janela são juntadas e processadas de uma vez só."""
+        if (not settings.humanize_enabled
+                or settings.humanize_debounce_sec <= 0):
+            threading.Thread(
+                target=_process_whatsapp_cloud,
+                args=(text, phone, msg_id), daemon=True,
+            ).start()
+            return
+        ckey = _conversation_key(phone)
+        with _debounce_lock:
+            entry = _debounce.get(ckey)
+            if entry and entry.get("timer"):
+                entry["timer"].cancel()
+            if not entry:
+                entry = {"texts": [], "phone": phone}
+                _debounce[ckey] = entry
+            entry["texts"].append(text)
+            entry["msg_id"] = msg_id
+            t = threading.Timer(
+                settings.humanize_debounce_sec,
+                _flush_debounce_cloud, args=(ckey,),
+            )
+            t.daemon = True
+            entry["timer"] = t
+            t.start()
 
     def _process_wa_cloud_audio(
         media_id: str, mime: str, phone: str, msg_id: str,
@@ -862,11 +928,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                             m.get("text") or "")
                         continue
             if mtype == "text" and (m.get("text") or "").strip():
-                threading.Thread(
-                    target=_process_whatsapp_cloud,
-                    args=(m["text"], phone, mid),
-                    daemon=True,
-                ).start()
+                _enqueue_cloud(m["text"], phone, mid)
             elif mtype == "audio" and m.get("media_id"):
                 threading.Thread(
                     target=_process_wa_cloud_audio,
