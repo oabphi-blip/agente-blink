@@ -1086,14 +1086,24 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # depender de cron externo. Liga se o follow-up (pós-valor OU primeiro
     # contato) estiver habilitado.
     if settings.followup_enabled or settings.followup_firstcontact_enabled:
+        def _fu_tick_once() -> None:
+            try:
+                rep = followup_engine.tick()
+                if rep.sent:
+                    log.info("[FOLLOWUP auto] %s", rep.as_dict())
+            except Exception as e:  # noqa: BLE001
+                log.warning("Follow-up tick erro: %s", e)
+
         def _followup_scheduler() -> None:
             import time as _t
             _t.sleep(20)  # espera o app subir
             while True:
+                # Cada tick roda em thread PRÓPRIA: se um tick travar num
+                # I/O lento, o laço NÃO congela — continua disparando os
+                # próximos a cada 120s. Era esse o bug do follow-up.
                 try:
-                    rep = followup_engine.tick()
-                    if rep.sent:
-                        log.info("[FOLLOWUP auto] %s", rep.as_dict())
+                    threading.Thread(
+                        target=_fu_tick_once, daemon=True).start()
                 except Exception as e:  # noqa: BLE001
                     log.warning("Follow-up scheduler erro: %s", e)
                 _t.sleep(120)
