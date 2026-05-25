@@ -178,6 +178,15 @@ FIELD_NOME_PACIENTE_1 = 1255757
 FIELD_MOTIVO_PACIENTE_1 = 1255727
 FIELD_DIA_TURNO_PERIODO = 1259960  # "DIA/TURNO/PERÍODO ⚠️" — preferência textual
 
+# CPF do paciente — necessário para o agendamento no Medware.
+# Campos numerados 1 a 6 (um por paciente da ficha). Hoje a extração
+# estrutura o paciente 1; os demais entram com a camada multipaciente.
+FIELD_CPF_PACIENTE_1 = 1260414
+FIELD_CPF_PACIENTES = {
+    1: 1260414, 2: 1260416, 3: 1260418,
+    4: 1260548, 5: 1260422, 6: 1260424,
+}
+
 # Date (timestamp YYYY-MM-DDTHH:MM:SS-03:00)
 FIELD_DATA_NASCIMENTO_PACIENTE_1 = 1259984
 
@@ -352,6 +361,9 @@ class KommoClient:
 
         add_text(FIELD_NOME_PACIENTE_1, fields.get("name"))
         add_text(FIELD_MOTIVO_PACIENTE_1, fields.get("reason"))
+        # CPF do paciente 1 — só dígitos, necessário p/ agendar no Medware.
+        _cpf = "".join(ch for ch in str(fields.get("cpf") or "") if ch.isdigit())
+        add_text(FIELD_CPF_PACIENTE_1, _cpf or None)
         add_text(FIELD_DIA_TURNO_PERIODO, fields.get("dia_turno_periodo"))
         add_date(FIELD_DATA_NASCIMENTO_PACIENTE_1, fields.get("birth_date_iso"))
         add_select(FIELD_CONVENIO, fields.get("convenio"))

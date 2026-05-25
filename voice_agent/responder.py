@@ -512,6 +512,15 @@ class Responder:
                         "description": "Data de nascimento em formato YYYY-MM-DD",
                     },
                     "reason": {"type": "string", "description": "Motivo/queixa da consulta"},
+                    "cpf": {
+                        "type": "string",
+                        "description": (
+                            "CPF do paciente que vai ser atendido, quando "
+                            "informado na conversa. Aceite só dígitos ou o "
+                            "formato 000.000.000-00. É o CPF de quem VAI ser "
+                            "atendido, não necessariamente de quem escreve."
+                        ),
+                    },
                     "convenio": {
                         "type": "string",
                         "description": "Nome do convênio (ex: 'Pro Ser STJ') ou 'Particular'",
