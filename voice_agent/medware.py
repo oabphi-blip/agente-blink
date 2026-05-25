@@ -115,6 +115,24 @@ def _data_nasc_iso(value: Optional[str]) -> str:
     return v
 
 
+def _data_hora_iso(value: Optional[str]) -> str:
+    """Normaliza data/hora do agendamento para yyyy-MM-ddTHH:mm.
+
+    Aceita ISO ('yyyy-MM-ddTHH:mm[:ss]') ou formato BR ('dd/MM/yyyy HH:mm').
+    """
+    if not value:
+        return ""
+    v = str(value).strip()
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S",
+                "%Y-%m-%d %H:%M", "%d/%m/%Y %H:%M",
+                "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %Hh%M"):
+        try:
+            return datetime.strptime(v, fmt).strftime("%Y-%m-%dT%H:%M")
+        except ValueError:
+            continue
+    return v
+
+
 @dataclass
 class MedwareClient:
     identificacao: str
@@ -281,7 +299,7 @@ class MedwareClient:
             "codMedico": cod_medico,
             "codProcedimento": cod_proc,
             "codPlano": cod_plano,
-            "dataHoraAgendada": data_hora,   # yyyy-MM-ddTHH:mm
+            "dataHoraAgendada": _data_hora_iso(data_hora),  # yyyy-MM-ddTHH:mm
         }
         # Celular: DDD e número SEPARADOS.
         cel = "".join(ch for ch in (celular or "") if ch.isdigit())

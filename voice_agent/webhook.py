@@ -170,6 +170,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         "Pode mandar sua dúvida por aqui também que eu já te ajudo. 💙"
     )
 
+    _unif_notified_mem: set[str] = set()  # dedup em memória (fallback s/ Redis)
+
     def _aviso_unificacao_se_novo(convo_key: str, remote_jid: str,
                                   msg_type: str) -> None:
         """QUALQUER lead que escreve no 0710 (novo OU recorrente) recebe o
@@ -179,12 +181,20 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         try:
             notified_key = f"blink:unif:notified:{convo_key}"
             r = getattr(conversation_store, "_redis", None)
+            marcado = False
             if r is not None:
                 try:
                     if not r.set(notified_key, "1", nx=True, ex=180 * 86400):
                         return  # já foi avisado antes
+                    marcado = True
                 except Exception:  # noqa: BLE001
                     pass
+            if not marcado:
+                # Sem Redis (ou falha) → dedup em memória, para NÃO repetir
+                # o aviso a cada mensagem do mesmo contato.
+                if convo_key in _unif_notified_mem:
+                    return
+                _unif_notified_mem.add(convo_key)
             evolution.send_text(number=remote_jid, text=_UNIF_AVISO_0710)
             log.info("[UNIF] aviso de numero unico enviado a %s (%s)",
                      convo_key, msg_type)
@@ -621,7 +631,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return
         texto = "\n".join(t for t in entry["texts"] if t)
         if texto.strip():
-            _process_whatsapp_cloud(texto, entry["phone"], entry["msg_id"])
+            # Roda dentro de um Timer — sem este try/except, uma exceção
+            # morreria silenciosa no thread do Timer e a mensagem do
+            # paciente se perderia sem registro.
+            try:
+                _process_whatsapp_cloud(texto, entry["phone"], entry["msg_id"])
+            except Exception:  # noqa: BLE001
+                log.exception("WA Cloud: _flush_debounce_cloud falhou")
 
     def _enqueue_cloud(text: str, phone: str, msg_id: str) -> None:
         """Coloca a mensagem na janela de debounce; mensagens que chegam

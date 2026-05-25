@@ -305,8 +305,9 @@ class Settings:
                 or rc.get("audio_ingest_admin", "") or ""
             ) if ch.isdigit()
         )
-        humanize_enabled = _flag(
-            "HUMANIZE_ENABLED", "humanize_enabled", True)
+        # _fflag (não _flag): lê o env, e na ausência usa o default —
+        # sem cair no config.json antigo (mesma correção do follow-up).
+        humanize_enabled = _fflag("HUMANIZE_ENABLED", True)
         humanize_debounce_sec = _intval(
             "HUMANIZE_DEBOUNCE_SEC", "humanize_debounce_sec", 7)
         humanize_delay_min_sec = _intval(
