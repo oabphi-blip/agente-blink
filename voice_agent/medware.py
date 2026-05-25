@@ -278,27 +278,34 @@ class MedwareClient:
         cel_ddd = cel[:2] if len(cel) >= 10 else ""
         cel_num = cel[2:] if len(cel) >= 10 else cel
 
-        # Se o paciente já existe no Medware (CPF cadastrado), usa o
-        # codPaciente dele — senão o Medware recusa com
-        # CPF_JA_CADASTRADO_OUTRA_PESSOA.
-        if not cod_paciente and cpf:
+        # O DTO do Medware SEMPRE exige o objeto `paciente`. Se o CPF já
+        # estiver cadastrado, o bloco usa o codPaciente e o NOME oficial
+        # do registro (senão o Medware recusa com
+        # CPF_JA_CADASTRADO_OUTRA_PESSOA).
+        cpf_digits = "".join(ch for ch in str(cpf or "") if ch.isdigit())
+        existente = None
+        if not cod_paciente and cpf_digits:
             try:
-                existente = self.buscar_paciente_por_cpf(cpf)
-                if existente and existente.get("codPaciente"):
-                    cod_paciente = int(existente["codPaciente"])
+                existente = self.buscar_paciente_por_cpf(cpf_digits)
             except Exception as e:  # noqa: BLE001
                 log.warning("Medware busca paciente por CPF falhou: %s", e)
 
-        if cod_paciente:
-            body["codPaciente"] = cod_paciente
+        paciente: dict[str, Any] = {
+            "cpf": cpf_digits,
+            "dataNascimento": data_nascimento or "",
+            "numeroCelular": cel_num,
+            "numeroCelularDdd": cel_ddd,
+        }
+        if existente and existente.get("codPaciente"):
+            paciente["codPaciente"] = int(existente["codPaciente"])
+            paciente["nome"] = (existente.get("nome")
+                                or (nome or "").strip().upper())
+        elif cod_paciente:
+            paciente["codPaciente"] = cod_paciente
+            paciente["nome"] = (nome or "").strip().upper()
         else:
-            body["paciente"] = {
-                "nome": (nome or "").strip().upper(),
-                "cpf": "".join(ch for ch in (cpf or "") if ch.isdigit()),
-                "dataNascimento": data_nascimento or "",
-                "numeroCelular": cel_num,
-                "numeroCelularDdd": cel_ddd,
-            }
+            paciente["nome"] = (nome or "").strip().upper()
+        body["paciente"] = paciente
 
         ok, payload = self._post("Medware/Agendamento/Salvar", body)
         if not ok:
