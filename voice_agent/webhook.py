@@ -102,7 +102,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     app = FastAPI(
         title="Agente Blink Oftalmologia — Voice + Text",
-        version="0.2.0",
+        version="0.2.1",
         description=(
             "Webhook que processa mensagens do WhatsApp (texto + áudio) "
             "com Whisper + Claude Sonnet/Haiku."
