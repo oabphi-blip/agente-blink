@@ -549,16 +549,26 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 wa_cloud.mark_read_typing(msg_id)
             except Exception as e:  # noqa: BLE001
                 log.debug("WA Cloud typing falhou: %s", e)
-        try:
-            result = responder.reply(
-                convo_key, user_text, caller_context=caller_context
-            )
-            answer = result.get("answer") or ""
-        except Exception as e:  # noqa: BLE001
-            log.exception("WA Cloud: Claude falhou")
+        # Gera a resposta com até 3 tentativas — uma falha transitória da
+        # API (timeout, 5xx, rate-limit) NÃO deve virar mensagem de erro
+        # para o paciente. Só cai no fallback se as 3 falharem.
+        answer = ""
+        for _tent in range(3):
+            try:
+                result = responder.reply(
+                    convo_key, user_text, caller_context=caller_context
+                )
+                answer = result.get("answer") or ""
+                break
+            except Exception:  # noqa: BLE001
+                log.warning("WA Cloud: responder.reply falhou (tentativa %d/3)",
+                            _tent + 1)
+                _time.sleep(1.5 * (_tent + 1))
+        if not answer:
+            log.error("WA Cloud: Claude falhou após 3 tentativas")
             answer = (
-                "Tive uma instabilidade aqui. Pode me reenviar sua última "
-                "mensagem, por favor?"
+                "Oi! Tivemos uma instabilidade rápida por aqui 🙏 "
+                "Já voltei — me conta de novo como posso te ajudar?"
             )
         if not answer:
             return
