@@ -521,6 +521,41 @@ class Responder:
                             "atendido, não necessariamente de quem escreve."
                         ),
                     },
+                    "pacientes": {
+                        "type": "array",
+                        "description": (
+                            "Lista de TODOS os pacientes que vão ser "
+                            "atendidos nesta conversa — um item por pessoa. "
+                            "Use sempre que houver paciente identificado; "
+                            "ESSENCIAL quando há mais de um (ex.: uma mãe "
+                            "agendando dois ou três filhos). O primeiro item "
+                            "é o paciente principal e deve coincidir com os "
+                            "campos 'name'/'birth_date_iso'/'cpf'/'reason'. "
+                            "Inclua um paciente só com os dados realmente "
+                            "ditos na conversa — não invente."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "nome": {
+                                    "type": "string",
+                                    "description": "Nome completo deste paciente",
+                                },
+                                "birth_date_iso": {
+                                    "type": "string",
+                                    "description": "Data de nascimento YYYY-MM-DD",
+                                },
+                                "cpf": {
+                                    "type": "string",
+                                    "description": "CPF deste paciente (dígitos)",
+                                },
+                                "reason": {
+                                    "type": "string",
+                                    "description": "Motivo/queixa da consulta deste paciente",
+                                },
+                            },
+                        },
+                    },
                     "convenio": {
                         "type": "string",
                         "description": "Nome do convênio (ex: 'Pro Ser STJ') ou 'Particular'",
@@ -620,13 +655,21 @@ class Responder:
             "QUEM É O PACIENTE: o campo 'name' é o nome de quem VAI SER ATENDIDO. "
             "Pode ser diferente de quem está escrevendo — por exemplo, um familiar "
             "agendando para outra pessoa. Se a consulta é para outra pessoa, use o "
-            "nome do paciente, NUNCA o de quem apenas enviou as mensagens."
+            "nome do paciente, NUNCA o de quem apenas enviou as mensagens.\n\n"
+            "MÚLTIPLOS PACIENTES: sempre que houver um paciente identificado, "
+            "preencha também a lista 'pacientes' — um item por pessoa que vai "
+            "ser atendida. Quando uma mesma pessoa agenda para mais de alguém "
+            "(ex.: mãe com dois ou três filhos), cada filho é um item da lista, "
+            "com o nome, a data de nascimento e o CPF DAQUELE paciente. O "
+            "primeiro item da lista é o paciente principal e deve bater com "
+            "'name'/'birth_date_iso'/'cpf'. Associe cada CPF ao paciente certo; "
+            "se um dado de um paciente ainda não foi dito, deixe-o em branco."
         )
 
         try:
             response = self._client.messages.create(
                 model=self._haiku,
-                max_tokens=600,
+                max_tokens=1200,
                 system=system,
                 tools=[tool_schema],
                 tool_choice={"type": "tool", "name": "save_lead_fields"},

@@ -178,17 +178,30 @@ FIELD_NOME_PACIENTE_1 = 1255757
 FIELD_MOTIVO_PACIENTE_1 = 1255727
 FIELD_DIA_TURNO_PERIODO = 1259960  # "DIA/TURNO/PERÍODO ⚠️" — preferência textual
 
-# CPF do paciente — necessário para o agendamento no Medware.
-# Campos numerados 1 a 6 (um por paciente da ficha). Hoje a extração
-# estrutura o paciente 1; os demais entram com a camada multipaciente.
+# Date (timestamp YYYY-MM-DDTHH:MM:SS-03:00)
+FIELD_DATA_NASCIMENTO_PACIENTE_1 = 1259984
+
+# ----------------------- camada MULTIPACIENTE (fichas 1 a 6)
+# Cada lead pode ter até 6 pacientes (ex.: mãe agendando vários filhos).
+# Mapas numerados {n: field_id} para gravar a ficha de cada paciente.
+FIELD_NOME_PACIENTES = {
+    1: 1255757, 2: 1255761, 3: 1255779,
+    4: 1255925, 5: 1257661, 6: 1260332,
+}
+FIELD_NASC_PACIENTES = {
+    1: 1259984, 2: 1255729, 3: 1255787,
+    4: 1255927, 5: 1257663, 6: 1260334,
+}
+FIELD_MOTIVO_PACIENTES = {
+    1: 1255727, 2: 1255733, 3: 1255783,
+    4: 1255929, 5: 1257665, 6: 1260338,
+}
+# CPF — necessário para o agendamento no Medware.
 FIELD_CPF_PACIENTE_1 = 1260414
 FIELD_CPF_PACIENTES = {
     1: 1260414, 2: 1260416, 3: 1260418,
     4: 1260548, 5: 1260422, 6: 1260424,
 }
-
-# Date (timestamp YYYY-MM-DDTHH:MM:SS-03:00)
-FIELD_DATA_NASCIMENTO_PACIENTE_1 = 1259984
 
 # Etapas do funil ATENDE em que o agente fica DESLIGADO — tratamento
 # conduzido por humanos ou contato que não é paciente (fornecedor).
@@ -359,13 +372,34 @@ class KommoClient:
                     {"field_id": field_id, "values": [{"value": int(ts)}]}
                 )
 
-        add_text(FIELD_NOME_PACIENTE_1, fields.get("name"))
-        add_text(FIELD_MOTIVO_PACIENTE_1, fields.get("reason"))
-        # CPF do paciente 1 — só dígitos, necessário p/ agendar no Medware.
-        _cpf = "".join(ch for ch in str(fields.get("cpf") or "") if ch.isdigit())
-        add_text(FIELD_CPF_PACIENTE_1, _cpf or None)
+        # ── Fichas dos pacientes (camada multipaciente) ──────────────
+        # Se a extração trouxe a lista `pacientes`, grava a ficha de cada
+        # um nos campos numerados 1..6 (nome, nascimento, motivo, CPF).
+        # Senão, usa os campos simples (compatibilidade — paciente único).
+        def _digits(v: Any) -> str:
+            return "".join(ch for ch in str(v or "") if ch.isdigit())
+
+        pacientes = fields.get("pacientes")
+        if isinstance(pacientes, list) and pacientes:
+            for idx, p in enumerate(pacientes[:6], start=1):
+                if not isinstance(p, dict):
+                    continue
+                add_text(FIELD_NOME_PACIENTES[idx],
+                         p.get("nome") or p.get("name"))
+                add_date(FIELD_NASC_PACIENTES[idx], p.get("birth_date_iso"))
+                add_text(FIELD_MOTIVO_PACIENTES[idx],
+                         p.get("reason") or p.get("motivo"))
+                add_text(FIELD_CPF_PACIENTES[idx],
+                         _digits(p.get("cpf")) or None)
+            # nº de pacientes — rede de segurança se a extração não trouxe
+            fields.setdefault("num_pacientes", str(min(len(pacientes), 10)))
+        else:
+            add_text(FIELD_NOME_PACIENTE_1, fields.get("name"))
+            add_text(FIELD_MOTIVO_PACIENTE_1, fields.get("reason"))
+            add_text(FIELD_CPF_PACIENTE_1, _digits(fields.get("cpf")) or None)
+            add_date(FIELD_DATA_NASCIMENTO_PACIENTE_1,
+                     fields.get("birth_date_iso"))
         add_text(FIELD_DIA_TURNO_PERIODO, fields.get("dia_turno_periodo"))
-        add_date(FIELD_DATA_NASCIMENTO_PACIENTE_1, fields.get("birth_date_iso"))
         add_select(FIELD_CONVENIO, fields.get("convenio"))
         add_select(FIELD_UNIDADE, fields.get("unidade"))
         add_select(FIELD_MEDICOS, fields.get("medico"))
