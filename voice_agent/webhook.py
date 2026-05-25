@@ -172,10 +172,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     def _aviso_unificacao_se_novo(convo_key: str, remote_jid: str,
                                   msg_type: str) -> None:
-        """Lead NOVO no 0710 → envia o aviso de número único UMA vez."""
+        """QUALQUER lead que escreve no 0710 (novo OU recorrente) recebe o
+        aviso do número único — UMA única vez por contato. O marcador
+        persistente em Redis garante que nunca repete. Assim a migração
+        para o 81331005 acontece sozinha, sem transferência manual."""
         try:
-            if conversation_store.get(convo_key):
-                return  # já tem histórico — não é contato novo
             notified_key = f"blink:unif:notified:{convo_key}"
             r = getattr(conversation_store, "_redis", None)
             if r is not None:
