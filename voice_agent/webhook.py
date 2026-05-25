@@ -697,6 +697,45 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "returned": len(out), "items": out,
         })
 
+    @app.api_route("/audios/send", methods=["GET", "POST"])
+    def audios_send(lead: int = 0, phone: str = "",
+                    audio: str = "") -> JSONResponse:
+        """Envia UM áudio da Dra. Karla para um lead/telefone específico.
+
+        Uso: /audios/send?lead=24004241&audio=karla_17
+        ou   /audios/send?phone=5561...&audio=karla_17
+        Só funciona dentro da janela de 24h (mensagem livre)."""
+        if wa_cloud is None:
+            return JSONResponse({"error": "WhatsApp Cloud off"}, status_code=503)
+        if not audio:
+            return JSONResponse(
+                {"error": "informe ?audio=karla_NN"}, status_code=400)
+        fname = audio if audio.lower().endswith(
+            (".ogg", ".mp3", ".opus")) else f"{audio}.ogg"
+        if not _os.path.isfile(_os.path.join(_audios_dir, fname)):
+            return JSONResponse(
+                {"error": f"áudio {fname} não existe"}, status_code=404)
+        dest = "".join(c for c in (phone or "") if c.isdigit())
+        if not dest and lead:
+            try:
+                dest = pipeline.kommo.get_lead_main_phone(int(lead)) or ""
+            except Exception as e:  # noqa: BLE001
+                log.warning("audios_send: telefone do lead falhou: %s", e)
+        if not dest:
+            return JSONResponse(
+                {"error": "telefone não encontrado"}, status_code=400)
+        base = (settings.audio_base_url or "").rstrip("/")
+        if not base:
+            return JSONResponse(
+                {"error": "AUDIO_BASE_URL não configurado"}, status_code=503)
+        try:
+            wa_cloud.send_audio(dest, f"{base}/{fname}")
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"error": str(e)[:240]}, status_code=502)
+        log.info("[AUDIO] enviado %s para %s (lead %s)", fname, dest, lead)
+        return JSONResponse({"sent": True, "to": dest, "audio": fname})
+
     @app.api_route("/audios/fixnames", methods=["GET", "POST"])
     def audios_fixnames() -> JSONResponse:
         """Renomeia karla_in_NNN.ogg → karla_NN.ogg conforme o roteiro.
