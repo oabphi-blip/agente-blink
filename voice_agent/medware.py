@@ -7,14 +7,14 @@ Auth: POST /Acesso/login {identificacao, senha} → {token, refreshToken}
 Endpoints usados:
 - POST /Acesso/login
 - GET  /Medware/Agendamento/Listar
-- GET  /Medware/Horarios/Listar     (vagas livres — ver nota abaixo)
+- GET  /Medware/Horarios/Listar     (vagas livres)
 - GET  /Medware/Medico/Listar
+- POST /Medware/Agendamento/Salvar  (gravação — Fase B)
 
-NOTA SOBRE HORÁRIOS LIVRES: na "Versão Light" da Medware desta clínica o
-endpoint Horarios/Listar tem retornado lista vazia para todas as combinações
-testadas de procedimento/unidade. Enquanto isso não for calibrado junto à
-Medware, `listar_horarios_livres` devolve [] e o agente cai no fluxo de
-coleta de preferência + transferência humana (fallback gracioso).
+NOTA SOBRE HORÁRIOS LIVRES (resolvido 05/2026): a "Versão Light" do Medware
+REJEITA parâmetros zerados (codProcedimento=0, codPlano=0, codEspecialidade=0,
+codPaciente=0) e devolvia [] quando eles eram enviados. A correção foi enviar
+apenas os parâmetros com valor real — ver `listar_horarios_livres`.
 """
 
 from __future__ import annotations
@@ -157,20 +157,29 @@ class MedwareClient:
         hora_inicio: str = "07:00", hora_fim: str = "19:00",
         cod_medico: int = 12080, cod_unidade: int = 0,
         cod_procedimento: int = 0, cod_plano: int = 0,
-        data_nasc: str = "01/01/1990",
+        data_nasc: str = "",
     ) -> list[dict]:
         """Lista vagas livres no período (datas DD/MM/YYYY, horas HH:MM).
 
-        Ver NOTA no topo do arquivo: hoje pode devolver [] (Versão Light).
+        IMPORTANTE: a "Versão Light" do Medware REJEITA parâmetros zerados
+        (codProcedimento=0, codPlano=0, codEspecialidade=0, codPaciente=0) e
+        devolve [] quando eles são enviados. A correção é só mandar o que
+        realmente tem valor — médico + período + janela de horário bastam.
         """
-        params = {
-            "codProcedimento": cod_procedimento,
+        params: dict[str, Any] = {
             "dataInicio": data_inicio, "dataFim": data_fim,
             "horaInicio": hora_inicio, "horaFim": hora_fim,
-            "dataNasc": data_nasc,
-            "codMedico": cod_medico, "codUnidade": cod_unidade,
-            "codPlano": cod_plano, "codEspecialidade": 0, "codPaciente": 0,
         }
+        if cod_medico:
+            params["codMedico"] = cod_medico
+        if cod_unidade:
+            params["codUnidade"] = cod_unidade
+        if cod_procedimento:
+            params["codProcedimento"] = cod_procedimento
+        if cod_plano:
+            params["codPlano"] = cod_plano
+        if data_nasc:
+            params["dataNasc"] = data_nasc
         data = self._get("Medware/Horarios/Listar", params)
         if isinstance(data, list):
             return data
@@ -213,6 +222,9 @@ class MedwareClient:
                 "data_br": dt.strftime("%d/%m"),
                 "dia_semana": _DIAS_SEMANA[dt.weekday()],
                 "hora": h,
+                "cod_agenda": s.get("codAgenda") or 0,
+                "cod_unidade": s.get("codUnidade") or 0,
+                "cod_medico": s.get("codMedico") or cod_medico,
             })
         return out
 
