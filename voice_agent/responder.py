@@ -318,6 +318,32 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
     ) + _agenda_block(ctx)
 
 
+def _sanitize_messages(msgs: list[dict]) -> list[dict]:
+    """Devolve uma lista de mensagens SEMPRE válida para a API Anthropic.
+
+    A API exige: começar com 'user', papéis alternados e conteúdo não
+    vazio. Se o histórico salvo da conversa estiver corrompido (conteúdo
+    vazio, papéis fora de ordem, dois 'user' seguidos), a chamada falha
+    SEMPRE e a conversa trava para sempre. Esta função conserta o
+    histórico em tempo de execução — a conversa se autocorrige na próxima
+    mensagem: descarta conteúdo vazio, descarta 'assistant' inicial e
+    funde mensagens consecutivas do mesmo papel.
+    """
+    out: list[dict] = []
+    for m in msgs:
+        role = m.get("role")
+        content = str(m.get("content") or "").strip()
+        if role not in ("user", "assistant") or not content:
+            continue
+        if not out and role != "user":
+            continue  # a conversa precisa começar com 'user'
+        if out and out[-1]["role"] == role:
+            out[-1]["content"] = out[-1]["content"] + "\n" + content
+        else:
+            out.append({"role": role, "content": content})
+    return out
+
+
 def _route_model(user_text: str, history_len: int, sonnet: str, haiku: str) -> str:
     """Roteador Sonnet vs Haiku por complexidade.
 
@@ -426,7 +452,9 @@ class Responder:
 
         # 3. Monta histórico no formato Anthropic (sem system, só user/assistant)
         history = self._convos.get(conversation_key)
-        messages = history + [{"role": "user", "content": user_text}]
+        messages = _sanitize_messages(
+            history + [{"role": "user", "content": user_text}]
+        )
 
         # 4. Decide modelo
         model = _route_model(user_text, len(history), self._sonnet, self._haiku)
