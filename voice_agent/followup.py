@@ -38,7 +38,31 @@ _FIRSTCONTACT_PREFIX = "blink:followup:firstcontact:"
 # um dict de módulo é compartilhado entre eles quando não há Redis.
 _MEM_PENDING: dict[str, float] = {}
 _MEM_DONE: set[str] = set()
-_MEM_FIRSTCONTACT: dict[str, float] = {}
+# Marcador de primeiro contato guarda "toque:timestamp" (ex.: "2:17796...").
+_MEM_FIRSTCONTACT: dict[str, str] = {}
+
+# Cadência de primeiro contato — quantos toques e o intervalo entre eles.
+# Toque 1: usa followup_firstcontact_min (settings). Toques 2 e 3: +24h cada.
+_FC_MAX_TOUCH = 3
+_FC_TTL = 6 * 86400  # TTL do marcador, longo o bastante p/ toda a cadência
+
+
+def _parse_fc(v) -> tuple[int, float]:
+    """Lê o marcador 'toque:timestamp'. Valor antigo (só timestamp, sem
+    ':') é tratado como toque 1, para compatibilidade."""
+    if v is None:
+        return (1, 0.0)
+    s = v.decode() if isinstance(v, bytes) else str(v)
+    if ":" in s:
+        a, _, b = s.partition(":")
+        try:
+            return (max(1, int(a)), float(b))
+        except (TypeError, ValueError):
+            return (1, 0.0)
+    try:
+        return (1, float(s))
+    except (TypeError, ValueError):
+        return (1, 0.0)
 
 _SEM_CONVENIO = {
     "", "não se aplica", "nao se aplica", "particular",
@@ -111,6 +135,41 @@ def _firstcontact_audio_url(settings, especialidade: str, motivo: str):
     return f"{base}/{fn}"
 
 
+def _firstcontact_touch_content(touch, nome, especialidade, motivo, settings):
+    """(texto, url_de_áudio) do toque N da cadência de primeiro contato.
+
+      Toque 1 — acolhimento + áudio por especialidade (roteiro 7/14/17).
+      Toque 2 — reengajamento suave (~24h depois) + áudio 20 do roteiro.
+      Toque 3 — última tentativa (~48h depois) + áudio 21 do roteiro.
+    Catarata não recebe áudio (usa o vídeo do Dr. Fabrício no toque 1)."""
+    base = (getattr(settings, "audio_base_url", "") or "").rstrip("/")
+    audio_on = bool(getattr(settings, "followup_audio_enabled", False) and base)
+    ctx = f"{especialidade} {motivo}".lower()
+    if touch <= 1:
+        return (
+            _firstcontact_msg(nome, especialidade, motivo),
+            _firstcontact_audio_url(settings, especialidade, motivo),
+        )
+    if touch == 2:
+        txt = (
+            f"Oi, {nome}! 😊 Passei aqui de novo — sei que o dia corre. "
+            "Se ainda quiser cuidar da sua consulta na Blink, é só me "
+            "responder que eu cuido de tudo por aqui 💙"
+        )
+        url = (f"{base}/karla_20.ogg"
+               if audio_on and "catarata" not in ctx else None)
+        return (txt, url)
+    # toque 3 — última tentativa, acolhedora
+    txt = (
+        f"{nome}, esta é a minha última mensagenzinha para não te "
+        "incomodar 💙 Quando quiser retomar a sua consulta, é só me "
+        "chamar aqui — vai ser um prazer te atender."
+    )
+    url = (f"{base}/karla_21.ogg"
+           if audio_on and "catarata" not in ctx else None)
+    return (txt, url)
+
+
 def _postvalue_audio_url(settings):
     """Áudio da Dra. Karla para o follow-up PÓS-VALOR — paciente sumiu
     depois de receber o preço da consulta. Usa o áudio 1 do roteiro
@@ -147,18 +206,19 @@ def set_pending(redis, ckey: str) -> None:
 
 
 def set_firstcontact(redis, ckey: str) -> None:
-    """Arma o marcador de follow-up de PRIMEIRO CONTATO — a Lia respondeu
-    e está aguardando o paciente. Disparado se o paciente não responder."""
+    """Arma o marcador de follow-up de PRIMEIRO CONTATO no toque 1 — a Lia
+    respondeu e está aguardando o paciente. Se o paciente não responder, a
+    cadência de até 3 toques é disparada pelo motor."""
     if not ckey:
         return
-    now = time.time()
+    val = f"1:{time.time()}"
     if redis is not None:
         try:
-            redis.set(_FIRSTCONTACT_PREFIX + ckey, str(now), ex=26 * 3600)
+            redis.set(_FIRSTCONTACT_PREFIX + ckey, val, ex=_FC_TTL)
             return
         except Exception:  # noqa: BLE001
             pass
-    _MEM_FIRSTCONTACT[ckey] = now
+    _MEM_FIRSTCONTACT[ckey] = val
 
 
 def clear_pending(redis, ckey: str) -> None:
@@ -276,24 +336,35 @@ class FollowupEngine:
 
     # ----------------------- follow-up de primeiro contato
 
-    def _firstcontact_items(self) -> list[tuple[str, float]]:
+    def _firstcontact_items(self) -> list[tuple[str, int, float]]:
+        """Lista (conversation_key, toque, timestamp) dos marcadores."""
+        out: list[tuple[str, int, float]] = []
         if self._redis is not None:
-            out: list[tuple[str, float]] = []
             try:
                 for k in self._redis.scan_iter(match=_FIRSTCONTACT_PREFIX + "*"):
                     key = k.decode() if isinstance(k, bytes) else str(k)
                     ckey = key[len(_FIRSTCONTACT_PREFIX):]
-                    v = self._redis.get(k)
-                    try:
-                        ts = float(v) if v else 0.0
-                    except (TypeError, ValueError):
-                        ts = 0.0
-                    out.append((ckey, ts))
+                    touch, ts = _parse_fc(self._redis.get(k))
+                    out.append((ckey, touch, ts))
                 return out
             except Exception as e:  # noqa: BLE001
                 log.warning("followup firstcontact scan falhou: %s", e)
                 return []
-        return list(_MEM_FIRSTCONTACT.items())
+        for ck, v in list(_MEM_FIRSTCONTACT.items()):
+            touch, ts = _parse_fc(v)
+            out.append((ck, touch, ts))
+        return out
+
+    def _rearm_firstcontact(self, ckey: str, touch: int) -> None:
+        """Reagenda o marcador para o próximo toque da cadência."""
+        val = f"{touch}:{time.time()}"
+        if self._redis is not None:
+            try:
+                self._redis.set(_FIRSTCONTACT_PREFIX + ckey, val, ex=_FC_TTL)
+                return
+            except Exception:  # noqa: BLE001
+                pass
+        _MEM_FIRSTCONTACT[ckey] = val
 
     def _fc_done_key(self, ckey: str) -> str:
         return f"{_DONE_PREFIX}fc:{self._mode()}:{ckey}"
@@ -325,20 +396,23 @@ class FollowupEngine:
         _MEM_FIRSTCONTACT.pop(ckey, None)
 
     def _tick_firstcontact(self) -> int:
-        """Dispara o nudge de primeiro contato (mensagem livre, dentro das
-        24h) para leads que não responderam a Lia. Uma vez por lead."""
+        """Cadência multi-toque de primeiro contato. Cada lead recebe até
+        3 toques (≈5min, +24h, +48h), cada um com texto e áudio próprios.
+        Quando o paciente responde, clear_pending apaga o marcador e a
+        cadência para. Esgotada a cadência, o lead é marcado como done."""
         s = self.s
         if not getattr(s, "followup_firstcontact_enabled", False):
             return 0
-        threshold = getattr(s, "followup_firstcontact_min", 5) * 60
         now = time.time()
-        due = [
-            (ck, ts) for ck, ts in self._firstcontact_items()
-            if (now - ts) >= threshold
-        ]
+        min_delay = getattr(s, "followup_firstcontact_min", 5) * 60
         dry = getattr(s, "followup_firstcontact_dry_run", True)
         sent = 0
-        for ckey, _ts in due:
+        for ckey, touch, ts in self._firstcontact_items():
+            # Intervalo até este toque: toque 1 = followup_firstcontact_min;
+            # toques seguintes = +24h desde o toque anterior.
+            delay = min_delay if touch <= 1 else 24 * 3600
+            if (now - ts) < delay:
+                continue
             if self._fc_is_done(ckey):
                 self._clear_firstcontact(ckey)
                 continue
@@ -358,31 +432,36 @@ class FollowupEngine:
                         phone = p
             except Exception as e:  # noqa: BLE001
                 log.warning("followup-fc: contexto falhou (%s): %s", ckey, e)
-            msg = _firstcontact_msg(_first_name(name), especialidade, motivo)
+            txt, audio_url = _firstcontact_touch_content(
+                touch, _first_name(name), especialidade, motivo, s)
+
+            def _avanca() -> None:
+                # Esgotou a cadência → done; senão → reagenda o próximo toque.
+                if touch >= _FC_MAX_TOUCH:
+                    self._fc_mark_done(ckey)
+                    self._clear_firstcontact(ckey)
+                else:
+                    self._rearm_firstcontact(ckey, touch + 1)
+
             if dry:
-                self._fc_mark_done(ckey)
-                self._clear_firstcontact(ckey)
+                _avanca()
                 sent += 1
                 continue
             try:
-                self.wa_cloud.send_text(phone, msg)
+                self.wa_cloud.send_text(phone, txt)
             except Exception as e:  # noqa: BLE001
                 log.warning("followup-fc: envio falhou (%s): %s", ckey, e)
                 continue
-            # Follow-up multimídia — áudio da Dra. Karla conforme a
-            # especialidade (catarata não recebe áudio: usa o vídeo).
-            audio_url = _firstcontact_audio_url(s, especialidade, motivo)
             if audio_url:
                 try:
                     self.wa_cloud.send_audio(phone, audio_url)
                 except Exception as e:  # noqa: BLE001
                     log.warning("followup-fc: áudio falhou (%s): %s", ckey, e)
-            self._fc_mark_done(ckey)
-            self._clear_firstcontact(ckey)
+            _avanca()
             sent += 1
         if sent:
             log.info(
-                "[FOLLOWUP-FC] %d nudge(s) de primeiro contato (dry=%s)",
+                "[FOLLOWUP-FC] %d toque(s) de cadência disparado(s) (dry=%s)",
                 sent, dry,
             )
         return sent
