@@ -697,6 +697,38 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "returned": len(out), "items": out,
         })
 
+    @app.api_route("/audios/fixnames", methods=["GET", "POST"])
+    def audios_fixnames() -> JSONResponse:
+        """Renomeia karla_in_NNN.ogg → karla_NN.ogg conforme o roteiro.
+
+        NNN = ordem de chegada na ingestão; NN = número do áudio no
+        roteiro da Dra. Karla (identificado por transcrição). Operação
+        única, idempotente."""
+        mapa = {
+            1: 1, 2: 2, 3: 3, 4: 5, 5: 4, 6: 6, 7: 7, 8: 8, 9: 9,
+            10: 11, 11: 10, 12: 12, 13: 13, 14: 14, 15: 15, 16: 16,
+            17: 17, 18: 19, 19: 18, 20: 21, 21: 20, 22: 22, 23: 23,
+            24: 24,
+        }
+        done, errs = [], []
+        for src_n, dst_n in mapa.items():
+            src = _os.path.join(_audios_dir, f"karla_in_{src_n:03d}.ogg")
+            dst = _os.path.join(_audios_dir, f"karla_{dst_n:02d}.ogg")
+            if not _os.path.isfile(src):
+                continue
+            try:
+                _os.rename(src, dst)
+                done.append(f"karla_{dst_n:02d}.ogg")
+            except Exception as e:  # noqa: BLE001
+                errs.append(f"{src_n}: {str(e)[:80]}")
+        try:
+            files = sorted(_os.listdir(_audios_dir))
+        except Exception:  # noqa: BLE001
+            files = []
+        return JSONResponse({
+            "renamed": len(done), "errors": errs, "files": files,
+        })
+
     @app.get("/whatsapp")
     def whatsapp_cloud_verify(request: Request):
         """Verificação do webhook exigida pela Meta (handshake)."""
