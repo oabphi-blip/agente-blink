@@ -200,6 +200,24 @@ class MedwareClient:
             log.warning("Medware POST %s erro: %s", path, e)
             return False, str(e)[:160]
 
+    def buscar_paciente_por_cpf(self, cpf: str) -> Optional[dict]:
+        """Busca um paciente pelo CPF. Devolve o 1º registro ou None.
+
+        Usado antes de gravar agendamento: se o paciente JÁ existe no
+        Medware, o agendamento usa o codPaciente dele (evita o erro
+        CPF_JA_CADASTRADO_OUTRA_PESSOA).
+        """
+        digits = "".join(ch for ch in str(cpf or "") if ch.isdigit())
+        if not digits:
+            return None
+        for path in ("Medware/Paciente/Listar", "Medware/Pacientes/Listar"):
+            data = self._get(path, {"cpfPaciente": digits})
+            if isinstance(data, list) and data:
+                return data[0]
+            if isinstance(data, dict) and data.get("codPaciente"):
+                return data
+        return None
+
     # ---------------------------------------------------- escrita (Fase B)
 
     def criar_agendamento(
@@ -259,6 +277,17 @@ class MedwareClient:
             cel = cel[2:]                       # remove DDI 55, se vier
         cel_ddd = cel[:2] if len(cel) >= 10 else ""
         cel_num = cel[2:] if len(cel) >= 10 else cel
+
+        # Se o paciente já existe no Medware (CPF cadastrado), usa o
+        # codPaciente dele — senão o Medware recusa com
+        # CPF_JA_CADASTRADO_OUTRA_PESSOA.
+        if not cod_paciente and cpf:
+            try:
+                existente = self.buscar_paciente_por_cpf(cpf)
+                if existente and existente.get("codPaciente"):
+                    cod_paciente = int(existente["codPaciente"])
+            except Exception as e:  # noqa: BLE001
+                log.warning("Medware busca paciente por CPF falhou: %s", e)
 
         if cod_paciente:
             body["codPaciente"] = cod_paciente
