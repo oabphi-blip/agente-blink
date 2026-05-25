@@ -606,7 +606,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception:  # noqa: BLE001
             pass
 
-    @app.post("/audios/ingest/{action}")
+    @app.api_route("/audios/ingest/{action}", methods=["GET", "POST"])
     def audios_ingest_ctl(action: str, admin: str = "") -> JSONResponse:
         """arm | disarm | status — controla o modo de ingestão de áudios.
 
