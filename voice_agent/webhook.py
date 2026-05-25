@@ -1154,6 +1154,92 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         threading.Thread(target=_broadcast_scheduler, daemon=True).start()
 
     # ================================================================
+    # UNIFICAÇÃO AUTOMÁTICA — leads novos em 0-ETAPA ENTRADA
+    # ================================================================
+    # Varre a etapa 0-ENTRADA a cada 10 min e envia o template de
+    # unificação para todo lead ainda não avisado. Lead novo é migrado
+    # para o 81331005 sozinho — sem transferência manual. Dedup pelo
+    # mesmo marcador da regra do 0710 (blink:unif:notified) → nunca
+    # repete, venha por onde vier.
+    _PIPELINE_ATENDE = 8601819
+    _STATUS_ENTRADA = 96441724
+    _ENTRADA_UNIF_CAP = 60  # teto por rodada (segurança contra surto)
+
+    def _entrada_primeiro_nome(nome: Optional[str]) -> str:
+        n = (nome or "").strip()
+        if not n or n.lower().startswith("lead") or n.startswith("#"):
+            return "tudo bem"
+        return n.split()[0].capitalize()
+
+    def _entrada_unif_scan() -> dict:
+        """Varre 0-ENTRADA e dispara o aviso de unificação aos novos."""
+        if pipeline.kommo is None or wa_cloud is None:
+            return {"ran": False, "reason": "kommo/wa_cloud ausente"}
+        if not settings.broadcast_template_name:
+            return {"ran": False, "reason": "template de unificação não configurado"}
+        try:
+            leads = pipeline.kommo.list_leads_by_status(
+                _PIPELINE_ATENDE, [_STATUS_ENTRADA], limit=250)
+        except Exception as e:  # noqa: BLE001
+            return {"ran": False, "reason": f"listar leads falhou: {e}"}
+        r = getattr(conversation_store, "_redis", None)
+        sent = 0
+        skipped = 0
+        for ld in leads:
+            if sent >= _ENTRADA_UNIF_CAP:
+                break
+            lead_id = int(ld["id"])
+            try:
+                phone = pipeline.kommo.get_lead_main_phone(lead_id)
+            except Exception:  # noqa: BLE001
+                phone = None
+            if not phone:
+                continue
+            digits = _conversation_key(phone)
+            nkey = f"blink:unif:notified:{digits}"
+            if r is not None:
+                try:
+                    if not r.set(nkey, "1", nx=True, ex=180 * 86400):
+                        skipped += 1
+                        continue   # já avisado (por aqui ou pela regra do 0710)
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                wa_cloud.send_template(
+                    to=phone,
+                    name=settings.broadcast_template_name,
+                    language=settings.broadcast_template_lang,
+                    body_params=[_entrada_primeiro_nome(ld.get("name"))],
+                )
+                sent += 1
+            except Exception as e:  # noqa: BLE001
+                log.warning("[ENTRADA-UNIF] envio falhou lead %s: %s", lead_id, e)
+        if sent:
+            log.info("[ENTRADA-UNIF] %d aviso(s) enviado(s), %d já avisado(s)",
+                     sent, skipped)
+        return {"ran": True, "sent": sent, "skipped": skipped,
+                "total_entrada": len(leads)}
+
+    @app.api_route("/unificacao/entrada/scan", methods=["GET", "POST"])
+    def unificacao_entrada_scan() -> JSONResponse:
+        """Diagnóstico/disparo manual da varredura de 0-ENTRADA."""
+        return JSONResponse(_entrada_unif_scan())
+
+    if wa_cloud is not None:
+        def _entrada_unif_scheduler() -> None:
+            import time as _t
+            _t.sleep(60)  # espera o app subir
+            while True:
+                try:
+                    threading.Thread(target=_entrada_unif_scan,
+                                     daemon=True).start()
+                except Exception as e:  # noqa: BLE001
+                    log.warning("[ENTRADA-UNIF] scheduler erro: %s", e)
+                _t.sleep(600)  # 10 minutos
+
+        threading.Thread(target=_entrada_unif_scheduler, daemon=True).start()
+
+    # ================================================================
     # FOLLOW-UP PÓS-VALOR (retomada quando o paciente some após o valor)
     # ================================================================
     # O pipeline marca quando o agente apresenta o valor; este motor
