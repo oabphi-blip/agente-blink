@@ -191,14 +191,28 @@ def answer_has_value(answer: str) -> bool:
     return ("r$" in a) and ("pix" in a or "cartão" in a or "cartao" in a)
 
 
+# Referência ÚNICA de Redis do módulo — definida pelo FollowupEngine na
+# inicialização. Garante que ARMAR o marcador (set_pending/set_firstcontact,
+# chamados pelo pipeline) e LER o marcador (o motor) usem sempre o MESMO
+# Redis. Sem isto, o marcador podia ir para a memória e o motor ler o Redis.
+_REDIS = None
+
+
+def _eff_redis(redis):
+    """Redis efetivo: o do motor (fonte única) tem prioridade sobre o
+    que foi passado pelo chamador."""
+    return _REDIS if _REDIS is not None else redis
+
+
 def set_pending(redis, ckey: str) -> None:
     """Arma o marcador de follow-up (o agente apresentou o valor)."""
     if not ckey:
         return
     now = time.time()
-    if redis is not None:
+    r = _eff_redis(redis)
+    if r is not None:
         try:
-            redis.set(_PENDING_PREFIX + ckey, str(now), ex=26 * 3600)
+            r.set(_PENDING_PREFIX + ckey, str(now), ex=26 * 3600)
             return
         except Exception:  # noqa: BLE001
             pass
@@ -212,9 +226,10 @@ def set_firstcontact(redis, ckey: str) -> None:
     if not ckey:
         return
     val = f"1:{time.time()}"
-    if redis is not None:
+    r = _eff_redis(redis)
+    if r is not None:
         try:
-            redis.set(_FIRSTCONTACT_PREFIX + ckey, val, ex=_FC_TTL)
+            r.set(_FIRSTCONTACT_PREFIX + ckey, val, ex=_FC_TTL)
             return
         except Exception:  # noqa: BLE001
             pass
@@ -226,10 +241,11 @@ def clear_pending(redis, ckey: str) -> None:
     Limpa tanto o follow-up pós-valor quanto o de primeiro contato."""
     if not ckey:
         return
-    if redis is not None:
+    r = _eff_redis(redis)
+    if r is not None:
         try:
-            redis.delete(_PENDING_PREFIX + ckey)
-            redis.delete(_FIRSTCONTACT_PREFIX + ckey)
+            r.delete(_PENDING_PREFIX + ckey)
+            r.delete(_FIRSTCONTACT_PREFIX + ckey)
             return
         except Exception:  # noqa: BLE001
             pass
@@ -263,6 +279,11 @@ class FollowupEngine:
         self.wa_cloud = wa_cloud
         self.store = store
         self._redis = getattr(store, "_redis", None)
+        # Publica o Redis do motor como referência única do módulo, para
+        # que set_pending/set_firstcontact/clear_pending (chamados pelo
+        # pipeline) gravem no MESMO Redis que o motor lê.
+        global _REDIS
+        _REDIS = self._redis
         self._mem_count: dict[str, int] = {}
 
     def _today(self) -> str:
