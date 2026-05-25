@@ -561,7 +561,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # isso /audios/export devolve os arquivos para arquivar no repo).
     _audios_dir = _os.path.join(_static_dir, "audios")
     _os.makedirs(_audios_dir, exist_ok=True)
-    _ingest = {"armed": False, "next_label": None, "saved": [], "admin": ""}
+    _ingest = {
+        "armed": False, "next_label": None, "saved": [], "admin": "",
+        "seq": 0,
+    }
+    _ingest_lock = threading.Lock()
 
     def _ingest_admin() -> str:
         """Número autorizado a ingerir áudios: o passado no /arm tem
@@ -586,10 +590,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         rm = (real_mime or mime or "").lower()
         ext = "ogg" if ("ogg" in rm or "opus" in rm) else (
             "mp3" if "mpeg" in rm or "mp3" in rm else "ogg")
-        label = _ingest["next_label"]
-        idx = label if label else (len(_ingest["saved"]) + 1)
-        _ingest["next_label"] = None
-        fname = f"karla_{idx:02d}.{ext}"
+        # Nome sequencial à prova de colisão (contador protegido por lock).
+        # A ORDEM de chegada é a ordem do encaminhamento; o mapa final
+        # para os números do roteiro é feito depois (por transcrição).
+        with _ingest_lock:
+            _ingest["seq"] += 1
+            idx = _ingest["seq"]
+        fname = f"karla_in_{idx:03d}.{ext}"
         try:
             with open(_os.path.join(_audios_dir, fname), "wb") as fh:
                 fh.write(audio_bytes)
@@ -600,8 +607,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         log.info("[INGEST] áudio salvo: %s (%d bytes)", fname, len(audio_bytes))
         try:
             wa_cloud.send_text(
-                settings.audio_ingest_admin,
-                f"✅ Áudio salvo: {fname}  ({len(_ingest['saved'])} no total)",
+                _ingest_admin(),
+                f"✅ Áudio {idx} salvo  ({len(_ingest['saved'])} no total)",
             )
         except Exception:  # noqa: BLE001
             pass
@@ -619,6 +626,18 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 _ingest["admin"] = digits
         elif action == "disarm":
             _ingest["armed"] = False
+        elif action == "clear":
+            # Apaga os áudios já ingeridos e zera o contador — para
+            # recomeçar a ingestão do zero, sem colisão de nomes.
+            for fn in list(_os.listdir(_audios_dir)):
+                if fn.lower().endswith((".ogg", ".mp3", ".opus")):
+                    try:
+                        _os.remove(_os.path.join(_audios_dir, fn))
+                    except Exception:  # noqa: BLE001
+                        pass
+            _ingest["saved"] = []
+            _ingest["seq"] = 0
+            _ingest["next_label"] = None
         return JSONResponse({
             "armed": _ingest["armed"],
             "admin": _ingest_admin() or None,
