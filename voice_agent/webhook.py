@@ -561,7 +561,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # isso /audios/export devolve os arquivos para arquivar no repo).
     _audios_dir = _os.path.join(_static_dir, "audios")
     _os.makedirs(_audios_dir, exist_ok=True)
-    _ingest = {"armed": False, "next_label": None, "saved": []}
+    _ingest = {"armed": False, "next_label": None, "saved": [], "admin": ""}
+
+    def _ingest_admin() -> str:
+        """Número autorizado a ingerir áudios: o passado no /arm tem
+        prioridade; senão cai no AUDIO_INGEST_ADMIN das settings."""
+        return _ingest.get("admin") or settings.audio_ingest_admin or ""
 
     def _ingest_label_from_text(text: str):
         """Extrai o número do áudio de um texto tipo 'Áudio 7' / '7'."""
@@ -602,15 +607,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             pass
 
     @app.post("/audios/ingest/{action}")
-    def audios_ingest_ctl(action: str) -> JSONResponse:
-        """arm | disarm | status — controla o modo de ingestão de áudios."""
+    def audios_ingest_ctl(action: str, admin: str = "") -> JSONResponse:
+        """arm | disarm | status — controla o modo de ingestão de áudios.
+
+        Em /arm, passe ?admin=<telefone> (com DDI) do número que vai
+        ENCAMINHAR os áudios — só ele é ingerido."""
         if action == "arm":
             _ingest["armed"] = True
+            digits = "".join(ch for ch in (admin or "") if ch.isdigit())
+            if digits:
+                _ingest["admin"] = digits
         elif action == "disarm":
             _ingest["armed"] = False
         return JSONResponse({
             "armed": _ingest["armed"],
-            "admin": settings.audio_ingest_admin or None,
+            "admin": _ingest_admin() or None,
             "saved": _ingest["saved"],
             "count": len(_ingest["saved"]),
         })
@@ -677,8 +688,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             # em /static/audios/, NÃO entram no atendimento da Lia.
             if (
                 _ingest["armed"]
-                and settings.audio_ingest_admin
-                and phone == settings.audio_ingest_admin
+                and _ingest_admin()
+                and phone == _ingest_admin()
             ):
                 if mtype == "audio" and m.get("media_id"):
                     threading.Thread(
