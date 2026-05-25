@@ -53,11 +53,53 @@ UNIDADE_CODES = {
     "águas claras": 3, "aguas claras": 3,
 }
 
+# --- Procedimentos de CONSULTA -------------------------------------------
+# Particular tem procedimento próprio por médico; convênio usa o genérico 13.
+PROC_CONSULTA_CONVENIO = 13          # "Consulta em consultório (horário normal)"
+PROC_CONSULTA_PARTICULAR = {
+    12080: 303,                       # Consulta Particular Dra. Karla
+}
+PROC_CONSULTA_PARTICULAR_DEFAULT = 303
+
+# --- Planos --------------------------------------------------------------
+# codPlano 1 = .PARTICULAR. Demais = convênios mapeados a partir do histórico
+# real de agendamentos. Convênio que NÃO estiver aqui → o agente cai no
+# fluxo de atendimento humano (nunca agenda com plano errado).
+PLANO_PARTICULAR = 1
+PLANO_CODES = {
+    "particular": 1, "sem convenio": 1, "sem convênio": 1, "particular ": 1,
+    "serpro": 31,
+    "sis senado": 32, "sis-senado": 32, "senado": 32,
+    "tjdft": 2, "t.j.d.f.t": 2, "tjdft direto": 2, "tribunal de justica": 2,
+    "policia federal": 26, "polícia federal": 26, "pf": 26,
+    "plan-assist": 4, "plan assist": 4, "planassist": 4, "plan-assit": 4,
+    "bacen": 9, "banco central": 9,
+    "stj": 3, "superior tribunal de justica": 3,
+    "camara dos deputados": 39, "câmara dos deputados": 39, "camara": 39,
+}
+
 
 def _code_lookup(table: dict, name: Optional[str]) -> int:
     if not name:
         return 0
     return table.get(str(name).strip().lower(), 0)
+
+
+def resolver_plano(convenio: Optional[str]) -> int:
+    """Nome do convênio → codPlano. 0 = desconhecido (→ atendimento humano).
+
+    'Particular'/'sem convênio'/vazio resolve para o plano particular (1).
+    """
+    if not convenio or not str(convenio).strip():
+        return 0
+    chave = str(convenio).strip().lower()
+    if chave in PLANO_CODES:
+        return PLANO_CODES[chave]
+    # match parcial — "uso o plano da policia federal" etc.
+    for nome, cod in PLANO_CODES.items():
+        if len(nome) >= 4 and nome in chave:
+            return cod
+    return 0
 
 
 @dataclass
@@ -135,6 +177,105 @@ class MedwareClient:
         except Exception as e:  # noqa: BLE001
             log.warning("Medware GET %s erro: %s", path, e)
             return None
+
+    def _post(self, path: str, body: dict) -> tuple[bool, Any]:
+        """POST autenticado. Devolve (ok, payload|erro)."""
+        headers = self._headers()
+        if headers is None:
+            return False, "sem token Medware"
+        headers["Content-Type"] = "application/json"
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.post(f"{self.base_url}/{path}", json=body, headers=headers)
+            ok = 200 <= r.status_code < 300
+            try:
+                payload = r.json()
+            except Exception:  # noqa: BLE001
+                payload = r.text
+            if not ok:
+                log.warning("Medware POST %s falhou: HTTP %d %s",
+                            path, r.status_code, str(payload)[:200])
+            return ok, payload
+        except Exception as e:  # noqa: BLE001
+            log.warning("Medware POST %s erro: %s", path, e)
+            return False, str(e)[:160]
+
+    # ---------------------------------------------------- escrita (Fase B)
+
+    def criar_agendamento(
+        self,
+        *,
+        cod_medico: int,
+        cod_unidade: int,
+        cod_agenda: int,
+        data_hora: str,
+        nome: str,
+        cpf: str = "",
+        data_nascimento: str = "",
+        celular: str = "",
+        convenio: Optional[str] = None,
+        cod_paciente: int = 0,
+        encaixe: bool = False,
+        obs: str = "",
+    ) -> dict:
+        """Grava um agendamento de CONSULTA no Medware.
+
+        `convenio` None/"particular" → plano particular (1) + procedimento
+        particular do médico. Convênio nomeado → resolve o codPlano; se não
+        estiver mapeado devolve {ok:False, motivo:"convenio_desconhecido"}
+        para o agente cair no fluxo humano.
+
+        `data_hora` aceita 'YYYY-MM-DDTHH:MM' ou 'DD/MM/YYYY HH:MM'.
+        Retorna {ok, cod_agendamento?, plano, procedimento, motivo?, detalhe?}.
+        """
+        cod_plano = (
+            PLANO_PARTICULAR
+            if (not convenio or str(convenio).strip().lower()
+                in ("particular", "sem convenio", "sem convênio"))
+            else resolver_plano(convenio)
+        )
+        if not cod_plano:
+            return {"ok": False, "motivo": "convenio_desconhecido",
+                    "convenio": convenio}
+        if cod_plano == PLANO_PARTICULAR:
+            cod_proc = PROC_CONSULTA_PARTICULAR.get(
+                cod_medico, PROC_CONSULTA_PARTICULAR_DEFAULT)
+        else:
+            cod_proc = PROC_CONSULTA_CONVENIO
+
+        body: dict[str, Any] = {
+            "codMedico": cod_medico,
+            "codUnidade": cod_unidade,
+            "codAgenda": cod_agenda,
+            "codProcedimento": cod_proc,
+            "codPlano": cod_plano,
+            "dataHoraAgendada": data_hora,
+            "encaixe": -1 if encaixe else 0,
+            "obs": obs or None,
+        }
+        if cod_paciente:
+            body["codPaciente"] = cod_paciente
+        else:
+            body["paciente"] = {
+                "nome": (nome or "").strip().upper(),
+                "cpf": "".join(ch for ch in (cpf or "") if ch.isdigit()),
+                "dataNascimento": data_nascimento or "",
+                "telefone": celular or "",
+            }
+
+        ok, payload = self._post("Medware/Agendamento/Salvar", body)
+        if not ok:
+            return {"ok": False, "motivo": "erro_medware",
+                    "detalhe": str(payload)[:200],
+                    "plano": cod_plano, "procedimento": cod_proc}
+        cod_ag = 0
+        if isinstance(payload, dict):
+            cod_ag = (payload.get("codAgendamento")
+                      or payload.get("cod") or 0)
+        return {"ok": True, "cod_agendamento": cod_ag,
+                "plano": cod_plano, "procedimento": cod_proc,
+                "detalhe": payload if not isinstance(payload, (dict, list))
+                else None}
 
     def listar_agendamentos(
         self, data_inicio: str, data_fim: str,

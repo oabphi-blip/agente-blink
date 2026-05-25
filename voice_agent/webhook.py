@@ -763,6 +763,37 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "returned": len(out), "items": out,
         })
 
+    @app.get("/medware/horarios")
+    def medware_horarios(medico: str = "Dra. Karla Delalibera",
+                         unidade: str = "", dias: int = 14) -> JSONResponse:
+        """Diagnóstico Fase A: vagas REAIS que a Lia consegue oferecer."""
+        if medware is None:
+            return JSONResponse({"error": "medware desligado"}, status_code=503)
+        try:
+            slots = medware.horarios_para_agente(medico, unidade or None, dias)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)[:200]}, status_code=500)
+        return JSONResponse({"medico": medico, "unidade": unidade or None,
+                             "count": len(slots), "slots": slots[:30]})
+
+    @app.get("/medware/diag-agendar")
+    def medware_diag_agendar(path: str = "Medware/Agendamento/Salvar"
+                             ) -> JSONResponse:
+        """Diagnóstico Fase B: verifica se o endpoint de GRAVAÇÃO do Medware
+        existe, SEM criar agendamento real.
+
+        Envia um corpo VAZIO ({}), que jamais cria um agendamento válido.
+        Interessa só o código HTTP da resposta:
+          • 400/422  → endpoint existe, corpo recusado pela validação (ok!)
+          • 404      → o caminho informado está errado, testar outro
+          • 200/201  → improvável; reportar antes de seguir
+        """
+        if medware is None:
+            return JSONResponse({"error": "medware desligado"}, status_code=503)
+        ok, payload = medware._post(path, {})
+        return JSONResponse({"path": path, "aceitou_corpo_vazio": ok,
+                             "resposta": str(payload)[:400]})
+
     @app.api_route("/whatsapp/reativar", methods=["GET", "POST"])
     def whatsapp_reativar(lead: int = 0, phone: str = "",
                           template: str = "", param: str = "",
