@@ -216,22 +216,32 @@ def _agenda_block(ctx: Optional[dict]) -> str:
             por_dia[key] = []
             ordem.append(key)
         por_dia[key].append(s.get("hora", ""))
+    # TRAVA 1 — amostra enxuta: no máximo 3 dias, e só 2 horários por dia.
+    # O agente NUNCA recebe a agenda inteira, então não tem como despejá-la.
     linhas = []
-    for (dia, dbr) in ordem[:8]:
-        horas = ", ".join([h for h in por_dia[(dia, dbr)] if h])
-        linhas.append(f"- {dia} {dbr}: {horas}")
+    for (dia, dbr) in ordem[:3]:
+        horas = [h for h in por_dia[(dia, dbr)] if h][:2]
+        if horas:
+            linhas.append(f"- {dia} {dbr}: {', '.join(horas)}")
     return (
         "\n\n----------------------------------------------------------------"
-        "\nAGENDA REAL — HORÁRIOS DISPONÍVEIS (consultados agora no Medware)"
+        "\nAGENDA REAL — AMOSTRA DE HORÁRIOS LIVRES (consultada no Medware)"
         "\n----------------------------------------------------------------"
-        "\nOs horários abaixo são vagas LIVRES de verdade na agenda do médico."
-        "\nQuando o paciente já tiver dado a preferência de dia/turno, OFEREÇA"
-        "\na ele 2 ou 3 destes horários concretos que combinem com a"
-        "\npreferência — diga o dia e a hora com clareza. NUNCA invente nem"
-        "\nprometa um horário fora desta lista. Esta seção TEM PRECEDÊNCIA: se"
-        "\nhá horários aqui, o agente OFERECE horário (não apenas coleta a"
-        "\npreferência). Depois que o paciente escolher, confirme os dados e"
-        "\ninforme que a recepção finaliza o agendamento."
+        "\nEstas são vagas LIVRES de verdade na agenda do médico."
+        "\n\n⚠️ REGRA DE OURO — PRINCÍPIO DA ESCASSEZ:"
+        "\n• Ofereça ao paciente NO MÁXIMO 2 horários por vez."
+        "\n• NUNCA liste vários horários nem 'a agenda toda'. Despejar muitas"
+        "\n  vagas passa a impressão de clínica vazia, destrói o senso de"
+        "\n  oportunidade e derruba a conversão — é um erro grave."
+        "\n• Escolha os 2 horários que MAIS combinam com a preferência de"
+        "\n  dia/turno que o paciente já deu. Se ele ainda não deu preferência,"
+        "\n  pergunte o melhor dia/turno ANTES de oferecer."
+        "\n• Só se o paciente recusar os 2, aí ofereça outros 2."
+        "\n• Nunca invente nem prometa horário fora desta lista."
+        "\nEsta seção TEM PRECEDÊNCIA: havendo horário, o agente OFERECE"
+        "\n(no máximo 2), não apenas coleta a preferência. Depois que o"
+        "\npaciente escolher, confirme os dados e informe que a recepção"
+        "\nfinaliza o agendamento."
         f"\n{chr(10).join(linhas)}"
         "\n----------------------------------------------------------------"
     )
