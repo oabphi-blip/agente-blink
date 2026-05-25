@@ -253,6 +253,13 @@ class MedwareClient:
             "encaixe": -1 if encaixe else 0,
             "obs": obs or None,
         }
+        # Celular: o Medware exige DDD e número SEPARADOS.
+        cel = "".join(ch for ch in (celular or "") if ch.isdigit())
+        if len(cel) > 11 and cel.startswith("55"):
+            cel = cel[2:]                       # remove DDI 55, se vier
+        cel_ddd = cel[:2] if len(cel) >= 10 else ""
+        cel_num = cel[2:] if len(cel) >= 10 else cel
+
         if cod_paciente:
             body["codPaciente"] = cod_paciente
         else:
@@ -260,7 +267,8 @@ class MedwareClient:
                 "nome": (nome or "").strip().upper(),
                 "cpf": "".join(ch for ch in (cpf or "") if ch.isdigit()),
                 "dataNascimento": data_nascimento or "",
-                "telefone": celular or "",
+                "numeroCelular": cel_num,
+                "numeroCelularDdd": cel_ddd,
             }
 
         ok, payload = self._post("Medware/Agendamento/Salvar", body)
