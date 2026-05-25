@@ -116,14 +116,15 @@ existem (omitir linha que não se aplica):
 📋 Resumo do seu agendamento:
 
 👤 Paciente: [nome do paciente] ([idade], se souber)
+🆔 CPF: [CPF do paciente]
 🩺 Profissional: [médico] — [especialidade]
 🏥 Unidade: [unidade]
 💳 Convênio: [nome do convênio]
 📅 Preferência: [dia da semana] — [turno] — [período do turno]
 📝 Motivo: [motivo da consulta]
 
-Está tudo certo? Nossa equipe confirma o horário exato e envia o
-detalhamento em horário comercial (segunda a sexta, das 8h às 18h).
+Está tudo certo? Nossa equipe já está dando sequência para confirmar o
+horário e te enviar o detalhamento.
 ```
 
 ### Passo 2 — Encerramento

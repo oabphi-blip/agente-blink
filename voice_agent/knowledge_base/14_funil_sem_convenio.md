@@ -79,27 +79,30 @@ Imediatamente após o paciente responder se prefere Pix ou Cartão para um atend
 
 ## ✅ ENCERRAMENTO — EXTRATO DO AGENDAMENTO
 
-Assim que o paciente escolher o dia/turno/período, **antes de encerrar**, o
-agente deve **OBRIGATORIAMENTE enviar UMA mensagem de extrato** consolidando
-tudo que foi levantado (ver artigo 13 — seção Encerramento). Para o
-atendimento sem convênio, na linha do convênio escrever **"Particular"** e
-incluir a forma de pagamento escolhida:
+Assim que o paciente escolher o dia/turno/período, o agente **NÃO encerra
+direto**. Para atendimento sem convênio (particular) é OBRIGATÓRIO, antes do
+resumo, solicitar o **comprovante do sinal** — adiantamento de 50% do valor
+da consulta (ver artigo 13, regra 13.1-A, e artigo 36). Só DEPOIS de receber
+o comprovante o agente envia **UMA mensagem de extrato** consolidando tudo:
 
 ```
 📋 Resumo do seu agendamento:
 
 👤 Paciente: [nome do paciente] ([idade], se souber)
+🆔 CPF: [CPF do paciente]
 🩺 Profissional: [médico] — [especialidade]
 🏥 Unidade: [unidade]
-💳 Pagamento: Particular — [Pix / Cartão]
+💳 Pagamento: Particular — sinal de 50% pago (comprovante recebido)
 📅 Preferência: [dia da semana] — [turno] — [período do turno]
 📝 Motivo: [motivo da consulta]
 
-Está tudo certo? Nossa equipe confirma o horário exato e envia o
-detalhamento em horário comercial (segunda a sexta, das 8h às 18h).
+Pronto! Seu horário está garantido ✅ Já te enviamos o detalhamento.
 ```
 
 É **uma mensagem só**. Se o paciente corrigir algo, ajustar e reenviar.
+Se o paciente NÃO enviar o comprovante ou resistir ao pagamento, NÃO
+confirmar o horário: registrar a preferência e mover para 0-ATENDIMENTO
+HUMANO (ver regra 13.1-A).
 
 ## ⚠️ Regras adicionais
 
