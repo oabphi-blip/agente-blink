@@ -671,6 +671,32 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return JSONResponse({"error": str(e)}, status_code=500)
         return JSONResponse({"count": len(out), "files": out})
 
+    @app.get("/audios/transcribe")
+    def audios_transcribe(offset: int = 0, limit: int = 6) -> JSONResponse:
+        """Transcreve um lote de áudios de /static/audios/ — usado para
+        identificar qual áudio do roteiro é cada arquivo ingerido."""
+        try:
+            files = sorted(
+                fn for fn in _os.listdir(_audios_dir)
+                if fn.lower().endswith((".ogg", ".mp3", ".opus"))
+            )
+        except Exception:  # noqa: BLE001
+            files = []
+        out = []
+        for fn in files[offset:offset + limit]:
+            fp = _os.path.join(_audios_dir, fn)
+            try:
+                with open(fp, "rb") as fh:
+                    data = fh.read()
+                text = transcriber.transcribe(data, mime_type="audio/ogg")
+            except Exception as e:  # noqa: BLE001
+                text = f"[erro: {str(e)[:120]}]"
+            out.append({"name": fn, "text": text})
+        return JSONResponse({
+            "total": len(files), "offset": offset,
+            "returned": len(out), "items": out,
+        })
+
     @app.get("/whatsapp")
     def whatsapp_cloud_verify(request: Request):
         """Verificação do webhook exigida pela Meta (handshake)."""
