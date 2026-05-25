@@ -98,6 +98,15 @@ class Settings:
     followup_firstcontact_enabled: bool = False
     followup_firstcontact_dry_run: bool = True
     followup_firstcontact_min: int = 5
+    # Follow-up MULTIMÍDIA — envia o áudio da Dra. Karla no nudge de
+    # primeiro contato, escolhido pela especialidade do lead.
+    followup_audio_enabled: bool = False
+    # URL base pública dos áudios (rota /static). Se vazio, é montada
+    # a partir do host do próprio agente.
+    audio_base_url: str = ""
+    # Telefone (só dígitos, com DDI) autorizado a ENCAMINHAR áudios para
+    # o 8133 durante o modo de ingestão. Ninguém mais é ingerido.
+    audio_ingest_admin: str = ""
 
     # Reconciliação de etapas (Medware × Kommo) — duas travas, igual reativação.
     reconciliation_enabled: bool = False
@@ -262,6 +271,16 @@ class Settings:
             "FOLLOWUP_FIRSTCONTACT_DRY_RUN", "followup_firstcontact_dry_run", True)
         followup_firstcontact_min = _intval(
             "FOLLOWUP_FIRSTCONTACT_MIN", "followup_firstcontact_min", 5)
+        followup_audio_enabled = _flag(
+            "FOLLOWUP_AUDIO_ENABLED", "followup_audio_enabled", False)
+        audio_base_url = (
+            os.getenv("AUDIO_BASE_URL") or rc.get("audio_base_url", "") or "")
+        audio_ingest_admin = "".join(
+            ch for ch in (
+                os.getenv("AUDIO_INGEST_ADMIN")
+                or rc.get("audio_ingest_admin", "") or ""
+            ) if ch.isdigit()
+        )
 
         # Asaas — links de pagamento da consulta.
         asaas_enabled = _flag("ASAAS_ENABLED", "asaas_enabled", False)
@@ -344,6 +363,9 @@ class Settings:
             followup_firstcontact_enabled=followup_firstcontact_enabled,
             followup_firstcontact_dry_run=followup_firstcontact_dry_run,
             followup_firstcontact_min=followup_firstcontact_min,
+            followup_audio_enabled=followup_audio_enabled,
+            audio_base_url=audio_base_url,
+            audio_ingest_admin=audio_ingest_admin,
             whatsapp_cloud_token=whatsapp_cloud_token,
             whatsapp_cloud_phone_number_id=whatsapp_cloud_phone_number_id,
             whatsapp_cloud_waba_id=whatsapp_cloud_waba_id,

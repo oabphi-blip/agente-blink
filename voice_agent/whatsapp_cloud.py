@@ -72,6 +72,28 @@ class WhatsAppCloudClient:
             )
         return r.json() if r.content else {}
 
+    def send_audio(self, to: str, link: str) -> dict:
+        """Envia uma mensagem de áudio (ex.: áudio gravado da Dra. Karla).
+
+        O áudio é enviado por URL pública. Arquivos .ogg/.opus aparecem
+        para o paciente como mensagem de voz no WhatsApp. Só funciona
+        dentro da janela de 24h (mensagem livre)."""
+        url = f"{self._base}/{self.phone_number_id}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": _digits(to),
+            "type": "audio",
+            "audio": {"link": link},
+        }
+        with httpx.Client(timeout=self.timeout) as c:
+            r = c.post(url, headers=self._headers(), json=payload)
+        if r.status_code >= 400:
+            raise WhatsAppCloudError(
+                f"send_audio falhou ({r.status_code}): {(r.text or '')[:300]}"
+            )
+        return r.json() if r.content else {}
+
     # ----------------------------------------------------------- templates
 
     def send_template(

@@ -551,6 +551,96 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if text and text.strip():
             _process_whatsapp_cloud(text, phone, msg_id)
 
+    # ================================================================
+    # INGESTÃO DE ÁUDIOS — recebe os áudios da Dra. Karla pelo 8133
+    # ================================================================
+    # O WhatsApp não deixa baixar nota de voz pela tela. Solução: o
+    # admin ENCAMINHA os áudios para o 8133; com o modo armado, cada
+    # áudio é salvo em /static/audios/ e fica disponível para o
+    # follow-up multimídia. Estado em memória (some no restart — por
+    # isso /audios/export devolve os arquivos para arquivar no repo).
+    _audios_dir = _os.path.join(_static_dir, "audios")
+    _os.makedirs(_audios_dir, exist_ok=True)
+    _ingest = {"armed": False, "next_label": None, "saved": []}
+
+    def _ingest_label_from_text(text: str):
+        """Extrai o número do áudio de um texto tipo 'Áudio 7' / '7'."""
+        import re as _re
+        mm = _re.search(r"\d{1,2}", text or "")
+        return int(mm.group()) if mm else None
+
+    def _ingest_audio(media_id: str, mime: str) -> None:
+        """Baixa o áudio encaminhado e salva em /static/audios/."""
+        if wa_cloud is None:
+            return
+        try:
+            audio_bytes, real_mime = wa_cloud.get_media_bytes(media_id)
+        except Exception as e:  # noqa: BLE001
+            log.warning("ingest áudio falhou: %s", e)
+            return
+        rm = (real_mime or mime or "").lower()
+        ext = "ogg" if ("ogg" in rm or "opus" in rm) else (
+            "mp3" if "mpeg" in rm or "mp3" in rm else "ogg")
+        label = _ingest["next_label"]
+        idx = label if label else (len(_ingest["saved"]) + 1)
+        _ingest["next_label"] = None
+        fname = f"karla_{idx:02d}.{ext}"
+        try:
+            with open(_os.path.join(_audios_dir, fname), "wb") as fh:
+                fh.write(audio_bytes)
+        except Exception as e:  # noqa: BLE001
+            log.warning("ingest gravar %s falhou: %s", fname, e)
+            return
+        _ingest["saved"].append({"name": fname, "size": len(audio_bytes)})
+        log.info("[INGEST] áudio salvo: %s (%d bytes)", fname, len(audio_bytes))
+        try:
+            wa_cloud.send_text(
+                settings.audio_ingest_admin,
+                f"✅ Áudio salvo: {fname}  ({len(_ingest['saved'])} no total)",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    @app.post("/audios/ingest/{action}")
+    def audios_ingest_ctl(action: str) -> JSONResponse:
+        """arm | disarm | status — controla o modo de ingestão de áudios."""
+        if action == "arm":
+            _ingest["armed"] = True
+        elif action == "disarm":
+            _ingest["armed"] = False
+        return JSONResponse({
+            "armed": _ingest["armed"],
+            "admin": settings.audio_ingest_admin or None,
+            "saved": _ingest["saved"],
+            "count": len(_ingest["saved"]),
+        })
+
+    @app.get("/audios/list")
+    def audios_list() -> JSONResponse:
+        """Lista os arquivos de áudio presentes em /static/audios/."""
+        try:
+            files = sorted(_os.listdir(_audios_dir))
+        except Exception:  # noqa: BLE001
+            files = []
+        return JSONResponse({"dir": "/static/audios", "files": files})
+
+    @app.get("/audios/export")
+    def audios_export() -> JSONResponse:
+        """Devolve os áudios ingeridos em base64, para arquivar no repo."""
+        import base64 as _b64
+        out = []
+        try:
+            for fn in sorted(_os.listdir(_audios_dir)):
+                fp = _os.path.join(_audios_dir, fn)
+                if not _os.path.isfile(fp):
+                    continue
+                with open(fp, "rb") as fh:
+                    out.append({"name": fn, "b64": _b64.b64encode(
+                        fh.read()).decode("ascii")})
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"count": len(out), "files": out})
+
     @app.get("/whatsapp")
     def whatsapp_cloud_verify(request: Request):
         """Verificação do webhook exigida pela Meta (handshake)."""
@@ -583,6 +673,24 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             if mid and not conversation_store.mark_seen(f"wa:{mid}"):
                 continue
             mtype = m.get("type")
+            # MODO INGESTÃO — áudios encaminhados pelo admin viram arquivos
+            # em /static/audios/, NÃO entram no atendimento da Lia.
+            if (
+                _ingest["armed"]
+                and settings.audio_ingest_admin
+                and phone == settings.audio_ingest_admin
+            ):
+                if mtype == "audio" and m.get("media_id"):
+                    threading.Thread(
+                        target=_ingest_audio,
+                        args=(m["media_id"], m.get("mime") or ""),
+                        daemon=True,
+                    ).start()
+                    continue
+                if mtype == "text":
+                    _ingest["next_label"] = _ingest_label_from_text(
+                        m.get("text") or "")
+                    continue
             if mtype == "text" and (m.get("text") or "").strip():
                 threading.Thread(
                     target=_process_whatsapp_cloud,

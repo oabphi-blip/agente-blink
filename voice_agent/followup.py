@@ -82,6 +82,35 @@ def _firstcontact_msg(
     )
 
 
+def _firstcontact_audio_url(settings, especialidade: str, motivo: str):
+    """Escolhe o áudio da Dra. Karla para o nudge de primeiro contato,
+    conforme a especialidade do lead. Devolve a URL pública ou None.
+
+    Mapa (roteiro de áudios da Dra. Karla):
+      estrabismo                 → karla_07 (parou após a triagem)
+      oftalmopediatria/infantil  → karla_14 (consulta da criança)
+      catarata                   → None (catarata usa o vídeo do Dr. Fabrício)
+      rotina/geral/demais        → karla_17 (não respondeu ao 1º contato)
+    """
+    if not getattr(settings, "followup_audio_enabled", False):
+        return None
+    base = (getattr(settings, "audio_base_url", "") or "").rstrip("/")
+    if not base:
+        return None
+    ctx = f"{especialidade} {motivo}".lower()
+    if "catarata" in ctx:
+        return None
+    if "estrabismo" in ctx:
+        fn = "karla_07.ogg"
+    elif any(k in ctx for k in (
+        "pediatr", "infantil", "criança", "crianca", "filho", "filha",
+    )):
+        fn = "karla_14.ogg"
+    else:
+        fn = "karla_17.ogg"
+    return f"{base}/{fn}"
+
+
 def answer_has_value(answer: str) -> bool:
     """True quando a resposta do agente apresentou o valor da consulta
     (bloco de formas de pagamento: R$ junto de Pix/Cartão)."""
@@ -328,6 +357,14 @@ class FollowupEngine:
             except Exception as e:  # noqa: BLE001
                 log.warning("followup-fc: envio falhou (%s): %s", ckey, e)
                 continue
+            # Follow-up multimídia — áudio da Dra. Karla conforme a
+            # especialidade (catarata não recebe áudio: usa o vídeo).
+            audio_url = _firstcontact_audio_url(s, especialidade, motivo)
+            if audio_url:
+                try:
+                    self.wa_cloud.send_audio(phone, audio_url)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("followup-fc: áudio falhou (%s): %s", ckey, e)
             self._fc_mark_done(ckey)
             self._clear_firstcontact(ckey)
             sent += 1
@@ -356,6 +393,8 @@ class FollowupEngine:
                 s, "followup_firstcontact_dry_run", True),
             "firstcontact_min": getattr(s, "followup_firstcontact_min", 5),
             "firstcontact_pending": len(self._firstcontact_items()),
+            "audio_enabled": getattr(s, "followup_audio_enabled", False),
+            "audio_base_url": getattr(s, "audio_base_url", "") or None,
             "wa_cloud_ready": self.wa_cloud is not None,
             "kommo_ready": self.kommo is not None,
         }
