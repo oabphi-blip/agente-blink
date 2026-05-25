@@ -834,6 +834,40 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return JSONResponse({"path": path, "aceitou_corpo_vazio": ok,
                              "resposta": str(payload)[:400]})
 
+    @app.get("/medware/agendar-teste")
+    def medware_agendar_teste(
+        cod_agenda: int = 0, cod_unidade: int = 0, cod_medico: int = 12080,
+        data_hora: str = "", nome: str = "", cpf: str = "",
+        nascimento: str = "", celular: str = "", convenio: str = "particular",
+        confirmar: str = "",
+    ) -> JSONResponse:
+        """Teste controlado da gravação no Medware (Fase B).
+
+        Sem ?confirmar=SIM apenas ECOA o payload (não grava). Com
+        ?confirmar=SIM chama medware.criar_agendamento de verdade — usar
+        somente no teste supervisionado com dados reais.
+        """
+        if medware is None:
+            return JSONResponse({"error": "medware desligado"}, status_code=503)
+        preview = {
+            "cod_medico": cod_medico, "cod_unidade": cod_unidade,
+            "cod_agenda": cod_agenda, "data_hora": data_hora, "nome": nome,
+            "cpf": cpf, "nascimento": nascimento, "convenio": convenio,
+        }
+        if confirmar.strip().upper() != "SIM":
+            return JSONResponse({
+                "preview": preview,
+                "aviso": "nada gravado — passe &confirmar=SIM para gravar",
+            })
+        res = medware.criar_agendamento(
+            cod_medico=cod_medico, cod_unidade=cod_unidade,
+            cod_agenda=cod_agenda, data_hora=data_hora, nome=nome,
+            cpf=cpf, data_nascimento=nascimento, celular=celular,
+            convenio=convenio,
+            obs="Agendamento de teste controlado — Lia/Fase B",
+        )
+        return JSONResponse({"enviado": preview, "resultado": res})
+
     @app.api_route("/whatsapp/reativar", methods=["GET", "POST"])
     def whatsapp_reativar(lead: int = 0, phone: str = "",
                           template: str = "", param: str = "",
