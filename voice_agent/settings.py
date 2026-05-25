@@ -267,8 +267,17 @@ class Settings:
             os.getenv("BROADCAST_TEMPLATE_NAME") or "atendimento_unificado_oficial"
         )
         broadcast_template_lang = os.getenv("BROADCAST_TEMPLATE_LANG") or "pt_BR"
-        followup_enabled = _flag("FOLLOWUP_ENABLED", "followup_enabled", False)
-        followup_dry_run = _flag("FOLLOWUP_DRY_RUN", "followup_dry_run", True)
+        # Follow-up: lê o env var; se ausente, usa o default abaixo —
+        # NÃO cai no config.json (que estava com flags antigas e mantinha
+        # o follow-up desligado mesmo com o env correto no painel).
+        def _fflag(env_name: str, default: bool) -> bool:
+            raw = os.getenv(env_name)
+            if raw is not None:
+                return raw.strip().lower() in ("1", "true", "yes", "sim")
+            return default
+
+        followup_enabled = _fflag("FOLLOWUP_ENABLED", True)
+        followup_dry_run = _fflag("FOLLOWUP_DRY_RUN", False)
         followup_silence_min = _intval("FOLLOWUP_SILENCE_MIN", "followup_silence_min", 15)
         followup_daily_cap = _intval("FOLLOWUP_DAILY_CAP", "followup_daily_cap", 100)
         followup_template_convenio = os.getenv("FOLLOWUP_TEMPLATE_CONVENIO") or ""
@@ -277,18 +286,17 @@ class Settings:
             or "1078_sem_resposta_valor_consulta_xs9jqe"
         )
         followup_template_lang = os.getenv("FOLLOWUP_TEMPLATE_LANG") or "pt_BR"
-        followup_firstcontact_enabled = _flag(
-            "FOLLOWUP_FIRSTCONTACT_ENABLED", "followup_firstcontact_enabled", False)
-        followup_firstcontact_dry_run = _flag(
-            "FOLLOWUP_FIRSTCONTACT_DRY_RUN", "followup_firstcontact_dry_run", True)
+        followup_firstcontact_enabled = _fflag(
+            "FOLLOWUP_FIRSTCONTACT_ENABLED", True)
+        followup_firstcontact_dry_run = _fflag(
+            "FOLLOWUP_FIRSTCONTACT_DRY_RUN", False)
         followup_firstcontact_min = _intval(
             "FOLLOWUP_FIRSTCONTACT_MIN", "followup_firstcontact_min", 5)
         followup_fc_touch2_min = _intval(
             "FOLLOWUP_FC_TOUCH2_MIN", "followup_fc_touch2_min", 15)
         followup_fc_touch3_min = _intval(
             "FOLLOWUP_FC_TOUCH3_MIN", "followup_fc_touch3_min", 30)
-        followup_audio_enabled = _flag(
-            "FOLLOWUP_AUDIO_ENABLED", "followup_audio_enabled", False)
+        followup_audio_enabled = _fflag("FOLLOWUP_AUDIO_ENABLED", True)
         audio_base_url = (
             os.getenv("AUDIO_BASE_URL") or rc.get("audio_base_url", "") or "")
         audio_ingest_admin = "".join(
