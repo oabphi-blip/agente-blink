@@ -98,6 +98,10 @@ class Settings:
     followup_firstcontact_enabled: bool = False
     followup_firstcontact_dry_run: bool = True
     followup_firstcontact_min: int = 5
+    # Cadência do dia 1 — minutos do 2º e 3º toque (lead ainda quente,
+    # dentro da janela de 24h). Padrão: 5 / 15 / 30 minutos.
+    followup_fc_touch2_min: int = 15
+    followup_fc_touch3_min: int = 30
     # Follow-up MULTIMÍDIA — envia o áudio da Dra. Karla no nudge de
     # primeiro contato, escolhido pela especialidade do lead.
     followup_audio_enabled: bool = False
@@ -279,6 +283,10 @@ class Settings:
             "FOLLOWUP_FIRSTCONTACT_DRY_RUN", "followup_firstcontact_dry_run", True)
         followup_firstcontact_min = _intval(
             "FOLLOWUP_FIRSTCONTACT_MIN", "followup_firstcontact_min", 5)
+        followup_fc_touch2_min = _intval(
+            "FOLLOWUP_FC_TOUCH2_MIN", "followup_fc_touch2_min", 15)
+        followup_fc_touch3_min = _intval(
+            "FOLLOWUP_FC_TOUCH3_MIN", "followup_fc_touch3_min", 30)
         followup_audio_enabled = _flag(
             "FOLLOWUP_AUDIO_ENABLED", "followup_audio_enabled", False)
         audio_base_url = (
@@ -379,6 +387,8 @@ class Settings:
             followup_firstcontact_enabled=followup_firstcontact_enabled,
             followup_firstcontact_dry_run=followup_firstcontact_dry_run,
             followup_firstcontact_min=followup_firstcontact_min,
+            followup_fc_touch2_min=followup_fc_touch2_min,
+            followup_fc_touch3_min=followup_fc_touch3_min,
             followup_audio_enabled=followup_audio_enabled,
             audio_base_url=audio_base_url,
             audio_ingest_admin=audio_ingest_admin,

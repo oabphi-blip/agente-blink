@@ -408,9 +408,15 @@ class FollowupEngine:
         dry = getattr(s, "followup_firstcontact_dry_run", True)
         sent = 0
         for ckey, touch, ts in self._firstcontact_items():
-            # Intervalo até este toque: toque 1 = followup_firstcontact_min;
-            # toques seguintes = +24h desde o toque anterior.
-            delay = min_delay if touch <= 1 else 24 * 3600
+            # Cadência do dia 1, com o lead ainda quente e dentro da
+            # janela de 24h: toque 1 ≈ 5 min, toque 2 ≈ 15 min,
+            # toque 3 ≈ 30 min (todos ajustáveis por settings/env).
+            if touch <= 1:
+                delay = min_delay
+            elif touch == 2:
+                delay = getattr(s, "followup_fc_touch2_min", 15) * 60
+            else:
+                delay = getattr(s, "followup_fc_touch3_min", 30) * 60
             if (now - ts) < delay:
                 continue
             if self._fc_is_done(ckey):
