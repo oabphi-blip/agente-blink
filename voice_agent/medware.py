@@ -102,14 +102,14 @@ def resolver_plano(convenio: Optional[str]) -> int:
     return 0
 
 
-def _data_nasc_br(value: Optional[str]) -> str:
-    """Normaliza a data de nascimento para dd/MM/yyyy (formato do Medware)."""
+def _data_nasc_iso(value: Optional[str]) -> str:
+    """Normaliza a data de nascimento para yyyy-MM-dd (PacienteExternoDto)."""
     if not value:
         return ""
     v = str(value).strip()[:10]
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
         try:
-            return datetime.strptime(v, fmt).strftime("%d/%m/%Y")
+            return datetime.strptime(v, fmt).strftime("%Y-%m-%d")
         except ValueError:
             continue
     return v
@@ -274,31 +274,27 @@ class MedwareClient:
         else:
             cod_proc = PROC_CONSULTA_CONVENIO
 
+        # Body conforme AgendamentoExternoDto (spec OpenAPI v1.5.0):
+        # campos da raiz são SÓ estes — additionalProperties=false.
         body: dict[str, Any] = {
-            "codMedico": cod_medico,
-            "codUnidade": cod_unidade,
             "codAgenda": cod_agenda,
+            "codMedico": cod_medico,
             "codProcedimento": cod_proc,
             "codPlano": cod_plano,
-            "dataHoraAgendada": data_hora,
-            "encaixe": -1 if encaixe else 0,
-            "obs": obs or None,
+            "dataHoraAgendada": data_hora,   # yyyy-MM-ddTHH:mm
         }
-        # Celular: o Medware exige DDD e número SEPARADOS.
+        # Celular: DDD e número SEPARADOS.
         cel = "".join(ch for ch in (celular or "") if ch.isdigit())
         if len(cel) > 11 and cel.startswith("55"):
             cel = cel[2:]                       # remove DDI 55, se vier
         cel_ddd = cel[:2] if len(cel) >= 10 else ""
         cel_num = cel[2:] if len(cel) >= 10 else cel
 
-        # O DTO do Medware SEMPRE exige o objeto `paciente`. Se o CPF já
-        # estiver cadastrado, o bloco usa o codPaciente e o NOME oficial
-        # do registro (senão o Medware recusa com
-        # CPF_JA_CADASTRADO_OUTRA_PESSOA).
-        # Resolução do paciente (orientação oficial Medware):
-        #  • Paciente JÁ cadastrado → identificar SÓ pelo codPaciente.
-        #    Não enviar o objeto completo (evita DATA_NASCIMENTO_INCORRETA).
-        #  • Paciente NOVO → cadastro completo, data em dd/MM/yyyy.
+        # Resolução do paciente (spec Medware):
+        #  • Paciente JÁ cadastrado → codPaciente na RAIZ do JSON; o objeto
+        #    `paciente` é OPCIONAL e NÃO é enviado (dispensa dataNascimento).
+        #  • Paciente NOVO → omite codPaciente e envia o objeto `paciente`
+        #    com nome, dataNascimento (yyyy-MM-dd), cpf e celular.
         cpf_digits = "".join(ch for ch in str(cpf or "") if ch.isdigit())
         if not cod_paciente and cpf_digits:
             try:
@@ -309,14 +305,14 @@ class MedwareClient:
                 log.warning("Medware busca paciente por CPF falhou: %s", e)
 
         if cod_paciente:
-            body["paciente"] = {"codPaciente": cod_paciente}
+            body["codPaciente"] = cod_paciente
         else:
             body["paciente"] = {
                 "nome": (nome or "").strip().upper(),
+                "dataNascimento": _data_nasc_iso(data_nascimento),
                 "cpf": cpf_digits,
-                "dataNascimento": _data_nasc_br(data_nascimento),
+                "numeroCelularddd": cel_ddd,
                 "numeroCelular": cel_num,
-                "numeroCelularDdd": cel_ddd,
             }
 
         ok, payload = self._post("Medware/Agendamento/Salvar", body)
