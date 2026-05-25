@@ -688,6 +688,25 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         log.info("[BROADCAST tick force=%s] %s", force, report.as_dict())
         return JSONResponse(report.as_dict())
 
+    # Agendador interno do disparo de unificação — chama tick() a cada
+    # 15 min, sem depender de cron externo. O teto diário (200) e o
+    # horário comercial seguram o ritmo. Liga se o broadcast estiver
+    # habilitado.
+    if settings.broadcast_enabled:
+        def _broadcast_scheduler() -> None:
+            import time as _t
+            _t.sleep(40)  # espera o app terminar de subir
+            while True:
+                try:
+                    rep = broadcast.tick()
+                    if rep.sent:
+                        log.info("[BROADCAST auto] %s", rep.as_dict())
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Broadcast scheduler erro: %s", e)
+                _t.sleep(900)  # 15 minutos
+
+        threading.Thread(target=_broadcast_scheduler, daemon=True).start()
+
     # ================================================================
     # FOLLOW-UP PÓS-VALOR (retomada quando o paciente some após o valor)
     # ================================================================
