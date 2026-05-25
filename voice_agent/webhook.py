@@ -697,6 +697,46 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "returned": len(out), "items": out,
         })
 
+    @app.api_route("/whatsapp/reativar", methods=["GET", "POST"])
+    def whatsapp_reativar(lead: int = 0, phone: str = "",
+                          template: str = "", param: str = "",
+                          noparam: int = 0) -> JSONResponse:
+        """Reabre a conversa de UM lead com um template aprovado.
+
+        Uso: /whatsapp/reativar?lead=23995869&template=1089_mens_ativar_conv_parada_qz7kbz
+        Por padrão envia o primeiro nome do paciente como variável {{1}};
+        passe ?noparam=1 se o template não tiver variáveis."""
+        if wa_cloud is None:
+            return JSONResponse({"error": "WhatsApp Cloud off"}, status_code=503)
+        tname = template or "1089_mens_ativar_conv_parada_qz7kbz"
+        dest = "".join(c for c in (phone or "") if c.isdigit())
+        nome = param
+        if (not dest or not nome) and lead:
+            try:
+                if not dest:
+                    dest = pipeline.kommo.get_lead_main_phone(int(lead)) or ""
+                if not nome:
+                    ctx = pipeline.kommo.get_caller_context_by_lead(
+                        int(lead)) or {}
+                    nome = ctx.get("name") or ""
+            except Exception as e:  # noqa: BLE001
+                log.warning("reativar: contexto lead %s falhou: %s", lead, e)
+        if not dest:
+            return JSONResponse(
+                {"error": "telefone não encontrado"}, status_code=400)
+        first = nome.strip().split()[0].capitalize() if nome.strip() else ""
+        body = None if noparam else ([first] if first else None)
+        try:
+            resp = wa_cloud.send_template(to=dest, name=tname, body_params=body)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"sent": False, "to": dest, "template": tname,
+                 "error": str(e)[:300]}, status_code=502)
+        log.info("[REATIVAR] template '%s' para %s (lead %s)", tname, dest, lead)
+        return JSONResponse(
+            {"sent": True, "to": dest, "template": tname, "nome": first,
+             "response": resp})
+
     @app.api_route("/audios/send", methods=["GET", "POST"])
     def audios_send(lead: int = 0, phone: str = "",
                     audio: str = "") -> JSONResponse:
