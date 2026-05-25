@@ -111,6 +111,18 @@ def _firstcontact_audio_url(settings, especialidade: str, motivo: str):
     return f"{base}/{fn}"
 
 
+def _postvalue_audio_url(settings):
+    """Áudio da Dra. Karla para o follow-up PÓS-VALOR — paciente sumiu
+    depois de receber o preço da consulta. Usa o áudio 1 do roteiro
+    ('vi que você se interessou... se ficou dúvida sobre os valores')."""
+    if not getattr(settings, "followup_audio_enabled", False):
+        return None
+    base = (getattr(settings, "audio_base_url", "") or "").rstrip("/")
+    if not base:
+        return None
+    return f"{base}/karla_01.ogg"
+
+
 def answer_has_value(answer: str) -> bool:
     """True quando a resposta do agente apresentou o valor da consulta
     (bloco de formas de pagamento: R$ junto de Pix/Cartão)."""
@@ -510,6 +522,16 @@ class FollowupEngine:
                     {"ckey": ckey, "result": f"falha: {str(e)[:140]}"}
                 )
                 continue
+            # Follow-up multimídia — áudio da Dra. Karla logo após o
+            # template (só envia dentro da janela de 24h; fora dela
+            # a falha é silenciosa e o template já foi entregue).
+            audio_url = _postvalue_audio_url(s)
+            if audio_url:
+                try:
+                    self.wa_cloud.send_audio(phone, audio_url)
+                except Exception as e:  # noqa: BLE001
+                    log.warning(
+                        "followup: áudio pós-valor falhou (%s): %s", ckey, e)
             self._mark_done(ckey)
             clear_pending(self._redis, ckey)
             self._incr_daily()
