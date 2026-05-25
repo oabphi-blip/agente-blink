@@ -686,22 +686,25 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             mtype = m.get("type")
             # MODO INGESTÃO — áudios encaminhados pelo admin viram arquivos
             # em /static/audios/, NÃO entram no atendimento da Lia.
-            if (
-                _ingest["armed"]
-                and _ingest_admin()
-                and phone == _ingest_admin()
-            ):
-                if mtype == "audio" and m.get("media_id"):
-                    threading.Thread(
-                        target=_ingest_audio,
-                        args=(m["media_id"], m.get("mime") or ""),
-                        daemon=True,
-                    ).start()
-                    continue
-                if mtype == "text":
-                    _ingest["next_label"] = _ingest_label_from_text(
-                        m.get("text") or "")
-                    continue
+            if _ingest["armed"]:
+                _admin = _ingest_admin()
+                if not _admin:
+                    # Sem admin definido: trava no 1º remetente que aparecer.
+                    _ingest["admin"] = phone
+                    _admin = phone
+                    log.info("[INGEST] travado no remetente %s", phone)
+                if phone == _admin:
+                    if mtype == "audio" and m.get("media_id"):
+                        threading.Thread(
+                            target=_ingest_audio,
+                            args=(m["media_id"], m.get("mime") or ""),
+                            daemon=True,
+                        ).start()
+                        continue
+                    if mtype == "text":
+                        _ingest["next_label"] = _ingest_label_from_text(
+                            m.get("text") or "")
+                        continue
             if mtype == "text" and (m.get("text") or "").strip():
                 threading.Thread(
                     target=_process_whatsapp_cloud,
