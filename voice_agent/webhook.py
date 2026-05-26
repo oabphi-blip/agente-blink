@@ -195,7 +195,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 if convo_key in _unif_notified_mem:
                     return
                 _unif_notified_mem.add(convo_key)
-            return  # 26/05 DESATIVADO: Evolution 0710 reconectado, mensagem de unificacao dispensada
+            evolution.send_text(number=remote_jid, text=_UNIF_AVISO_0710)
             log.info("[UNIF] aviso de numero unico enviado a %s (%s)",
                      convo_key, msg_type)
         except Exception:  # noqa: BLE001
