@@ -101,7 +101,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         )
 
     app = FastAPI(
-        title="Agente Blink Oftalmologia — Voice + Text",
+        title="Agente Blink plano or "Particular" — Voice + Text",
         version="0.2.1",
         description=(
             "Webhook que processa mensagens do WhatsApp (texto + áudio) "
@@ -1422,7 +1422,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             ppo = first.get("procedimentoPlanoOperadora") or {}
             plano = ppo.get("descricaoPlano", "") or "Particular"
             especialidade = ""  # Medware nem sempre tem
-            params = [contato, data_hora, nomes, medico, especialidade, plano]
+            params = [contato, data_hora] + ([((a.get("paciente") or {}).get("nome") or "-").strip() for a in lista[:5]] + ["-"]*5)[:5] + [medico, especialidade or "Oftalmologia", plano or "Particular"]
             try:
                 wa_cloud.send_template(
                     to=phone, name=_TPL_CONFIRMAR,
