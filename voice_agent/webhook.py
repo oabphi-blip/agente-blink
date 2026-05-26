@@ -1211,7 +1211,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         r = getattr(conversation_store, "_redis", None)
         sent = 0
         skipped = 0
-       if hoje_only: leads = [ld for ld in leads if int(ld.get('created_at') or 0) >= int(__import__('time').time() - 86400)]
         for ld in leads:
             if sent >= _ENTRADA_UNIF_CAP:
                 break
@@ -1224,7 +1223,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 continue
             digits = _conversation_key(phone)
             nkey = f"blink:unif:notified:{digits}"
-            if r is not None and not hoje_only:
+            if r is not None:
                 try:
                     if not r.set(nkey, "1", nx=True, ex=180 * 86400):
                         skipped += 1
