@@ -216,10 +216,14 @@ def _agenda_block(ctx: Optional[dict]) -> str:
             por_dia[key] = []
             ordem.append(key)
         por_dia[key].append(s.get("hora", ""))
-    # TRAVA 1 — amostra enxuta: no máximo 3 dias, e só 2 horários por dia.
-    # O agente NUNCA recebe a agenda inteira, então não tem como despejá-la.
+    # TRAVA — só 2 horários por dia (escassez no OUTPUT, não no input).
+    # Ampliada a janela em DIAS porque os pacientes costumam pedir uma
+    # data específica 1–2 semanas à frente (ex.: "terça, 9 de junho"); se
+    # esse dia não está no prompt, a Lia não consegue oferecer. A regra
+    # de "no máximo 2 horários por mensagem" é cumprida pelo OUTPUT da
+    # Lia (instrução abaixo), não pelo tamanho da amostra.
     linhas = []
-    for (dia, dbr) in ordem[:3]:
+    for (dia, dbr) in ordem:
         horas = [h for h in por_dia[(dia, dbr)] if h][:2]
         if horas:
             linhas.append(f"- {dia} {dbr}: {', '.join(horas)}")
