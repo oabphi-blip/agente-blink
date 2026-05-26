@@ -1238,6 +1238,15 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     body_params=[_entrada_primeiro_nome(ld.get("name"))],
                 )
                 sent += 1
+                # Nota no Kommo — para visibilidade no painel
+                try:
+                    pipeline.kommo.add_note(
+                        lead_id,
+                        f"🔁 Aviso de unificação para o 81331005 enviado "
+                        f"a {ld.get('name') or 'lead'}."
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             except Exception as e:  # noqa: BLE001
                 log.warning("[ENTRADA-UNIF] envio falhou lead %s: %s", lead_id, e)
         if sent:
@@ -1284,6 +1293,317 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 _t.sleep(600)  # 10 minutos
 
         threading.Thread(target=_entrada_unif_scheduler, daemon=True).start()
+
+    # ================================================================
+    # CONFIRMAÇÃO DE CONSULTAS (3 toques automáticos)
+    # ================================================================
+    # 1) 08h do dia ANTERIOR  → template 1031 (confirmação)
+    # 2) 06h do dia da consulta → template de localização (AN ou AC)
+    # 3) ~1h antes da consulta  → template "como chegar" (apenas AC)
+    # Fonte oficial: Medware/Agendamento/Listar. Telefone do paciente
+    # vem do registro do Medware (paciente.telefone). Casa com o lead
+    # no Kommo para escrever a nota de visibilidade.
+    from datetime import datetime as _dt, timedelta as _td
+    from zoneinfo import ZoneInfo as _ZI
+    _TZBR = _ZI("America/Sao_Paulo")
+
+    # Códigos das unidades atendidas
+    _COD_UNID_ASA_NORTE = 5
+    _COD_UNID_AGUAS_CLARAS = 3
+    # Status ativos: 1=Agendado, 2=Confirmado, 3=Recebido
+    _STATUS_ATIVOS = {1, 2, 3}
+
+    # Slugs dos templates (formato Meta — minúsculo, underscores)
+    _TPL_CONFIRMAR = "1031_concluir_confirmar"
+    _TPL_LOC_ASA_NORTE = "localiza_asa_norte_1005"
+    _TPL_LOC_AGUAS_CLARAS = "local_aguas_claras_1005_aprovada"
+    _TPL_COMO_CHEGAR_AC = "1012_como_chegar_na_blink_aguas_claras"
+    _TPL_LANG = "pt_BR"
+
+    def _phone_e164(raw: str) -> str:
+        """Normaliza telefone do Medware ('(61)999999999 (cel)') para E.164
+        sem o '+': 5561999999999."""
+        if not raw:
+            return ""
+        d = "".join(ch for ch in str(raw) if ch.isdigit())
+        if not d:
+            return ""
+        # remove DDI duplicado
+        if len(d) >= 13 and d.startswith("55"):
+            return d
+        if 10 <= len(d) <= 11:
+            return "55" + d
+        return d
+
+    def _fmt_data_hora_br(dh: str) -> str:
+        if not dh:
+            return ""
+        s = str(dh)
+        try:
+            if "T" in s:
+                dt = _dt.fromisoformat(s)
+            else:
+                dt = _dt.strptime(s[:16], "%d/%m/%Y %H:%M")
+            return dt.strftime("%d/%m/%Y às %H:%M")
+        except Exception:  # noqa: BLE001
+            return s
+
+    def _parse_data_hora(dh: str):
+        if not dh:
+            return None
+        s = str(dh)
+        try:
+            if "T" in s:
+                return _dt.fromisoformat(s).replace(tzinfo=_TZBR)
+            return _dt.strptime(s[:16], "%d/%m/%Y %H:%M").replace(tzinfo=_TZBR)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _agendamentos_do_dia(data_br: str) -> list:
+        if pipeline.medware is None:
+            return []
+        try:
+            apps = pipeline.medware.listar_agendamentos(data_br, data_br)
+        except Exception as e:  # noqa: BLE001
+            log.warning("[CONFIRM] listar_agendamentos falhou: %s", e)
+            return []
+        return [a for a in apps
+                if a.get("codUnidade") in (_COD_UNID_ASA_NORTE,
+                                            _COD_UNID_AGUAS_CLARAS)
+                and a.get("codStatusAgendamento") in _STATUS_ATIVOS]
+
+    def _kommo_note_safe(phone: str, texto: str) -> None:
+        if pipeline.kommo is None:
+            return
+        try:
+            lead_id = pipeline.kommo.find_lead_id_by_phone(phone)
+            if lead_id:
+                pipeline.kommo.add_note(lead_id, texto)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _confirmar_consultas(data_consulta: _dt) -> dict:
+        """Dispara o template 1031 (confirmação) para todos os agendamentos
+        do dia informado. Agrupa por telefone — se a mesma pessoa tem 2+
+        agendamentos no dia, recebe UM template listando os pacientes."""
+        if wa_cloud is None:
+            return {"ran": False, "reason": "wa_cloud ausente"}
+        data_br = data_consulta.strftime("%d/%m/%Y")
+        apps = _agendamentos_do_dia(data_br)
+        # agrupa por telefone
+        grupos: dict = {}
+        for a in apps:
+            phone = _phone_e164((a.get("paciente") or {}).get("telefone"))
+            if not phone:
+                continue
+            grupos.setdefault(phone, []).append(a)
+        r = getattr(conversation_store, "_redis", None)
+        dia_key = _dt.now(_TZBR).strftime("%Y%m%d")
+        sent = 0
+        failed = 0
+        detalhes = []
+        for phone, lista in grupos.items():
+            dedup = f"blink:confirm:1031:{dia_key}:{phone}"
+            if r is not None:
+                try:
+                    if not r.set(dedup, "1", nx=True, ex=2 * 86400):
+                        continue  # já enviou hoje
+                except Exception:  # noqa: BLE001
+                    pass
+            first = lista[0]
+            pac_nome = (first.get("paciente") or {}).get("nome", "") or ""
+            contato = pac_nome.split()[0].capitalize() if pac_nome else "paciente"
+            data_hora = _fmt_data_hora_br(first.get("dataHoraAgendada"))
+            nomes = ", ".join(
+                ((a.get("paciente") or {}).get("nome") or "")
+                for a in lista if (a.get("paciente") or {}).get("nome")
+            )
+            medico = (first.get("medico") or {}).get("nome", "") or ""
+            ppo = first.get("procedimentoPlanoOperadora") or {}
+            plano = ppo.get("descricaoPlano", "") or "Particular"
+            especialidade = ""  # Medware nem sempre tem
+            params = [contato, data_hora, nomes, medico, especialidade, plano]
+            try:
+                wa_cloud.send_template(
+                    to=phone, name=_TPL_CONFIRMAR,
+                    language=_TPL_LANG, body_params=params,
+                )
+                sent += 1
+                _kommo_note_safe(
+                    phone,
+                    f"📅 Confirmação de consulta enviada (1031) — "
+                    f"{data_hora} | {medico}"
+                )
+                detalhes.append({"phone": phone, "nome": pac_nome, "ok": True})
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                detalhes.append({"phone": phone, "nome": pac_nome,
+                                 "ok": False, "erro": str(e)[:240]})
+                log.warning("[CONFIRM] envio falhou %s: %s", phone, e)
+        log.info("[CONFIRM] %s: %d enviados, %d falhas, %d grupos",
+                 data_br, sent, failed, len(grupos))
+        return {"ran": True, "data_consulta": data_br, "total_apps": len(apps),
+                "grupos": len(grupos), "sent": sent, "failed": failed,
+                "details": detalhes[:30]}
+
+    def _enviar_localizacao(data_consulta: _dt) -> dict:
+        """6h do dia da consulta: localização específica de cada unidade."""
+        if wa_cloud is None:
+            return {"ran": False, "reason": "wa_cloud ausente"}
+        data_br = data_consulta.strftime("%d/%m/%Y")
+        apps = _agendamentos_do_dia(data_br)
+        r = getattr(conversation_store, "_redis", None)
+        dia_key = _dt.now(_TZBR).strftime("%Y%m%d")
+        sent = 0
+        failed = 0
+        # evita reenviar para mesmo telefone+unidade no dia
+        enviados = set()
+        for a in apps:
+            phone = _phone_e164((a.get("paciente") or {}).get("telefone"))
+            if not phone:
+                continue
+            unidade = a.get("codUnidade")
+            chave = (phone, unidade)
+            if chave in enviados:
+                continue
+            enviados.add(chave)
+            template = (_TPL_LOC_ASA_NORTE if unidade == _COD_UNID_ASA_NORTE
+                        else _TPL_LOC_AGUAS_CLARAS)
+            dedup = f"blink:confirm:loc:{dia_key}:{phone}:{unidade}"
+            if r is not None:
+                try:
+                    if not r.set(dedup, "1", nx=True, ex=2 * 86400):
+                        continue
+                except Exception:  # noqa: BLE001
+                    pass
+            pac_nome = (a.get("paciente") or {}).get("nome", "") or "paciente"
+            contato = pac_nome.split()[0].capitalize() if pac_nome else "paciente"
+            try:
+                wa_cloud.send_template(
+                    to=phone, name=template, language=_TPL_LANG,
+                    body_params=[contato],  # tentativa; se header-only, ignorado
+                )
+                sent += 1
+                _kommo_note_safe(
+                    phone,
+                    f"📍 Localização enviada ({'Asa Norte' if unidade==5 else 'Águas Claras'})"
+                )
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                log.warning("[CONFIRM-LOC] envio falhou %s/%s: %s",
+                            phone, unidade, e)
+        log.info("[CONFIRM-LOC] %s: %d enviados, %d falhas",
+                 data_br, sent, failed)
+        return {"ran": True, "data_consulta": data_br,
+                "sent": sent, "failed": failed}
+
+    def _como_chegar_proximas() -> dict:
+        """A cada N minutos: para cada agendamento de Águas Claras de HOJE
+        cujo horário está ~1h à frente, envia o template 'como chegar'."""
+        if wa_cloud is None:
+            return {"ran": False, "reason": "wa_cloud ausente"}
+        agora = _dt.now(_TZBR)
+        data_br = agora.strftime("%d/%m/%Y")
+        apps = _agendamentos_do_dia(data_br)
+        r = getattr(conversation_store, "_redis", None)
+        sent = 0
+        failed = 0
+        for a in apps:
+            if a.get("codUnidade") != _COD_UNID_AGUAS_CLARAS:
+                continue
+            dh = _parse_data_hora(a.get("dataHoraAgendada"))
+            if not dh:
+                continue
+            delta = (dh - agora).total_seconds() / 60.0
+            # janela 50–70 minutos à frente
+            if not (50 <= delta <= 70):
+                continue
+            phone = _phone_e164((a.get("paciente") or {}).get("telefone"))
+            if not phone:
+                continue
+            dedup = f"blink:confirm:chegar:{a.get('codAgendamento')}"
+            if r is not None:
+                try:
+                    if not r.set(dedup, "1", nx=True, ex=86400):
+                        continue
+                except Exception:  # noqa: BLE001
+                    pass
+            pac_nome = (a.get("paciente") or {}).get("nome", "") or "paciente"
+            contato = pac_nome.split()[0].capitalize() if pac_nome else "paciente"
+            try:
+                wa_cloud.send_template(
+                    to=phone, name=_TPL_COMO_CHEGAR_AC,
+                    language=_TPL_LANG, body_params=[contato],
+                )
+                sent += 1
+                _kommo_note_safe(
+                    phone,
+                    "🧭 Como chegar (Águas Claras) enviado — 1h antes da consulta."
+                )
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                log.warning("[CONFIRM-CHEGAR] envio falhou %s: %s", phone, e)
+        if sent:
+            log.info("[CONFIRM-CHEGAR] %d enviados", sent)
+        return {"ran": True, "sent": sent, "failed": failed}
+
+    @app.api_route("/confirmacao/confirmar", methods=["GET", "POST"])
+    def confirmacao_confirmar() -> JSONResponse:
+        """Disparo manual: confirmação 1031 para a data informada (?data=DD/MM/YYYY)
+        ou para AMANHÃ se não informada."""
+        from fastapi import Request as _Req  # noqa: F401
+        params = {}
+        # GET: usa query param data
+        from starlette.requests import Request as _SReq  # noqa: F401
+        # Aqui usamos data="" → amanhã
+        amanha = _dt.now(_TZBR) + _td(days=1)
+        return JSONResponse(_confirmar_consultas(amanha))
+
+    @app.api_route("/confirmacao/localizar", methods=["GET", "POST"])
+    def confirmacao_localizar() -> JSONResponse:
+        """Disparo manual: localização para os agendamentos de HOJE."""
+        hoje = _dt.now(_TZBR)
+        return JSONResponse(_enviar_localizacao(hoje))
+
+    @app.api_route("/confirmacao/como-chegar", methods=["GET", "POST"])
+    def confirmacao_como_chegar() -> JSONResponse:
+        """Disparo manual: 'como chegar' para AC nas próximas ~1h."""
+        return JSONResponse(_como_chegar_proximas())
+
+    if wa_cloud is not None and pipeline.medware is not None:
+        def _confirmacao_scheduler() -> None:
+            import time as _t
+            _t.sleep(90)  # espera o app subir
+            ultima_8h = ""  # YYYY-MM-DD em que já rodou
+            ultima_6h = ""
+            while True:
+                try:
+                    agora = _dt.now(_TZBR)
+                    hoje_str = agora.strftime("%Y-%m-%d")
+                    # 08h dia-anterior — uma vez por dia
+                    if agora.hour == 8 and ultima_8h != hoje_str:
+                        ultima_8h = hoje_str
+                        threading.Thread(
+                            target=lambda: _confirmar_consultas(
+                                agora + _td(days=1)),
+                            daemon=True,
+                        ).start()
+                    # 06h dia-da-consulta — uma vez por dia
+                    if agora.hour == 6 and ultima_6h != hoje_str:
+                        ultima_6h = hoje_str
+                        threading.Thread(
+                            target=lambda: _enviar_localizacao(agora),
+                            daemon=True,
+                        ).start()
+                    # "como chegar" — a cada ciclo (~5 min)
+                    threading.Thread(
+                        target=_como_chegar_proximas, daemon=True).start()
+                except Exception as e:  # noqa: BLE001
+                    log.warning("[CONFIRM] scheduler erro: %s", e)
+                import time as _t2
+                _t2.sleep(300)  # 5 minutos
+
+        threading.Thread(target=_confirmacao_scheduler, daemon=True).start()
 
     # ================================================================
     # FOLLOW-UP PÓS-VALOR (retomada quando o paciente some após o valor)
