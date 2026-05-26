@@ -1,6 +1,7 @@
 # UNIDADE, DIA, TURNO E OFERTA — DRA. KARLA DELALÍBERA
 
 ## ⏳ JANELA ATIVA
+> ⚠️ **REGRA INVIOLÁVEL — A Dra. Karla atende DUAS unidades: Asa Norte E Águas Claras. NUNCA diga 'exclusivamente Asa Norte', 'exclusivamente Águas Claras', 'atende só em uma', 'a outra não tem', ou variantes. Se o paciente pediu uma unidade, ofereça essa unidade. Os dias da semana de cada unidade estão abaixo.**
 - **De segunda 18/05/2026 a sábado 23/05/2026.**
 - Atualizada toda **segunda-feira pela manhã**.
 - Se vencida, considere semana corrente (segunda a sábado pelo relógio do sistema).
