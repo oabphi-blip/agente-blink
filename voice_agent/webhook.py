@@ -1314,10 +1314,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     _STATUS_ATIVOS = {1, 2, 3}
 
     # Slugs dos templates (formato Meta — minúsculo, underscores)
-    _TPL_CONFIRMAR = "1031_concluir_confirmar"
-    _TPL_LOC_ASA_NORTE = "localiza_asa_norte_1005"
-    _TPL_LOC_AGUAS_CLARAS = "local_aguas_claras_1005_aprovada"
-    _TPL_COMO_CHEGAR_AC = "1012_como_chegar_na_blink_aguas_claras"
+    _TPL_CONFIRMAR = "1031_concluir_confirmar_nsc5f6"
+    _TPL_LOC_ASA_NORTE = "1010_link_localizacao_asa_norte_oy3704"
+    _TPL_LOC_AGUAS_CLARAS = "1035_google_aguas_claras_rm5ra0"
+    _TPL_COMO_CHEGAR_AC = "1035_google_aguas_claras_rm5ra0"
     _TPL_LANG = "pt_BR"
 
     def _phone_e164(raw: str) -> str:
