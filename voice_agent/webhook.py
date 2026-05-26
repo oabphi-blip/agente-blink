@@ -1197,7 +1197,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return "tudo bem"
         return n.split()[0].capitalize()
 
-    def _entrada_unif_scan() -> dict:
+    def _entrada_unif_scan(hoje_only: bool = False) -> dict:
         """Varre 0-ENTRADA e dispara o aviso de unificação aos novos."""
         if pipeline.kommo is None or wa_cloud is None:
             return {"ran": False, "reason": "kommo/wa_cloud ausente"}
@@ -1211,6 +1211,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         r = getattr(conversation_store, "_redis", None)
         sent = 0
         skipped = 0
+       if hoje_only: leads = [ld for ld in leads if int(ld.get('created_at') or 0) >= int(__import__('time').time() - 86400)]
         for ld in leads:
             if sent >= _ENTRADA_UNIF_CAP:
                 break
@@ -1223,7 +1224,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 continue
             digits = _conversation_key(phone)
             nkey = f"blink:unif:notified:{digits}"
-            if r is not None:
+            if r is not None and not hoje_only:
                 try:
                     if not r.set(nkey, "1", nx=True, ex=180 * 86400):
                         skipped += 1
@@ -1276,9 +1277,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return JSONResponse(out)
 
     @app.api_route("/unificacao/entrada/scan", methods=["GET", "POST"])
-    def unificacao_entrada_scan() -> JSONResponse:
+    def unificacao_entrada_scan(request: Request) -> JSONResponse:
         """Diagnóstico/disparo manual da varredura de 0-ENTRADA."""
-        return JSONResponse(_entrada_unif_scan())
+        return JSONResponse(_entrada_unif_scan(hoje_only=request.query_params.get("hoje") in ("1","true","True")))
 
     if wa_cloud is not None:
         def _entrada_unif_scheduler() -> None:
