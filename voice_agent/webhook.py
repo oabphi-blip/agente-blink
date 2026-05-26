@@ -1422,7 +1422,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             ppo = first.get("procedimentoPlanoOperadora") or {}
             plano = ppo.get("descricaoPlano", "") or "Particular"
             especialidade = ""  # Medware nem sempre tem
-            params = [contato, data_hora] + ([((a.get("paciente") or {}).get("nome") or "-").strip() for a in lista[:5]] + ["-"]*5)[:5] + [medico, especialidade or "Oftalmologia", plano or "Particular"]
+            params = [contato, data_hora, nomes, medico, especialidade, plano]
             try:
                 wa_cloud.send_template(
                     to=phone, name=_TPL_CONFIRMAR,
