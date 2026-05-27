@@ -210,6 +210,8 @@ ST_AGENT_OFF = frozenset({
     106157139,  # 7-CIRURGIAS ANDAMENTO
     106484343,  # 8-LENTES ANDAMENTO
     106484347,  # 9-FORNECEDORES
+    101109455,  # 5-CONFIRMAR — paciente respondendo template de confirmação
+    106653499,  # 6-CONFIRMADO — consulta já confirmada
 })
 
 # Nomes legíveis das etapas do funil ATENDE (status_id → nome).
