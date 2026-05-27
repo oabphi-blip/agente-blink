@@ -2,7 +2,7 @@
 
 API: https://medware.blinkoftalmologia.com.br/api
 Auth: POST /Acesso/login {identificacao, senha} → {token, refreshToken}
-      Token JWT válido ~13h. Bearer em todas as requisições.
+      Token JWT válido ~24h. Bearer em todas as requisições.
 
 Endpoints usados:
 - POST /Acesso/login
@@ -141,6 +141,8 @@ class MedwareClient:
     timeout: float = 12.0
 
     _token: Optional[str] = field(default=None, init=False)
+    _refresh_token: Optional[str] = field(default=None, init=False)
+    _refresh_token: Optional[str] = field(default=None, init=False)
     _token_exp: float = field(default=0.0, init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
 
@@ -162,8 +164,9 @@ class MedwareClient:
                     return None
                 data = r.json()
                 self._token = data.get("token")
+                self._refresh_token = data.get("refreshToken")
                 # JWT exp — decodifica payload sem verificar assinatura
-                self._token_exp = _jwt_exp(self._token) or (time.time() + 3600)
+                self._token_exp = _jwt_exp(self._token) or (time.time() + 86400)
                 log.info("Medware: token renovado")
                 return self._token
             except Exception as e:  # noqa: BLE001
