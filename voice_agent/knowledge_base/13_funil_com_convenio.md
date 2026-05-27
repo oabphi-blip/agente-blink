@@ -116,7 +116,6 @@ existem (omitir linha que não se aplica):
 📋 Resumo do seu agendamento:
 
 👤 Paciente: [nome do paciente] ([idade], se souber)
-🆔 CPF: [CPF do paciente]
 🩺 Profissional: [médico] — [especialidade]
 🏥 Unidade: [unidade]
 💳 Convênio: [nome do convênio]
