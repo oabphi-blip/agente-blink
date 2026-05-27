@@ -398,7 +398,7 @@ class MedwareClient:
 
     def horarios_para_agente(
         self, medico_nome: str, unidade_nome: Optional[str] = None,
-        dias: int = 21,
+        dias: int = 90,
     ) -> list[dict]:
         """Vagas livres reais para o agente OFERECER ao paciente.
 
