@@ -175,6 +175,15 @@ def executar_agendamento(
     )
     if not result.get("ok"):
         log.warning("medware criar_agendamento falhou: %s", result)
+        _lid = (caller_context or {}).get("lead_id")
+        if _lid and kommo:
+            try:
+                kommo.update_lead_status(int(_lid), 106563343)
+                _nota = "GRAVACAO MEDWARE FALHOU. motivo=" + str(result.get('motivo')) + " detalhe=" + str(result.get('detalhe'))[:200] + " data=" + str(decision.get('data_iso')) + " hora=" + str(decision.get('hora')) + " medico=" + str(decision.get('medico')) + " unidade=" + str(decision.get('unidade')) + ". ACAO HUMANA: confirmar manualmente no Medware."
+                kommo.add_note(int(_lid), _nota)
+                log.info("Gap 5: lead %s -> 0-HUMANO + nota", _lid)
+            except Exception as _e:
+                log.warning("Gap 5 fallback erro: %s", _e)
         return {"ok": False, "motivo": result.get("motivo"),
                 "detalhe": result.get("detalhe")}
 
