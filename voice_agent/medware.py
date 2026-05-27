@@ -142,7 +142,6 @@ class MedwareClient:
 
     _token: Optional[str] = field(default=None, init=False)
     _refresh_token: Optional[str] = field(default=None, init=False)
-    _refresh_token: Optional[str] = field(default=None, init=False)
     _token_exp: float = field(default=0.0, init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
 
@@ -185,12 +184,9 @@ class MedwareClient:
         """Verifica conectividade — usado pelo /health."""
         try:
             with httpx.Client(timeout=self.timeout) as c:
-                r = c.post(
-                    f"{self.base_url}/Acesso/login",
-                    json={"identificacao": self.identificacao, "senha": self.senha},
-                )
-            if r.status_code == 200 and r.json().get("token"):
-                return {"ok": True, "detail": "login ok"}
+                                r = c.get(f"{self.base_url}/health/health")
+            if r.status_code == 200 and "API Ativa" in r.text:
+                return {"ok": True, "detail": "API Ativa"}
             return {"ok": False, "detail": f"HTTP {r.status_code}"}
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "detail": str(e)[:120]}
