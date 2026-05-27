@@ -198,6 +198,8 @@ FIELD_MOTIVO_PACIENTES = {
 }
 # CPF — necessário para o agendamento no Medware.
 FIELD_CPF_PACIENTE_1 = 1260414
+# COD-AGENDAMENTO (numeric) — id do agendamento criado no Medware via API.
+FIELD_COD_AGENDAMENTO = 1260645
 FIELD_CPF_PACIENTES = {
     1: 1260414, 2: 1260416, 3: 1260418,
     4: 1260548, 5: 1260422, 6: 1260424,
@@ -425,6 +427,13 @@ class KommoClient:
         add_datetime(FIELD_HORA_ATIVACAO, fields.get("hora_ativacao_ts"))
         # ATENDENTE — carimba "Lia" quando a IA conduz o atendimento.
         add_select(FIELD_ATENDENTE, fields.get("atendente"))
+        # COD-AGENDAMENTO — preenchido apos gravar consulta no Medware via API.
+        cod_ag = fields.get("cod_agendamento")
+        if cod_ag:
+            try:
+                cfs.append({"field_id": FIELD_COD_AGENDAMENTO, "values": [{"value": int(cod_ag)}]})
+            except (TypeError, ValueError):
+                log.warning("cod_agendamento nao numerico: %s", cod_ag)
 
         if not cfs:
             return True
