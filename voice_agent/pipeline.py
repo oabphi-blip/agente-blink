@@ -261,6 +261,17 @@ class VoicePipeline:
                 daemon=True,
             ).start()
 
+        # 6) Gap 2: detectar se a Lia confirmou agendamento e gravar Medware
+        if self.medware is not None and self.kommo is not None and caller_context:
+            from . import agendamento as _ag
+            threading.Thread(
+                target=_ag.detectar_e_executar_safely,
+                args=(answer, caller_context, self.medware, self.kommo,
+                      self.settings.anthropic_api_key,
+                      self.settings.claude_haiku_model),
+                daemon=True,
+            ).start()
+
         return PipelineResult(
             transcript=user_text, answer=answer, sent=True,
             model_used=model_used, articles_used=articles_used,
