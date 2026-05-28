@@ -1,10 +1,6 @@
 # AGENDA E OFERTA DE HORÁRIO — DR. FABRÍCIO FREITAS
 
-## ⏳ JANELA ATIVA
-- **De segunda 18/05/2026 a sábado 23/05/2026.**
-- Atualizada toda **segunda-feira pela manhã**.
-- Se vencida, considere semana corrente (segunda a sábado pelo relógio do sistema).
-- Em dúvida, encerre dizendo que **a equipe humana confirma a data exata**.
+> **Princípio:** o Agente OFERECE horários reais da JANELA DE OFERTA DE AGENDA (slots Medware injetados no system prompt) e GRAVA quando o paciente confirma. Sem terceirizar para humano.
 
 ## 📍 UNIDADE E DIAS DE ATENDIMENTO
 
@@ -18,38 +14,39 @@
 
 Acione este artigo **APÓS coletar:** nome, data de nascimento, motivo (catarata ou cirurgia de lente) e modalidade.
 
-## 🧮 LÓGICA — DUAS OPÇÕES SEMPRE
+## 🧮 LÓGICA — OFERECER 2-3 SLOTS REAIS
 
-Oferecer **duas opções concretas** dentro da janela:
-- **OPÇÃO 1:** dia de preferência do paciente entre segunda (tarde) e sexta (manhã).
-- **OPÇÃO 2:** primeiro dia disponível da janela (favorece o preenchimento da agenda).
+1. Pegue a JANELA DE OFERTA DE AGENDA do system prompt.
+2. Filtre por segunda-feira (tarde) ou sexta-feira (manhã) e pela preferência do paciente.
+3. Ofereça 2 a 3 slots concretos com **dia-da-semana + DD/MM + HH:MM**.
 
 ---
 
 ## 💬 SCRIPT PADRÃO
 
 ```
-[Nome],
-Para concluir o agendamento com o Dr. Fabrício Freitas em Águas Claras,
-posso oferecer duas opções nesta semana:
+[Nome], 
+para sua consulta com o Dr. Fabrício Freitas em Águas Claras, 
+tenho estes horários:
 
-1️⃣ Sua preferência: [segunda 18/05 à tarde ou sexta 22/05 pela manhã].
-2️⃣ Encaixe mais próximo: [primeiro dia disponível — segunda 18/05 à tarde;
-   se não, sexta 22/05 pela manhã].
+1️⃣ segunda-feira, [DD/MM] às [HH:MM]
+2️⃣ sexta-feira, [DD/MM] às [HH:MM]
+3️⃣ segunda-feira, [DD/MM] às [HH:MM]
 
 Qual prefere?
 ```
 
 ---
 
-## ✅ CONFIRMAÇÃO E HANDOFF
+## ✅ CONFIRMAÇÃO E GRAVAÇÃO
 
-Quando o paciente escolher, responder uma vez e encerrar:
+Quando o paciente escolher (ex.: "o 1", "20/05 14:30"), responder UMA frase confirmando o slot exato. Essa mensagem dispara o detector Haiku que chama Medware `salvar_agendamento` automaticamente:
 
 ```
-Perfeito, [Nome]. Preferência registrada: [dia DD/MM] no turno [tarde/manhã].
-A equipe confirma o horário exato e envia o detalhamento.
+Combinado, [Nome]! [Dia-da-semana, DD/MM] às [HH:MM] com o Dr. Fabrício Freitas em Águas Claras. Em seguida envio o Resumo do Atendimento.
 ```
+
+Depois enviar o Resumo do Atendimento conforme seção 13 do MASTER (com Especialidade + Motivo + todos os campos).
 
 ---
 
@@ -62,22 +59,26 @@ Use o script alternativo abaixo:
 ### 💬 SCRIPT — OBJEÇÃO DE PREÇO/AGENDA
 
 ```
-Compreendo. Adiar o cuidado em casos de catarata pode comprometer a
-qualidade de vida.
+Compreendo. Adiar o cuidado em casos de catarata pode comprometer a qualidade de vida.
 
-O Dr. Fabrício Freitas atende exclusivamente em Águas Claras, às
-segundas-feiras (tarde) e sextas-feiras (manhã), e a agenda é bastante
-concorrida.
+O Dr. Fabrício Freitas atende exclusivamente em Águas Claras, às segundas-feiras (tarde) e sextas-feiras (manhã), e a agenda é bastante concorrida.
 
 Qual dos dois dias facilita para você fazer a avaliação?
 ```
 
 ---
 
+## ⚠️ JANELA VAZIA — FALLBACK ÚNICO
+
+Se a JANELA DE OFERTA DE AGENDA estiver vazia para segunda-tarde e sexta-manhã (cenário raro de indisponibilidade Medware), informe ao paciente. Persistindo, registre uma única frase: *"Vou registrar sua preferência para a equipe finalizar — retorno em horário comercial (seg–sex, 8h–18h)."* Esta é a ÚNICA hipótese em que se aciona humano antes da gravação.
+
+---
+
 ## ⛔ PROIBIÇÕES
 
-- ❌ Não inventar horário cheio. O Agente oferece **dia + turno**; horário exato é da equipe.
-- ❌ Não oferecer outro dia além de segunda (tarde) e sexta (manhã).
-- ❌ Não oferecer outra unidade além de Águas Claras.
-- ❌ **Não oferecer sábado**, mesmo em objeção.
-- ❌ Não usar diminutivos nem emojis decorativos.
+- ❌ NUNCA dizer "a equipe confirma o horário exato" ou "preferência registrada — equipe confirma". O Agente oferece horário REAL e fecha sozinho.
+- ❌ NUNCA inventar horário fora da JANELA DE OFERTA DE AGENDA.
+- ❌ NUNCA oferecer outro dia além de segunda (tarde) e sexta (manhã).
+- ❌ NUNCA oferecer outra unidade além de Águas Claras.
+- ❌ **NUNCA oferecer sábado**, mesmo em objeção.
+- ❌ NUNCA usar diminutivos nem emojis decorativos.
