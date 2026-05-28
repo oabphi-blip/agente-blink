@@ -132,6 +132,31 @@ def _data_hora_iso(value: Optional[str]) -> str:
             continue
     return v
 
+# Thresholds para alertar sobre lentidão do servidor Medware
+# (servidor Windows local da clínica — sob pressão de memória/cpu).
+_LATENCY_WARN_S = 3.0   # acima disso, aviso (servidor sob estresse)
+_LATENCY_ERROR_S = 8.0  # acima disso, erro crítico (timeout iminente)
+
+
+def _log_latencia(method: str, path: str, elapsed: float, status: int) -> None:
+    """Log estruturado de latência das chamadas Medware.
+
+    Permite cruzar logs do Easypanel com momentos de instabilidade do
+    servidor Windows local. Use grep '[MEDWARE LATENCY]' nos logs.
+    """
+    if elapsed >= _LATENCY_ERROR_S:
+        log.error(
+            "[MEDWARE LATENCY] %s %s %.2fs HTTP=%d — CRÍTICO (servidor sobrecarregado)",
+            method, path, elapsed, status,
+        )
+    elif elapsed >= _LATENCY_WARN_S:
+        log.warning(
+            "[MEDWARE LATENCY] %s %s %.2fs HTTP=%d — lento (servidor sob estresse)",
+            method, path, elapsed, status,
+        )
+    else:
+        log.info("[MEDWARE LATENCY] %s %s %.2fs HTTP=%d", method, path, elapsed, status)
+
 
 @dataclass
 class MedwareClient:
@@ -152,12 +177,15 @@ class MedwareClient:
         with self._lock:
             if self._token and time.time() < self._token_exp - 300:
                 return self._token
+            t0 = time.perf_counter()
             try:
                 with httpx.Client(timeout=self.timeout) as c:
                     r = c.post(
                         f"{self.base_url}/Acesso/login",
                         json={"identificacao": self.identificacao, "senha": self.senha},
                     )
+                elapsed = time.perf_counter() - t0
+                _log_latencia("POST", "Acesso/login", elapsed, r.status_code)
                 if r.status_code != 200:
                     log.warning("Medware login falhou: HTTP %d", r.status_code)
                     return None
@@ -166,10 +194,19 @@ class MedwareClient:
                 self._refresh_token = data.get("refreshToken")
                 # JWT exp — decodifica payload sem verificar assinatura
                 self._token_exp = _jwt_exp(self._token) or (time.time() + 86400)
-                log.info("Medware: token renovado")
+                log.info("Medware: token renovado (%.2fs)", elapsed)
                 return self._token
+            except httpx.TimeoutException as e:
+                elapsed = time.perf_counter() - t0
+                log.error(
+                    "[MEDWARE LATENCY] TIMEOUT no login após %.2fs — servidor "
+                    "Windows local pode estar sobrecarregado. Erro: %s",
+                    elapsed, e,
+                )
+                return None
             except Exception as e:  # noqa: BLE001
-                log.warning("Medware login erro: %s", e)
+                elapsed = time.perf_counter() - t0
+                log.warning("Medware login erro após %.2fs: %s", elapsed, e)
                 return None
 
     def _headers(self) -> Optional[dict]:
@@ -182,14 +219,18 @@ class MedwareClient:
 
     def status(self) -> dict:
         """Verifica conectividade — usado pelo /health."""
+        t0 = time.perf_counter()
         try:
             with httpx.Client(timeout=self.timeout) as c:
-                                r = c.get(f"{self.base_url}/health/health")
+                r = c.get(f"{self.base_url}/health/health")
+            elapsed = time.perf_counter() - t0
+            _log_latencia("GET", "health/health", elapsed, r.status_code)
             if r.status_code == 200 and "API Ativa" in r.text:
-                return {"ok": True, "detail": "API Ativa"}
-            return {"ok": False, "detail": f"HTTP {r.status_code}"}
+                return {"ok": True, "detail": "API Ativa", "elapsed_s": round(elapsed, 2)}
+            return {"ok": False, "detail": f"HTTP {r.status_code}", "elapsed_s": round(elapsed, 2)}
         except Exception as e:  # noqa: BLE001
-            return {"ok": False, "detail": str(e)[:120]}
+            elapsed = time.perf_counter() - t0
+            return {"ok": False, "detail": str(e)[:120], "elapsed_s": round(elapsed, 2)}
 
     # ---------------------------------------------------- consultas
 
@@ -197,15 +238,29 @@ class MedwareClient:
         headers = self._headers()
         if headers is None:
             return None
+        t0 = time.perf_counter()
         try:
             with httpx.Client(timeout=self.timeout) as c:
                 r = c.get(f"{self.base_url}/{path}", params=params, headers=headers)
+            elapsed = time.perf_counter() - t0
+            _log_latencia("GET", path, elapsed, r.status_code)
             if r.status_code != 200:
                 log.warning("Medware GET %s falhou: HTTP %d", path, r.status_code)
                 return None
             return r.json()
+        except httpx.TimeoutException as e:
+            elapsed = time.perf_counter() - t0
+            log.error(
+                "[MEDWARE LATENCY] TIMEOUT em GET %s após %.2fs (timeout=%.1fs) "
+                "— servidor pode estar sobrecarregado. Erro: %s",
+                path, elapsed, self.timeout, e,
+            )
+            return None
         except Exception as e:  # noqa: BLE001
-            log.warning("Medware GET %s erro: %s", path, e)
+            elapsed = time.perf_counter() - t0
+            log.warning(
+                "Medware GET %s erro após %.2fs: %s", path, elapsed, e,
+            )
             return None
 
     def _post(self, path: str, body: dict) -> tuple[bool, Any]:

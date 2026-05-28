@@ -11,6 +11,7 @@ Arquitetura:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -354,6 +355,149 @@ def _sanitize_messages(msgs: list[dict]) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# FILTRO PÓS-GERAÇÃO — última linha de defesa contra alucinação
+# ---------------------------------------------------------------------------
+# Vocabulário vetado pelo KB §1.4 — substitui por neutro ou remove
+_PROHIBITED_REPLACEMENTS = [
+    (re.compile(r"\binfelizmente[,\s]*", re.IGNORECASE), ""),
+    (re.compile(r"\bdireitinho\b", re.IGNORECASE), "direito"),
+    (re.compile(r"\bcertinho\b", re.IGNORECASE), "certo"),
+    (re.compile(r"\brapidinho\b", re.IGNORECASE), "rápido"),
+    (re.compile(r"\bbonitinho\b", re.IGNORECASE), "bonito"),
+    (re.compile(r"\bqueridinha?\b", re.IGNORECASE), ""),
+    (re.compile(r"\bqueridinho\b", re.IGNORECASE), ""),
+    (re.compile(r"\bobrigadinho\b", re.IGNORECASE), "obrigada"),
+    (re.compile(r"\bconsultinha\b", re.IGNORECASE), "consulta"),
+    (re.compile(r"\bfilhinha\b", re.IGNORECASE), "filha"),
+    (re.compile(r"\bshow\b", re.IGNORECASE), "ótimo"),
+    (re.compile(r"\btá\b", re.IGNORECASE), "está"),
+]
+
+# Chaves Pix oficiais (artigo 38 §3) — qualquer outra é alucinação
+_CHAVES_PIX_OFICIAIS = {
+    "karladelaliberaoftalmo@gmail.com",   # Asa Norte
+    "52.303.729/0001-30",                  # Águas Claras (CNPJ)
+}
+
+_HALLUCINATION_PATTERNS = []  # mantido por compatibilidade; lógica em função
+
+
+def _detecta_chave_pix_inventada(text: str) -> bool:
+    """True se o texto menciona uma chave Pix e ela NÃO está no allowlist."""
+    if not text:
+        return False
+    # Procura "chave pix" + algo até 120 chars
+    trecho = re.search(r"chave\s*pix.{0,120}", text, re.IGNORECASE | re.DOTALL)
+    if not trecho:
+        return False
+    snippet = trecho.group(0)
+    # Email no snippet?
+    email = re.search(r"[\w.\-+]+@[\w.\-]+", snippet)
+    if email:
+        return email.group(0).lower() not in {k.lower() for k in _CHAVES_PIX_OFICIAIS}
+    # CNPJ formatado ou não
+    cnpj = re.search(r"\d{2}[\.\-]?\d{3}[\.\-]?\d{3}\/?\d{4}\-?\d{2}", snippet)
+    if cnpj:
+        norm = re.sub(r"[\.\-\/]", "", cnpj.group(0))
+        oficiais_norm = {re.sub(r"[\.\-\/]", "", k) for k in _CHAVES_PIX_OFICIAIS}
+        return norm not in oficiais_norm
+    return False
+
+
+def _viola_artigo_36(text: str) -> bool:
+    """Detecta se a resposta menciona 'sinal/adiantamento 50%' SEM oferecer
+    também a 'Fila de Encaixe' — viola a regra do artigo 36 que exige
+    apresentar as DUAS opções ao paciente."""
+    if not text:
+        return False
+    t_lower = text.lower()
+    menciona_sinal = any(termo in t_lower for termo in (
+        "50%", "cinquenta por cento", "adiantamento", "sinal de"
+    ))
+    menciona_encaixe = "encaixe" in t_lower
+    return menciona_sinal and not menciona_encaixe
+
+_HALLUCINATION_FALLBACK = (
+    "Vou alinhar a informação correta sobre pagamento com a equipe e te "
+    "retorno em instantes. ✨"
+)
+
+# Anti-pattern "equipe vai confirmar" (KB §13.4.1) — só loga, não substitui
+_TRANSFER_ANTIPATTERN = [
+    re.compile(r"equipe.{0,20}retornar", re.IGNORECASE),
+    re.compile(r"equipe.{0,20}confirma", re.IGNORECASE),
+    re.compile(r"sem acesso à agenda", re.IGNORECASE),
+    re.compile(r"vou registrar.{0,20}prefer[êe]ncia", re.IGNORECASE),
+]
+
+
+def _scrub_prohibited(text: str) -> str:
+    """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
+
+    1. Detecta alucinação de pagamento → substitui resposta por fallback seguro.
+    2. Remove/substitui vocabulário diminutivo/vetado pelo KB §1.4.
+    3. Loga (não substitui) anti-pattern de transferência humana.
+    """
+    if not text:
+        return text
+
+    # 1. Chave Pix inventada (não consta no allowlist do artigo 38 §3)
+    if _detecta_chave_pix_inventada(text):
+        log.error(
+            "[FILTRO] CHAVE PIX INVENTADA bloqueada. Texto: %r", text[:200]
+        )
+        return _HALLUCINATION_FALLBACK
+
+    # 1a. Padrões adicionais (compatibilidade, hoje vazio)
+    for pat in _HALLUCINATION_PATTERNS:
+        if pat.search(text):
+            log.error(
+                "[FILTRO] ALUCINAÇÃO DE PAGAMENTO bloqueada: padrão=%r texto=%r",
+                pat.pattern, text[:200],
+            )
+            return _HALLUCINATION_FALLBACK
+
+    # 1b. Viola artigo 36 — apresenta só 50% sem oferecer Fila de Encaixe.
+    # Só substitui se também mencionar Pix (sinal explícito de cobrança)
+    if _viola_artigo_36(text) and "pix" in text.lower():
+        log.warning(
+            "[FILTRO] Artigo 36 violado: apresenta 50%% sem oferecer Fila de "
+            "Encaixe. Texto: %r", text[:200],
+        )
+        return (
+            "Antes de seguir com o pagamento, deixa eu te apresentar as duas "
+            "opções da clínica:\n\n"
+            "1️⃣ *Reserva Imediata* — adiantamento de 50% via Pix; garante seu "
+            "dia/horário exatos na agenda.\n"
+            "2️⃣ *Fila de Encaixe* — sem adiantamento; pagamento só no dia da "
+            "consulta; avisamos assim que surgir vaga compatível com sua "
+            "preferência.\n\n"
+            "Qual formato prefere?"
+        )
+
+    # 2. Vocabulário vetado — substitui inline
+    original = text
+    for pat, replacement in _PROHIBITED_REPLACEMENTS:
+        text = pat.sub(replacement, text)
+
+    if text != original:
+        # Limpa artefatos das remoções (espaços duplos, vírgulas órfãs)
+        text = re.sub(r"  +", " ", text)
+        text = re.sub(r"\s+,", ",", text)
+        text = re.sub(r",\s*,", ",", text)
+        text = text.strip()
+        log.info("[FILTRO] Vocabulário vetado removido/substituído")
+
+    # 3. Anti-pattern transferência — só observa
+    for pat in _TRANSFER_ANTIPATTERN:
+        if pat.search(text):
+            log.warning("[FILTRO] Anti-pattern transferência detectado: %r", pat.pattern)
+            break
+
+    return text
+
+
 def _route_model(user_text: str, history_len: int, sonnet: str, haiku: str) -> str:
     """Roteador Sonnet vs Haiku por complexidade.
 
@@ -421,13 +565,23 @@ class Responder:
         # 1. Seleciona artigos relevantes da KB
         relevant = self._kb.select_relevant(user_text, max_articles=3, max_chars=12000)
 
-        # 1b. SEMPRE injetar as listas oficiais de convênios (artigos 17 e 18) —
-        # são pequenas (~10KB juntas) e críticas: o agente NUNCA pode afirmar
-        # "não aceitamos X" sem o catálogo completo na frente. Isso elimina o
-        # bug onde "Tribunal" / "STJ" eram negados erradamente.
+        # 1b. SEMPRE injetar artigos CRÍTICOS — pequenos (~15KB juntos) e que
+        # NÃO podem depender de retrieval por keywords. O agente alucina dados
+        # quando esses artigos não estão no contexto:
+        # - 00: endereços, contatos, chave Pix, regra anti-alucinação de endereço
+        #   (bug Lidia 28/05: Lia inventou "SGAS 915" e "Av. Araucárias")
+        # - 17/18: catálogo de convênios aceitos / negados
+        #   (bug "Tribunal/STJ" negados erradamente)
         mandatory_filenames = [
+            "00_identidade_e_unidades.md",
+            "15_pagamento_pos_consulta.md",
             "17_convenios_aceitos_lista_oficial.md",
             "18_convenios_NAO_aceitos_lista_oficial.md",
+            "19_tabela_valores_travas_por_medico.md",
+            "22_agenda_dra_karla.md",                # mapeamento unidade × dia
+            "31_sdp_fluxo_excecao.md",
+            "34_agenda_dr_fabricio.md",              # mapeamento unidade × dia
+            "36_pagamento_exclusivo_encaixe_karla.md",  # política sinal 50% Karla
         ]
         existing_filenames = {a.filename for a in relevant}
         mandatory_articles = []
@@ -484,6 +638,9 @@ class Responder:
 
         if len(answer) > self._max_chars:
             answer = answer[: self._max_chars - 1].rstrip() + "…"
+
+        # 5.1. Filtro pós-geração: vocabulário vetado + alucinação de pagamento
+        answer = _scrub_prohibited(answer)
 
         # 6. Persiste no histórico
         self._convos.append(conversation_key, "user", user_text)
