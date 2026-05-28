@@ -576,6 +576,26 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 _time.sleep(1.5 * (_tent + 1))
         if not answer:
             log.error("WA Cloud: Claude falhou após 3 tentativas")
+            # DEDUP do fallback: se já enviamos a frase de instabilidade
+            # nos últimos 30 min para este convo_key, NÃO repetir.
+            # Silêncio é melhor que parecer robô quebrado mandando a
+            # mesma mensagem 3x na sequência (origem: lead 24037253
+            # recebeu 3 fallbacks idênticos em 1h por falta de crédito
+            # Anthropic + sem dedup).
+            _fallback_key = f"blink:fallback:instab:{convo_key}"
+            try:
+                _redis = getattr(pipeline, "_redis", None)
+                if _redis is not None and _redis.exists(_fallback_key):
+                    log.warning(
+                        "WA Cloud: fallback instabilidade suprimido "
+                        "(já enviado nos últimos 30 min para %s)",
+                        convo_key,
+                    )
+                    return
+                if _redis is not None:
+                    _redis.set(_fallback_key, "1", ex=1800)
+            except Exception as e:  # noqa: BLE001
+                log.debug("dedup fallback ignorado: %s", e)
             answer = (
                 "Oi! Tivemos uma instabilidade rápida por aqui 🙏 "
                 "Já voltei — me conta de novo como posso te ajudar?"
