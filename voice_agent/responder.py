@@ -230,10 +230,21 @@ def _agenda_block(ctx: Optional[dict]) -> str:
             linhas.append(f"- {dia} {dbr}: {', '.join(horas)}")
     return (
         "\n\n----------------------------------------------------------------"
-        "\nAGENDA REAL — AMOSTRA DE HORÁRIOS LIVRES (consultada no Medware)"
+        "\nAGENDA REAL — AMOSTRA DE HORÁRIOS LIVRES (JÁ CONSULTADA NO MEDWARE)"
         "\n----------------------------------------------------------------"
-        "\nEstas são vagas LIVRES de verdade na agenda do médico."
-        "\n\n⚠️ REGRA DE OURO — PRINCÍPIO DA ESCASSEZ:"
+        "\n🚨 ATENÇÃO: Estas vagas JÁ FORAM CONSULTADAS na Medware AGORA."
+        "\nVocê NÃO precisa 'consultar', 'verificar' nem 'aguardar a equipe'."
+        "\nOFEREÇA IMEDIATAMENTE os horários da lista abaixo — sem rodeio."
+        "\n"
+        "\n❌ FRASES PROIBIDAS quando há horários listados:"
+        "\n  • \"Deixa eu consultar a agenda real...\""
+        "\n  • \"Um momentinho enquanto verifico...\""
+        "\n  • \"Vou conferir os horários e te respondo\""
+        "\n  • \"Estou sem acesso à agenda no momento\""
+        "\n  • \"Nossa equipe vai te retornar com os horários\""
+        "\nQualquer uma dessas frases = bug grave. A agenda ESTÁ na sua frente."
+        "\n"
+        "\n⚠️ REGRA DE OURO — PRINCÍPIO DA ESCASSEZ:"
         "\n• Ofereça ao paciente NO MÁXIMO 2 horários por vez."
         "\n• NUNCA liste vários horários nem 'a agenda toda'. Despejar muitas"
         "\n  vagas passa a impressão de clínica vazia, destrói o senso de"
@@ -286,6 +297,28 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
     for k, label in rotulos.items():
         if known.get(k):
             linhas.append(f"- {label}: {known[k]}")
+    # Data da consulta JÁ MARCADA (1.DIA CONSULTA do Kommo, se houver).
+    # Mostrar em formato humano e travar a Lia para confirmar ESSA data exata.
+    dia_consulta_iso = known.get("dia_consulta_iso")
+    dia_consulta_humano: Optional[str] = None
+    if dia_consulta_iso:
+        try:
+            from datetime import datetime as _dt
+            _d = _dt.fromisoformat(dia_consulta_iso)
+            dia_consulta_humano = _d.strftime(
+                "%A, %d/%m/%Y às %H:%M"
+            ).replace("Monday", "segunda-feira").replace(
+                "Tuesday", "terça-feira"
+            ).replace("Wednesday", "quarta-feira").replace(
+                "Thursday", "quinta-feira"
+            ).replace("Friday", "sexta-feira").replace(
+                "Saturday", "sábado"
+            ).replace("Sunday", "domingo")
+            linhas.append(
+                f"- 📅 *CONSULTA JÁ MARCADA*: {dia_consulta_humano}"
+            )
+        except (ValueError, TypeError):
+            pass
     if etapa:
         linhas.append(f"- Etapa atual no funil: {etapa}")
     dados = "\n".join(linhas) if linhas else "- (lead existe, mas sem campos preenchidos ainda)"
@@ -300,16 +333,32 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
     )
     alerta = ""
     if ja_agendado:
+        data_str = (
+            f"em {dia_consulta_humano}"
+            if dia_consulta_humano
+            else "(data exata no campo 1.DIA CONSULTA do Kommo)"
+        )
         alerta = (
             "\n"
-            "\n⚠️ ATENÇÃO — ESTE LEAD JÁ TEM CONSULTA MARCADA/REALIZADA."
-            f"\nA etapa do funil ({etapa}) confirma que o agendamento já existe."
-            "\nEsta conversa NÃO é um novo agendamento. É confirmação de presença,"
-            "\ndúvida ou ajuste sobre a consulta que JÁ ESTÁ marcada. É PROIBIDO"
-            "\nrefazer a triagem — não pergunte de novo motivo, convênio, médico,"
-            "\nunidade ou horário. Leia o histórico, entenda o que a pessoa precisa"
-            "\nAGORA e responda só isso. Se não tiver certeza de algum dado, NÃO"
-            "\nINVENTE — diga que vai verificar com a equipe."
+            "\n🚨 ATENÇÃO MÁXIMA — ESTE LEAD JÁ TEM CONSULTA MARCADA."
+            f"\n📅 A consulta está agendada {data_str}."
+            f"\nEtapa do funil: {etapa or '(verificar Kommo)'}."
+            "\n"
+            "\nESTA conversa É:"
+            "\n  ✅ confirmação de presença (\"Sim, vou comparecer\")"
+            "\n  ✅ dúvida operacional (endereço, horário, documento, prazo)"
+            "\n  ✅ remarcação/cancelamento (\"preciso mudar pra outro dia\")"
+            "\n"
+            "\nESTA conversa NÃO É:"
+            "\n  ❌ novo agendamento — não refaça a triagem do zero"
+            "\n  ❌ coleta de preferência (\"qual dia da semana?\") — proibido"
+            "\n  ❌ oferta de slots novos — só se a pessoa pedir REMARCAÇÃO explicitamente"
+            "\n"
+            "\nRESPONDA APENAS À PERGUNTA ATUAL — não invente próxima etapa."
+            "\nSe a pessoa cumprimentar (\"oi\", \"boa tarde\"), responda confirmando"
+            "\na consulta marcada e pergunte se está vindo OU se precisa de algo."
+            "\nEXEMPLO de boa resposta inicial nesse caso:"
+            f'\n  "Olá! Tudo certo pra sua consulta {data_str}? Posso te ajudar com algo?"'
         )
     return (
         "\n\n================================================================"
@@ -431,16 +480,62 @@ _TRANSFER_ANTIPATTERN = [
     re.compile(r"vou registrar.{0,20}prefer[êe]ncia", re.IGNORECASE),
 ]
 
+# Anti-pattern "deixa eu consultar a agenda" / "um momentinho" — quando há
+# agenda real no contexto, a Lia DEVE oferecer slots imediatamente, nunca
+# fingir que vai consultar.
+_FAKE_AGENDA_LOOKUP = [
+    re.compile(r"deixa eu consultar.{0,30}agenda", re.IGNORECASE | re.DOTALL),
+    re.compile(r"vou consultar.{0,30}agenda", re.IGNORECASE | re.DOTALL),
+    re.compile(r"deixa eu verificar.{0,30}(agenda|horário|disponibilidade)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"vou verificar.{0,30}(horário|disponibilidade|agenda)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"\bum momentinho\b", re.IGNORECASE),
+    re.compile(r"\bsó um momento\b", re.IGNORECASE),
+    re.compile(r"aguarda.{0,15}(momento|instante)", re.IGNORECASE),
+    re.compile(r"estou sem acesso.{0,15}agenda", re.IGNORECASE),
+]
 
-def _scrub_prohibited(text: str) -> str:
+_FAKE_AGENDA_LOOKUP_FALLBACK = (
+    "Para eu te oferecer o melhor horário, me confirma só: você prefere "
+    "manhã, tarde ou início da noite? E algum dia específico da semana?"
+)
+
+
+def _viola_oferta_agenda(text: str, has_agenda: bool) -> bool:
+    """True se a Lia fingiu que vai consultar agenda — quando JÁ tem agenda
+    real no contexto, isso é violação grave (deveria oferecer imediatamente).
+    """
+    if not has_agenda or not text:
+        return False
+    return any(p.search(text) for p in _FAKE_AGENDA_LOOKUP)
+
+
+def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
 
     1. Detecta alucinação de pagamento → substitui resposta por fallback seguro.
-    2. Remove/substitui vocabulário diminutivo/vetado pelo KB §1.4.
-    3. Loga (não substitui) anti-pattern de transferência humana.
+    2. Detecta "consultar agenda" quando há agenda real no contexto → substitui.
+    3. Remove/substitui vocabulário diminutivo/vetado pelo KB §1.4.
+    4. Loga (não substitui) anti-pattern de transferência humana.
+
+    Args:
+        text: resposta gerada pela Lia.
+        ctx: caller_context opcional. Se contém "agenda" não-vazia, ativa o
+            detector de "fingiu consultar agenda".
     """
     if not text:
         return text
+
+    has_agenda = bool((ctx or {}).get("agenda"))
+
+    # 0. Fingiu consultar agenda — quando JÁ tem horários no contexto.
+    # Esse bug deixa a Lia em loop de "deixa eu consultar..." sem nunca voltar.
+    if _viola_oferta_agenda(text, has_agenda):
+        log.error(
+            "[FILTRO] FAKE AGENDA LOOKUP bloqueado — Lia disse que ia consultar "
+            "agenda quando JÁ tinha %d slots no contexto. Texto: %r",
+            len(ctx.get("agenda", [])), text[:200],
+        )
+        return _FAKE_AGENDA_LOOKUP_FALLBACK
 
     # 1. Chave Pix inventada (não consta no allowlist do artigo 38 §3)
     if _detecta_chave_pix_inventada(text):
@@ -640,7 +735,8 @@ class Responder:
             answer = answer[: self._max_chars - 1].rstrip() + "…"
 
         # 5.1. Filtro pós-geração: vocabulário vetado + alucinação de pagamento
-        answer = _scrub_prohibited(answer)
+        # + detector "fake agenda lookup" (passa ctx pra saber se há agenda real)
+        answer = _scrub_prohibited(answer, ctx=caller_context)
 
         # 6. Persiste no histórico
         self._convos.append(conversation_key, "user", user_text)

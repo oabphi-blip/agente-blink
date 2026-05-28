@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Optional
 
 import httpx
@@ -177,6 +178,7 @@ STATUS_CLOSED_LOST = 143
 FIELD_NOME_PACIENTE_1 = 1255757
 FIELD_MOTIVO_PACIENTE_1 = 1255727
 FIELD_DIA_TURNO_PERIODO = 1259960  # "DIA/TURNO/PERÍODO ⚠️" — preferência textual
+FIELD_DIA_CONSULTA_1 = 1255723     # "1.DIA CONSULTA" (date_time) — data/hora confirmada
 
 # Date (timestamp YYYY-MM-DDTHH:MM:SS-03:00)
 FIELD_DATA_NASCIMENTO_PACIENTE_1 = 1259984
@@ -727,7 +729,9 @@ class KommoClient:
             sid = data.get("status_id")
             out["status_id"] = sid
             out["etapa"] = ST_NAMES.get(sid)
-            out["ja_agendado"] = sid in ST_JA_AGENDADO
+            # ja_agendado baseado em status_id (camada 1).
+            # Camada 2 (1.DIA CONSULTA preenchido) é avaliada abaixo.
+            ja_agendado_by_status = sid in ST_JA_AGENDADO
             id_to_label = {
                 FIELD_NOME_PACIENTE_1: "nome_paciente",
                 FIELD_MOTIVO_PACIENTE_1: "motivo",
@@ -738,8 +742,31 @@ class KommoClient:
                 FIELD_DIA_TURNO_PERIODO: "dia_turno",
                 FIELD_ATIVADO_IA[0]: "ativado_ia",
             }
+            # 1.DIA CONSULTA é tratado separadamente porque é date_time (epoch)
+            # e dispara a flag ja_agendado quando aponta para futuro/hoje.
+            ja_agendado_by_consulta = False
+            dia_consulta_ts: Optional[int] = None
             for cf in (data.get("custom_fields_values") or []):
                 fid = cf.get("field_id")
+                # 1.DIA CONSULTA (date_time) → ja_agendado se >= ontem
+                if fid == FIELD_DIA_CONSULTA_1:
+                    vals = cf.get("values") or []
+                    if vals and vals[0].get("value"):
+                        try:
+                            ts = int(vals[0]["value"])
+                            # Aceita "consulta hoje OU futura" como sinal de já agendado
+                            # (consulta de ontem já passou, não conta)
+                            if ts > time.time() - 86400:
+                                ja_agendado_by_consulta = True
+                                dia_consulta_ts = ts
+                                out["known"]["dia_consulta_ts"] = ts
+                                # Para o agente saber a data legível
+                                out["known"]["dia_consulta_iso"] = (
+                                    datetime.fromtimestamp(ts).isoformat()
+                                )
+                        except (ValueError, TypeError):
+                            pass
+                    continue
                 label = id_to_label.get(fid)
                 if not label:
                     continue
@@ -748,6 +775,16 @@ class KommoClient:
                     v = vals[0].get("value")
                     if v:
                         out["known"][label] = v
+            # ja_agendado = OR das duas camadas (status_id OR consulta futura)
+            out["ja_agendado"] = ja_agendado_by_status or ja_agendado_by_consulta
+            if ja_agendado_by_consulta and not ja_agendado_by_status:
+                # Caso típico do bug "Aurora": lead com 1.DIA CONSULTA preenchido
+                # mas status ainda 2-AGENDAR (não foi movido). Loga aviso.
+                log.info(
+                    "Kommo: lead %s tem dia_consulta_ts=%s (futuro) mas status "
+                    "%s não está em ST_JA_AGENDADO. ja_agendado=True por camada 2.",
+                    lead_id, dia_consulta_ts, sid,
+                )
 
             # 'name' = nome do CONTATO (quem escreve no WhatsApp) — é esse
             # que o agente usa para CUMPRIMENTAR. NUNCA usar o nome do
