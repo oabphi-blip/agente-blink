@@ -509,6 +509,58 @@ def _viola_oferta_agenda(text: str, has_agenda: bool) -> bool:
     return any(p.search(text) for p in _FAKE_AGENDA_LOOKUP)
 
 
+# Padrões de cobrança de sinal/Pix — só são legítimos APÓS o paciente ter
+# escolhido um slot concreto (data + hora). Antes disso, é violação 12.9.
+_COBRANCA_SINAL_PATTERNS = [
+    re.compile(r"sinal\s+(?:de\s+)?(?:50\s*%|r\$)", re.IGNORECASE),
+    re.compile(r"comprovante\s+do\s+(?:sinal|pix)", re.IGNORECASE),
+    re.compile(r"chave\s+pix", re.IGNORECASE),
+    re.compile(r"karladelaliberaoftalmo@gmail", re.IGNORECASE),
+    re.compile(r"52\.?303\.?729", re.IGNORECASE),  # CNPJ Águas Claras
+    re.compile(r"garantir\s+seu\s+horário\s+(?:com|via|pelo)\s+(?:o\s+)?pix", re.IGNORECASE),
+    re.compile(r"fa[çc]a\s+o\s+pix\s+(?:de|no\s+valor)", re.IGNORECASE),
+]
+
+# Padrão de "slot concreto" — data DD/MM ou dia-da-semana + hora HH:MM
+# Se o histórico (texto da conversa) tem algo assim, sinal pode ser legítimo.
+_SLOT_CONCRETO_NA_RESPOSTA = re.compile(
+    r"(?:segunda|terça|quarta|quinta|sexta|sábado|domingo)[\-\s]?(?:feira)?"
+    r"\s*,?\s*\d{1,2}[\/\.]\d{1,2}\s+(?:às|as)\s+\d{1,2}[:h]\d{2}",
+    re.IGNORECASE,
+)
+
+
+def _viola_cobranca_antes_slot(text: str) -> bool:
+    """True se a resposta cobra sinal/Pix SEM ter um slot concreto antes.
+
+    Lógica: se o TEXTO da resposta atual menciona sinal/Pix MAS não tem um
+    formato de slot concreto (dia-da-semana + data + hora), é violação 12.9.
+
+    Limitação: só vê a resposta atual, não o histórico da conversa. Se a Lia
+    confirmou o slot na mensagem ANTERIOR e cobra Pix na atual, vai dar falso
+    positivo. Mas é melhor errar pra mais e pedir ajuste do que cobrar sem
+    confirmação.
+    """
+    if not text:
+        return False
+    menciona_cobranca = any(p.search(text) for p in _COBRANCA_SINAL_PATTERNS)
+    if not menciona_cobranca:
+        return False
+    # Tem cobrança. Tem slot concreto na MESMA mensagem?
+    tem_slot_concreto = bool(_SLOT_CONCRETO_NA_RESPOSTA.search(text))
+    # Cobrança válida só se tem slot concreto na mesma mensagem
+    # OU se menciona "fila de encaixe" (apresentação correta das 2 opções)
+    menciona_encaixe = "encaixe" in text.lower()
+    return not (tem_slot_concreto or menciona_encaixe)
+
+
+_COBRANCA_ANTECIPADA_FALLBACK = (
+    "Antes de qualquer pagamento, deixa eu te oferecer os horários reais. "
+    "Qual dia da semana e turno funcionam melhor pra você? Assim já te passo "
+    "as opções concretas com data e hora."
+)
+
+
 def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
 
@@ -536,6 +588,17 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             len(ctx.get("agenda", [])), text[:200],
         )
         return _FAKE_AGENDA_LOOKUP_FALLBACK
+
+    # 0a. Cobrança de sinal/Pix ANTES de slot concreto (regra 12.9 do master).
+    # Lia não pode cobrar sinal sem antes ter oferecido um slot específico
+    # (dia-da-semana + data + hora) e o paciente ter escolhido.
+    if _viola_cobranca_antes_slot(text):
+        log.error(
+            "[FILTRO] COBRANCA ANTES DE SLOT bloqueada — Lia mencionou "
+            "sinal/Pix mas sem slot concreto (data+hora) nem mencionar Fila "
+            "de Encaixe. Texto: %r", text[:200],
+        )
+        return _COBRANCA_ANTECIPADA_FALLBACK
 
     # 1. Chave Pix inventada (não consta no allowlist do artigo 38 §3)
     if _detecta_chave_pix_inventada(text):
