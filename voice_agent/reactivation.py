@@ -418,6 +418,41 @@ class ReactivationEngine:
         except Exception as e:  # noqa: BLE001
             log.warning("react: mover etapa do lead %s falhou: %s", lead_id, e)
 
+        # === LINHA CONTÍNUA NO KOMMO ===
+        # 1. Carimba campos custom: ATIVADO IA? + HORA ATIVAÇÃO + ATENDENTE=LIA
+        # 2. Adiciona nota interna com timestamp + canal + template usado
+        # Assim o atendente humano vê tudo direto no card do lead — sem
+        # precisar olhar Slack ou logs do container.
+        try:
+            self.kommo.update_lead_fields(lead_id, {
+                "ativado_ia": "ATIVADO",
+                "hora_ativacao_ts": int(time.time()),
+                "atendente": "LIA",
+            })
+        except Exception as e:  # noqa: BLE001
+            log.warning("react: carimbar campos do lead %s falhou: %s", lead_id, e)
+
+        try:
+            now_brt = datetime.now(_TZ).strftime("%d/%m/%Y %H:%M")
+            template_info = (
+                f"template `{self.s.reactivation_template_name}`"
+                if self._use_cloud() else "Evolution 0710 (texto livre)"
+            )
+            nota = (
+                f"🤖 LIA ATIVOU este lead em {now_brt}.\n\n"
+                f"Canal: {channel}\n"
+                f"Mensagem: {template_info}\n\n"
+                f"Conteúdo enviado:\n{message[:500]}\n\n"
+                f"Próximos passos esperados:\n"
+                f"• Paciente responde → Lia conduz triagem automática\n"
+                f"• Sem resposta em 24h → cadência D-1 dispara reminder\n"
+                f"• Atendente humano pode assumir a qualquer momento "
+                f"(handoff desativa a Lia automaticamente)."
+            )
+            self.kommo.add_note(lead_id, nota)
+        except Exception as e:  # noqa: BLE001
+            log.warning("react: nota de ativação no lead %s falhou: %s", lead_id, e)
+
         self._mark_done(lead_id)
         self._incr_daily()
         self._set_last_send(time.time())
