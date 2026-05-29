@@ -1122,6 +1122,40 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         wa_cloud=wa_cloud,
     )
 
+    # ================================================================
+    # CRON INTERNO — dispara reactivation.tick() a cada N min em background.
+    # Substitui dependência externa (N8N workflow ou cron Easypanel).
+    # Loop começa 2 min após startup pra dar tempo do app subir.
+    # Se REACTIVATION_ENABLED=false, o tick retorna "skipped" e nada
+    # acontece — totalmente seguro deixar rodando sempre.
+    # Intervalo: 600s (10 min). Cada tick processa NO MÁXIMO 1 lead.
+    # ================================================================
+    import asyncio as _asyncio_cron
+
+    @app.on_event("startup")
+    async def _start_reactivation_internal_cron():
+        async def _cron_loop():
+            await _asyncio_cron.sleep(120)  # delay inicial 2 min
+            log.info("[CRON interno] iniciado — tick a cada 10 min")
+            while True:
+                try:
+                    report = await _asyncio_cron.to_thread(
+                        reactivation.tick, False
+                    )
+                    if report.action != "skipped":
+                        log.info(
+                            "[CRON tick] action=%s lead=%s count=%s",
+                            report.action, report.lead_id, report.daily_count,
+                        )
+                    elif report.ran:
+                        log.info(
+                            "[CRON tick] ran=true skip=%s", report.reason,
+                        )
+                except Exception as e:  # noqa: BLE001
+                    log.warning("[CRON tick] erro: %s", e)
+                await _asyncio_cron.sleep(600)  # 10 min
+        _asyncio_cron.create_task(_cron_loop())
+
     @app.get("/reactivation/status")
     def reactivation_status() -> dict:
         return reactivation.status()
