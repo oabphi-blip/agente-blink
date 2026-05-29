@@ -62,22 +62,141 @@ PROC_CONSULTA_PARTICULAR = {
 PROC_CONSULTA_PARTICULAR_DEFAULT = 303
 
 # --- Planos --------------------------------------------------------------
-# codPlano 1 = .PARTICULAR. Demais = convênios mapeados a partir do histórico
-# real de agendamentos. Convênio que NÃO estiver aqui → o agente cai no
-# fluxo de atendimento humano (nunca agenda com plano errado).
+# codPlano 1 = .PARTICULAR. Demais = convênios mapeados via cross-check
+# entre lista oficial Medware (listar_planos_operadoras) e enum CONVÊNIO
+# do Kommo (field_id=853206). Cada convênio tem múltiplos aliases para
+# tolerar variações do paciente. Convênio NÃO mapeado → cai em humano.
+#
+# Cross-check oficial 29/05/2026 — todos os 27 convênios do Kommo mapeados:
 PLANO_PARTICULAR = 1
 PLANO_CODES = {
-    "particular": 1, "sem convenio": 1, "sem convênio": 1, "particular ": 1,
-    "serpro": 31,
-    "sis senado": 32, "sis-senado": 32, "senado": 32,
-    "tjdft": 2, "t.j.d.f.t": 2, "tjdft direto": 2, "tribunal de justica": 2,
-    "policia federal": 26, "polícia federal": 26, "pf": 26,
-    "plan-assist": 4, "plan assist": 4, "planassist": 4, "plan-assit": 4,
-    "bacen": 9, "banco central": 9,
+    # PARTICULAR (codPlano 1)
+    "particular": 1, "sem convenio": 1, "sem convênio": 1,
+    "particular ": 1, "nao se aplica": 1, "não se aplica": 1,
+    "n/a": 1,
+
+    # T.J.D.F.T - DIRETO (codPlano 2) — Kommo: "TJDFT Pró-Saúde"
+    "tjdft": 2, "t.j.d.f.t": 2, "t.j.d.f.t - direto": 2, "tjdft direto": 2,
+    "tribunal de justica": 2, "tjdft pró-saúde": 2, "tjdft pro-saude": 2,
+    "tjdft pro saude": 2, "pro saude tjdft": 2, "pró-saúde tjdft": 2,
+
+    # STJ (codPlano 3) — Kommo: "Pro ser STJ"
     "stj": 3, "superior tribunal de justica": 3,
     "pro ser stj": 3, "pro-ser stj": 3, "proser stj": 3,
     "pro ser": 3, "pro-ser": 3, "pro ser do stj": 3, "pro-ser do stj": 3,
+
+    # PLAN-ASSIT (codPlano 4) — Kommo: "Plan Assiste - MPF (MPU)"
+    # NOTA: existe "MPU- PLAN ASSISTE AGUAS CLARAS (DIRETO)" cod 74,
+    # decidir caso a caso. Padrão = 4 (mais comum historicamente).
+    "plan-assist": 4, "plan assist": 4, "planassist": 4, "plan-assit": 4,
+    "plan assiste": 4, "plan-assiste": 4, "planassiste": 4,
+    "plan assiste mpf": 4, "plan assiste - mpf (mpu)": 4,
+    "mpf": 4, "mpu": 4,
+
+    # E-VIDA (codPlano 5) — Kommo: "E-vida (Luminar)"
+    "e-vida": 5, "evida": 5, "e vida": 5, "luminar": 5,
+    "e-vida (luminar)": 5, "evida luminar": 5,
+
+    # AFFEGO (codPlano 7) — sem correspondência Kommo, mantido pra compatibilidade
+    "affego": 7,
+
+    # ANAFE (codPlano 8) — Kommo: "Anafe"
+    "anafe": 8,
+
+    # BACEN (codPlano 9) — Kommo: "Bacen"
+    "bacen": 9, "banco central": 9,
+
+    # CARE PLUS (codPlano 14) — Kommo: "Care Plus"
+    "care plus": 14, "careplus": 14, "care-plus": 14,
+
+    # CASEC (codPlano 15) — Kommo: "Casec (Codevasf)"
+    "casec": 15, "casec (codevasf)": 15, "codevasf": 15,
+
+    # CASEMBRAPA (codPlano 16) — Kommo: "Casembrapa  _ Embrapa"
+    "casembrapa": 16, "embrapa": 16, "casembrapa _ embrapa": 16,
+    "casembrapa  _ embrapa": 16, "casembrapa embrapa": 16,
+
+    # CNTI (codPlano 18) — sem correspondência Kommo
+    "cnti": 18,
+
+    # FASCAL (codPlano 22) — Kommo: "Fascal"
+    "fascal": 22,
+
+    # CONAB (codPlano 19) — Kommo: "Conab"
+    "conab": 19,
+
+    # OMINT (codPlano 25) — Kommo: "Omint"
+    "omint": 25,
+
+    # POLICIA FEDERAL (codPlano 26) — Kommo: "PF Saúde"
+    "policia federal": 26, "polícia federal": 26, "pf": 26,
+    "pf saude": 26, "pf saúde": 26, "pfsaude": 26,
+    "policia": 26, "polícia": 26,
+
+    # STM (codPlano 27) — Kommo: "PLAS/JMU (STM)"
+    "stm": 27, "plas/jmu": 27, "plas jmu": 27, "plas/jmu (stm)": 27,
+    "jmu": 27,
+
+    # PROASA (codPlano 28) — Kommo: "Proasa"
+    "proasa": 28, "pro-asa": 28, "pro asa": 28,
+
+    # SAÚDE CAIXA (codPlano 29) — Kommo: "Saúde Caixa"
+    "saude caixa": 29, "saúde caixa": 29, "caixa": 29, "saúde-caixa": 29,
+    "saude-caixa": 29,
+
+    # SAÚDE PETROBRAS (codPlano 30) — Kommo: "Petrobrás (Saúde Petrobrás)"
+    "saude petrobras": 30, "saúde petrobras": 30, "saúde petrobrás": 30,
+    "petrobras": 30, "petrobrás": 30,
+    "petrobrás (saúde petrobrás)": 30, "petrobras (saude petrobras)": 30,
+
+    # SERPRO (codPlano 31) — Kommo: "Serpro"
+    "serpro": 31,
+
+    # SIS SENADO (codPlano 32) — Kommo: "SIS Senado"
+    "sis senado": 32, "sis-senado": 32, "senado": 32, "sis": 32,
+
+    # STF-MED (codPlano 33) — Kommo: "STF-Med"
+    "stf-med": 33, "stf med": 33, "stfmed": 33, "stf": 33,
+
+    # TRF (codPlano 34) — Kommo: "TRF Pró-Social"
+    "trf": 34, "trf pro-social": 34, "trf pró-social": 34,
+    "pro social trf": 34, "pró-social trf": 34,
+
+    # TRE (codPlano 35) — Kommo: "TRE"
+    "tre": 35,
+
+    # TRT (codPlano 36) — Kommo: "TRT"
+    "trt": 36,
+
+    # TST (codPlano 37) — Kommo: "TST Saúde"
+    "tst": 37, "tst saude": 37, "tst saúde": 37, "tstsaude": 37,
+
+    # UNAFISCO SAÚDE (codPlano 38) — sem correspondência Kommo
+    "unafisco": 38, "unafisco saude": 38, "unafisco saúde": 38,
+
+    # CAMARA DOS DEPUTADOS (codPlano 39) — Kommo: "PróSaúde (Camara dos Deputados)"
     "camara dos deputados": 39, "câmara dos deputados": 39, "camara": 39,
+    "câmara": 39, "prosaude camara": 39, "prósaúde câmara": 39,
+    "prósaúde (camara dos deputados)": 39,
+    "prosaude (camara dos deputados)": 39,
+    "pró-saúde câmara": 39, "pró-saúde camara dos deputados": 39,
+
+    # BACEN AMHPDF (codPlano 45) — sem correspondência Kommo direta
+    "bacen amhpdf": 45, "amhpdf": 45,
+
+    # MPU- PLAN ASSISTE AGUAS CLARAS (DIRETO) (codPlano 74)
+    # alternativa pra MPU em vez de PLAN-ASSIT (4)
+    "mpu plan assiste aguas claras": 74,
+    "mpu- plan assiste aguas claras (direto)": 74,
+    "plan assiste aguas claras": 74,
+
+    # INAS (Kommo: "Inas GDf (somente Dr. Fabrício Freitas)")
+    # NOTA: NÃO existe operadora INAS na listar_planos_operadoras do Medware.
+    # Provavelmente é um plano interno / particular especial. Mantém código 0
+    # pra escalar humano até esclarecer com a equipe. Listar aliases pra
+    # detectar e marcar no log.
+    # "inas": 0, "inas gdf": 0,  # deixar SEM mapeamento → humano
+
 }
 
 

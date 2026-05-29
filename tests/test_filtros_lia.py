@@ -33,6 +33,7 @@ from voice_agent.responder import (  # noqa: E402
     _viola_cobranca_antes_slot,
     _viola_oferta_agenda,
 )
+from voice_agent.medware import resolver_plano  # noqa: E402
 
 
 # ----------------------------------------------------------------------
@@ -148,3 +149,61 @@ class TestFakeAgendaLookup:
         """Se de fato não tem agenda no contexto, frase é honesta."""
         text = "Um momentinho enquanto consulto a agenda"
         assert not _viola_oferta_agenda(text, has_agenda=False)
+
+
+# ----------------------------------------------------------------------
+# CENÁRIO 5 — Convênios Kommo ↔ Medware mapeados (lead 24038029, 29/05/2026)
+# Bug original: "Pro ser STJ" do Kommo não casava com "STJ" do Medware.
+# Cross-check oficial 29/05/2026 — todos os 27 convênios devem resolver.
+# ----------------------------------------------------------------------
+class TestConveniosMapeados:
+    @pytest.mark.parametrize("convenio,esperado", [
+        ("Bacen", 9),
+        ("Casec (Codevasf)", 15),
+        ("Casembrapa  _ Embrapa", 16),
+        ("Conab", 19),
+        ("E-vida (Luminar)", 5),
+        ("Fascal", 22),
+        ("Omint", 25),
+        ("PF Saúde", 26),
+        ("Plan Assiste - MPF (MPU)", 4),
+        ("PróSaúde (Camara dos Deputados)", 39),
+        ("Proasa", 28),
+        ("Saúde Caixa", 29),
+        ("Petrobrás (Saúde Petrobrás)", 30),
+        ("Serpro", 31),
+        ("SIS Senado", 32),
+        ("STF-Med", 33),
+        ("TRE", 35),
+        ("TRF Pró-Social", 34),
+        ("TRT", 36),
+        ("TST Saúde", 37),
+        ("TJDFT Pró-Saúde", 2),
+        ("Não se aplica", 1),
+        ("Pro ser STJ", 3),  # ← bug histórico lead 24038029
+        ("Care Plus", 14),
+        ("Anafe", 8),
+        ("PLAS/JMU (STM)", 27),
+    ])
+    def test_convenio_kommo_resolve_medware(self, convenio, esperado):
+        """Cada convênio do enum CONVÊNIO do Kommo (field 853206) DEVE
+        resolver pra um codPlano > 0 do Medware. Bug histórico (lead
+        24038029, 29/05/2026): 'Pro ser STJ' não casava com 'STJ'
+        porque match parcial exige len(nome)>=4 e 'stj' tem 3 chars."""
+        assert resolver_plano(convenio) == esperado
+
+    def test_inas_gdf_nao_mapeado_propositalmente(self):
+        """Inas GDf não tem correspondência no listar_planos_operadoras
+        do Medware (29/05/2026). Retorna 0 propositalmente → escala
+        humano até decisão de negócio sobre qual codPlano usar."""
+        assert resolver_plano("Inas GDf (somente Dr. Fabrício Freitas)") == 0
+
+    def test_paciente_escreve_minusculo_funciona(self):
+        """Lookup é case-insensitive."""
+        assert resolver_plano("pro ser stj") == 3
+        assert resolver_plano("fascal") == 22
+
+    def test_paciente_escreve_sem_acento(self):
+        """Aliases sem acento devem funcionar."""
+        assert resolver_plano("saude caixa") == 29
+        assert resolver_plano("petrobras") == 30
