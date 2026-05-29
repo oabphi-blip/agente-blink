@@ -563,6 +563,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         # API (timeout, 5xx, rate-limit) NÃO deve virar mensagem de erro
         # para o paciente. Só cai no fallback se as 3 falharem.
         answer = ""
+        _last_exc_repr = ""
         for _tent in range(3):
             try:
                 result = responder.reply(
@@ -570,30 +571,36 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 )
                 answer = result.get("answer") or ""
                 break
-            except Exception:  # noqa: BLE001
-                log.warning("WA Cloud: responder.reply falhou (tentativa %d/3)",
-                            _tent + 1)
+            except Exception as _exc:  # noqa: BLE001
+                _last_exc_repr = repr(_exc)[:300]
+                log.warning(
+                    "WA Cloud: responder.reply falhou (tentativa %d/3): %s",
+                    _tent + 1, _last_exc_repr,
+                )
                 _time.sleep(1.5 * (_tent + 1))
         if not answer:
-            log.error("WA Cloud: Claude falhou após 3 tentativas")
-            # DEDUP do fallback: se já enviamos a frase de instabilidade
-            # nos últimos 30 min para este convo_key, NÃO repetir.
-            # Silêncio é melhor que parecer robô quebrado mandando a
-            # mesma mensagem 3x na sequência (origem: lead 24037253
-            # recebeu 3 fallbacks idênticos em 1h por falta de crédito
-            # Anthropic + sem dedup).
+            log.error(
+                "WA Cloud: Claude falhou após 3 tentativas — convo=%s "
+                "user_text=%r last_exc=%s",
+                convo_key, user_text[:200], _last_exc_repr or "(sem exc)",
+            )
+            # DEDUP do fallback: 24h por convo_key.
+            # Antes era 30 min — mas paciente Patricia Somera (lead 24041465,
+            # 29/05) recebeu 2 fallbacks em 35 min porque TTL expirou entre as
+            # falhas. 24h elimina repetição total. Se Claude continuar caindo,
+            # silêncio é melhor que robô quebrado.
             _fallback_key = f"blink:fallback:instab:{convo_key}"
             try:
                 _redis = getattr(pipeline, "_redis", None)
                 if _redis is not None and _redis.exists(_fallback_key):
                     log.warning(
                         "WA Cloud: fallback instabilidade suprimido "
-                        "(já enviado nos últimos 30 min para %s)",
+                        "(já enviado nas últimas 24h para %s)",
                         convo_key,
                     )
                     return
                 if _redis is not None:
-                    _redis.set(_fallback_key, "1", ex=1800)
+                    _redis.set(_fallback_key, "1", ex=86400)  # 24h
             except Exception as e:  # noqa: BLE001
                 log.debug("dedup fallback ignorado: %s", e)
             answer = (
