@@ -154,15 +154,51 @@ def detectar_agendamento_confirmado(
         return None
 
 
+def _gravacao_redis_key(lead_id: int) -> str:
+    return f"blink:gravacao:lead:{lead_id}"
+
+
+def _set_gravacao_status(
+    redis_client: Any, lead_id: int, status: str,
+    cod_agendamento: Optional[int] = None,
+    motivo: Optional[str] = None,
+    detalhe: Optional[str] = None,
+) -> None:
+    """Salva em Redis o status REAL da gravação Medware pra próximo turno
+    da Lia consultar. Resolve Gap 5 (origem: lead 24038029 — Lia mentiu
+    'está gravado' sem saber). TTL 6h.
+    """
+    if redis_client is None or not lead_id:
+        return
+    import json as _json
+    payload = {
+        "status": status,  # 'success' | 'failed' | 'pending'
+        "cod_agendamento": cod_agendamento,
+        "motivo": motivo,
+        "detalhe": (detalhe or "")[:300],
+        "ts": int(__import__("time").time()),
+    }
+    try:
+        redis_client.set(
+            _gravacao_redis_key(int(lead_id)),
+            _json.dumps(payload, ensure_ascii=False),
+            ex=21600,  # 6h
+        )
+    except Exception as e:  # noqa: BLE001
+        log.debug("Redis gravacao status falhou: %s", e)
+
+
 def executar_agendamento(
     decision: dict,
     caller_context: dict,
     medware: Any,
     kommo: Any,
+    redis_client: Any = None,
 ) -> dict:
     """Chama medware.criar_agendamento e atualiza Kommo em sucesso.
 
     Retorna dict: {ok, cod_agendamento?, lead_id?, motivo?}
+    Side-effect: salva status real em Redis pra Lia consultar (Gap 5).
     """
     from .medware import MEDICO_CODES, UNIDADE_CODES, _code_lookup
 
@@ -194,6 +230,13 @@ def executar_agendamento(
     if not result.get("ok"):
         log.warning("medware criar_agendamento falhou: %s", result)
         _lid = (caller_context or {}).get("lead_id")
+        # Gap 5: registra status real em Redis pra Lia saber e responder com verdade
+        _set_gravacao_status(
+            redis_client, int(_lid) if _lid else 0,
+            status="failed",
+            motivo=str(result.get("motivo")),
+            detalhe=str(result.get("detalhe") or "")[:200],
+        )
         if _lid and kommo:
             try:
                 kommo.update_lead_status(int(_lid), 106563343)
@@ -208,6 +251,12 @@ def executar_agendamento(
     cod_ag = result.get("cod_agendamento")
     lead_id = (caller_context or {}).get("lead_id")
     log.info("agendamento criado: codAgendamento=%s lead=%s", cod_ag, lead_id)
+
+    # Gap 5: registra sucesso real em Redis pra Lia saber e responder com verdade
+    _set_gravacao_status(
+        redis_client, int(lead_id) if lead_id else 0,
+        status="success", cod_agendamento=int(cod_ag) if cod_ag else None,
+    )
 
     # Move lead Kommo para 4-AGENDADO (Gap 3).
     if lead_id and cod_ag:
@@ -234,11 +283,13 @@ def detectar_e_executar_safely(
     kommo: Any,
     anthropic_api_key: str,
     haiku_model: str,
+    redis_client: Any = None,
 ) -> Optional[dict]:
     """Entry-point chamado pelo pipeline (em thread).
 
     Detecta agendamento confirmado e, se houver, executa.
     Captura qualquer exceção — nunca propaga.
+    Salva status real em Redis pra Lia consultar (Gap 5).
     """
     try:
         client = _get_anthropic_client(anthropic_api_key)
@@ -249,8 +300,20 @@ def detectar_e_executar_safely(
             return None
         if not medware or not kommo:
             log.warning("agendamento detectado mas medware/kommo indisponíveis")
+            _lid = (caller_context or {}).get("lead_id")
+            _set_gravacao_status(
+                redis_client, int(_lid) if _lid else 0,
+                status="failed", motivo="medware_ou_kommo_indisponivel",
+            )
             return None
-        return executar_agendamento(decision, caller_context, medware, kommo)
+        # Marca pendente antes de chamar Medware
+        _lid = (caller_context or {}).get("lead_id")
+        _set_gravacao_status(
+            redis_client, int(_lid) if _lid else 0, status="pending",
+        )
+        return executar_agendamento(
+            decision, caller_context, medware, kommo, redis_client,
+        )
     except Exception as e:  # noqa: BLE001
         log.exception("detectar_e_executar_safely falhou: %s", e)
         return None

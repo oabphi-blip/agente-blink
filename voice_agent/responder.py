@@ -360,6 +360,50 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
             "\nEXEMPLO de boa resposta inicial nesse caso:"
             f'\n  "Olá! Tudo certo pra sua consulta {data_str}? Posso te ajudar com algo?"'
         )
+    # Bloco STATUS GRAVAÇÃO MEDWARE (Gap 5 — origem lead 24038029)
+    # Quando o paciente perguntar "está gravado?" / "foi confirmado?",
+    # Lia precisa saber a VERDADE. Aqui injetamos o status real da
+    # gravação que rodou em thread separada (escrito em Redis pelo
+    # executor_agendamento). Sem isso a Lia mente.
+    gravacao = ctx.get("gravacao_status") if isinstance(ctx, dict) else None
+    gravacao_block = ""
+    if gravacao:
+        st = gravacao.get("status", "pending")
+        if st == "success":
+            cod = gravacao.get("cod_agendamento")
+            gravacao_block = (
+                "\n\n----------------------------------------------------------------"
+                "\nSTATUS GRAVAÇÃO MEDWARE — FONTE DE VERDADE"
+                "\n----------------------------------------------------------------"
+                f"\n✅ Agendamento GRAVADO no Medware. codAgendamento={cod}."
+                "\nSe paciente perguntar 'gravou?' / 'confirmado?', responda SIM "
+                "com naturalidade, mencionando que está tudo certo. PODE confirmar."
+                "\n----------------------------------------------------------------"
+            )
+        elif st == "failed":
+            motivo = gravacao.get("motivo", "desconhecido")
+            gravacao_block = (
+                "\n\n----------------------------------------------------------------"
+                "\nSTATUS GRAVAÇÃO MEDWARE — FONTE DE VERDADE"
+                "\n----------------------------------------------------------------"
+                f"\n❌ Gravação FALHOU. Motivo técnico: {motivo}."
+                "\nNUNCA diga ao paciente que falhou. Diga: 'A equipe está "
+                "finalizando seu agendamento manualmente. Confirmo aqui assim "
+                "que sair.'"
+                "\n----------------------------------------------------------------"
+            )
+        else:  # pending
+            gravacao_block = (
+                "\n\n----------------------------------------------------------------"
+                "\nSTATUS GRAVAÇÃO MEDWARE — FONTE DE VERDADE"
+                "\n----------------------------------------------------------------"
+                "\n⏳ Gravação EM PROCESSAMENTO. Não foi confirmada AINDA."
+                "\nSe paciente perguntar 'gravou?', responda: 'Sua reserva está "
+                "em processamento, a confirmação no sistema sai em alguns "
+                "minutos.' NUNCA afirme que está gravado."
+                "\n----------------------------------------------------------------"
+            )
+
     return (
         "\n\n================================================================"
         "\nONBOARDING — CONTATO JÁ CONHECIDO PELO CRM"
@@ -375,7 +419,7 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
         '("Você quer seguir com [convênio/médico] como da outra vez?"), mas'
         "\nnunca recolha de novo o que já está aqui."
         "\n================================================================"
-    ) + _agenda_block(ctx)
+    ) + _agenda_block(ctx) + gravacao_block
 
 
 def _sanitize_messages(msgs: list[dict]) -> list[dict]:
@@ -649,6 +693,48 @@ _DIA_SEMANA_FALLBACK = (
 )
 
 
+# ------------------------------------------------------------------
+# Filtro anti-mentira: NUNCA afirmar que foi gravado no Medware
+# ------------------------------------------------------------------
+# Origem: lead 24038029 (29/05/2026), nota 28929893. Paciente perguntou
+# "está gravado?" e Lia respondeu "Sim! O agendamento já foi registrado
+# automaticamente no Medware". MENTIRA — Lia não tem acesso ao Medware
+# para verificar status real. A gravação acontece em thread daemon
+# separada e a Lia não sabe se sucedeu.
+# A Blink Oftalmologia se posiciona como Cosmoética — Lia NÃO pode mentir
+# ao paciente em hipótese alguma. Este filtro é a rede final.
+
+_AFIRMACAO_GRAVACAO_PATTERNS = [
+    re.compile(r"(j[áa]\s+)?(foi|est[áa])\s+(registrad[oa]|salv[oa]|gravad[oa])"
+               r"(\s+(no|na))?\s+(medware|sistema)", re.IGNORECASE),
+    re.compile(r"registrad[oa]\s+automaticamente", re.IGNORECASE),
+    re.compile(r"est[áa]\s+tudo\s+(registrad[oa]|salv[oa]|gravad[oa])", re.IGNORECASE),
+    re.compile(r"agendamento\s+(j[áa]\s+)?(foi\s+)?(criado|registrado|gravado|salvo)"
+               r"\s+(no\s+sistema|na\s+medware)", re.IGNORECASE),
+    re.compile(r"dados\s+(j[áa]\s+)?(foram\s+)?(salvos|registrados|gravados)"
+               r"\s+(no\s+sistema|na\s+medware)", re.IGNORECASE),
+]
+
+_AFIRMACAO_GRAVACAO_FALLBACK = (
+    "Sua reserva está em processamento — assim que a gravação no sistema "
+    "confirmar, a equipe te confirma por aqui. Enquanto isso, pode me "
+    "enviar a foto da carteirinha e do documento de identidade pra "
+    "garantir o horário?"
+)
+
+
+def _viola_afirmacao_gravacao(text: str) -> bool:
+    """Detecta se Lia afirmou indevidamente que algo foi gravado no Medware.
+
+    Como a gravação acontece em thread separada e o status real só é
+    conhecido pelo executor, a Lia NUNCA tem como SABER se gravou.
+    Qualquer afirmação positiva é alucinação ética.
+    """
+    if not text:
+        return False
+    return any(p.search(text) for p in _AFIRMACAO_GRAVACAO_PATTERNS)
+
+
 def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
 
@@ -676,6 +762,18 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             len(ctx.get("agenda", [])), text[:200],
         )
         return _FAKE_AGENDA_LOOKUP_FALLBACK
+
+    # 0c. ANTI-MENTIRA: Lia afirmou gravação no Medware (lead 24038029)
+    # Blink Oftalmologia = Cosmoética. Lia NÃO pode mentir ao paciente.
+    # Ela não tem acesso ao Medware pra verificar gravação real — qualquer
+    # afirmação positiva é alucinação. Substituir por frase honesta.
+    if _viola_afirmacao_gravacao(text):
+        log.error(
+            "[FILTRO] AFIRMACAO GRAVACAO MEDWARE BLOQUEADA — Lia disse que "
+            "algo foi gravado no Medware/sistema, mas não tem como saber. "
+            "Texto bloqueado: %r", text[:200],
+        )
+        return _AFIRMACAO_GRAVACAO_FALLBACK
 
     # 0b. Dia da semana INVENTADO (lead 24038029, 29/05/2026)
     # Python valida cada par "<dia-semana>, DD/MM" do texto contra o

@@ -182,26 +182,49 @@ class VoicePipeline:
                     model_used="", articles_used=[],
                 )
 
-        # 2d) Agenda Medware: se o lead já tem médico definido, busca os
-        # horários reais para o agente poder oferecer vagas concretas.
-        if (
-            self.medware is not None
-            and caller_context
-            and (caller_context.get("known") or {}).get("medico")
-        ):
+        # 2d) Agenda Medware: busca horários reais para o agente OFERECER.
+        # ANTES: só consultava se caller_context.known.medico estava
+        # preenchido. Resultado: lead novo (paciente recém-chegado, médico
+        # ainda não definido no Kommo) → caller_context.agenda vazia →
+        # Lia INVENTAVA slots no KB E7. Origem: lead 24038029 (29/05/2026).
+        # AGORA: se ctx.medico vazio, default = Dra. Karla Delalibera
+        # (médica principal Blink — oftalmologia geral) para já injetar
+        # agenda real e a Lia poder oferecer slots concretos com cod_agenda.
+        if self.medware is not None and caller_context:
             try:
-                known = caller_context["known"]
+                known = caller_context.get("known") or {}
+                medico_param = known.get("medico") or "Dra. Karla Delalibera"
+                unidade_param = known.get("unidade")  # pode ser None
                 slots = self.medware.horarios_para_agente(
-                    known.get("medico"), known.get("unidade"),
+                    medico_param, unidade_param,
                 )
                 if slots:
                     caller_context["agenda"] = slots
+                    caller_context["agenda_medico_inferido"] = (
+                        "default_karla" if not known.get("medico") else "ctx"
+                    )
                     log.info(
-                        "Medware: %d horários para %s",
-                        len(slots), known.get("medico"),
+                        "Medware: %d horários para %s (fonte_medico=%s)",
+                        len(slots), medico_param,
+                        "ctx" if known.get("medico") else "default_karla",
                     )
             except Exception as e:  # noqa: BLE001
                 log.warning("Medware horários falhou: %s", e)
+
+        # 2e) Gap 5: status real da gravação Medware (se houver) — pra Lia
+        # poder responder com VERDADE quando paciente perguntar "gravou?".
+        # Origem: lead 24038029 — Lia mentiu sem saber.
+        if caller_context and caller_context.get("lead_id"):
+            try:
+                _redis = getattr(self, "_redis", None)
+                if _redis is not None:
+                    import json as _json
+                    _raw = _redis.get(f"blink:gravacao:lead:{int(caller_context['lead_id'])}")
+                    if _raw:
+                        _val = _raw.decode() if isinstance(_raw, bytes) else _raw
+                        caller_context["gravacao_status"] = _json.loads(_val)
+            except Exception as _e:  # noqa: BLE001
+                log.debug("consulta status gravacao Redis ignorada: %s", _e)
 
         # 3) Resposta com Claude
         try:
@@ -261,14 +284,18 @@ class VoicePipeline:
                 daemon=True,
             ).start()
 
-        # 6) Gap 2: detectar se a Lia confirmou agendamento e gravar Medware
+        # 6) Gap 2: detectar se a Lia confirmou agendamento e gravar Medware.
+        # Passa redis_client pra thread escrever status real (Gap 5) — assim
+        # a Lia consegue saber no próximo turno se o agendamento foi gravado
+        # de verdade, evitando mentir pra o paciente (origem: lead 24038029).
         if self.medware is not None and self.kommo is not None and caller_context:
             from . import agendamento as _ag
+            _redis = getattr(self, "_redis", None)
             threading.Thread(
                 target=_ag.detectar_e_executar_safely,
                 args=(answer, caller_context, self.medware, self.kommo,
                       self.settings.anthropic_api_key,
-                      self.settings.claude_haiku_model),
+                      self.settings.claude_haiku_model, _redis),
                 daemon=True,
             ).start()
 
