@@ -1,0 +1,82 @@
+[
+  {
+    "query": "preciso ver porque o lead 24031747 da Renata não está respondendo no kommo univeja, parece que a Lia parou de mandar mensagem desde ontem à noite",
+    "should_trigger": true
+  },
+  {
+    "query": "a lia da Blink mandou pra paciente uma chave pix nova que eu não conheço (algo@gmail.com), isso é alucinação?",
+    "should_trigger": true
+  },
+  {
+    "query": "tem um caso de oftalmopediatria com 3 crianças e a mãe quer agendar tudo no mesmo dia em águas claras, como configuro isso?",
+    "should_trigger": true
+  },
+  {
+    "query": "qual é o valor da consulta de catarata com Dr Fabricio? Paciente perguntou e quero confirmar antes de responder",
+    "should_trigger": true
+  },
+  {
+    "query": "Dra. Karla atende terça em qual unidade? A paciente quer terça primeiro horário",
+    "should_trigger": true
+  },
+  {
+    "query": "criei novos campos no kommo pra rastrear sinal pix de 50%, como integro isso no responder.py do agente?",
+    "should_trigger": true
+  },
+  {
+    "query": "no-show de paciente em SDP — quantos podem ter antes de bloquear novo agendamento? Tô em dúvida do limite",
+    "should_trigger": true
+  },
+  {
+    "query": "porque o webhook do easypanel não está disparando agendamento na medware? Lia confirma com paciente mas não grava",
+    "should_trigger": true
+  },
+  {
+    "query": "esse lead tá parado em 0-ETAPA ENTRADA há 4h, ativado IA tá vazio. faz sentido reativar manual ou tem outro caminho?",
+    "should_trigger": true
+  },
+  {
+    "query": "qual o endereço correto da unidade asa norte? a lia mandou pra paciente SGAS 915 que não existe",
+    "should_trigger": true
+  },
+  {
+    "query": "como faço pra criar uma skill nova no Claude code que automatize relatório semanal de vendas pra minha empresa",
+    "should_trigger": false
+  },
+  {
+    "query": "preciso fazer um deploy de uma aplicação flask no easypanel, tem algum exemplo de Dockerfile?",
+    "should_trigger": false
+  },
+  {
+    "query": "qual a melhor forma de integrar whatsapp cloud api com python? to começando um projeto",
+    "should_trigger": false
+  },
+  {
+    "query": "como rodar pytest com cobertura em um projeto fastapi? quero ver quais funções não estão sendo testadas",
+    "should_trigger": false
+  },
+  {
+    "query": "tem um lead no salesforce CRM da minha empresa parado a dias, como faço pra reativar ele via api?",
+    "should_trigger": false
+  },
+  {
+    "query": "to com problema no meu medco api integration, retornando 401 sem motivo aparente. medware versão antiga",
+    "should_trigger": false
+  },
+  {
+    "query": "preciso configurar OAuth do Google Workspace pra meu time, manjas?",
+    "should_trigger": false
+  },
+  {
+    "query": "qual conversão de cor RGB pra HSL pro tailwind config do meu site da clínica?",
+    "should_trigger": false
+  },
+  {
+    "query": "como funciona consulta de catarata no SUS? Vou levar minha tia que tem 78 anos pra avaliar",
+    "should_trigger": false
+  },
+  {
+    "query": "qual o melhor plano de saúde com cobertura nacional pra oftalmologia? quero comparar Bradesco e Sul América",
+    "should_trigger": false
+  }
+]

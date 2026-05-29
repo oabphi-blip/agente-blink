@@ -41,12 +41,22 @@ _DIAS_SEMANA = [
 # Mapa médico/unidade → códigos do Medware. Por ora só os dois confirmados;
 # os demais médicos entram quando os códigos forem validados.
 MEDICO_CODES = {
+    # Dra. Karla Delalibera (cod 12080) — todas as variantes que pacientes escrevem
     "dra. karla delalibera": 12080, "dra karla": 12080,
     "karla delalibera": 12080, "karla delalíbera": 12080,
+    "karla delalibera pacheco": 12080,  # como aparece no Medware
+    "dra. karla delalibera pacheco": 12080,
     "dra karla delalíbera": 12080, "dra. karla delalíbera": 12080,
-    "dr. fabrício freitas": 12081, "dr fabricio": 12081,
+    "karla": 12080, "dra. karla": 12080, "doutora karla": 12080,
+    "dra delalibera": 12080, "dra. delalibera": 12080,
+    # Dr. Fabrício Freitas (cod 12081) — todas as variantes (com/sem acento, sigla)
+    "dr. fabrício freitas": 12081, "dr. fabricio freitas": 12081,
+    "dr fabricio": 12081, "dr fabrício": 12081,
+    "dr. fabricio": 12081, "dr. fabrício": 12081,
     "fabricio freitas": 12081, "fabrício freitas": 12081,
-    "dr fabrício": 12081, "dr. fabricio": 12081,
+    "fabricio": 12081, "fabrício": 12081,
+    "doutor fabricio": 12081, "doutor fabrício": 12081,
+    "dr freitas": 12081, "dr. freitas": 12081,
 }
 UNIDADE_CODES = {
     "asa norte": 5,

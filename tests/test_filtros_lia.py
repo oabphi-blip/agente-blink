@@ -207,3 +207,32 @@ class TestConveniosMapeados:
         """Aliases sem acento devem funcionar."""
         assert resolver_plano("saude caixa") == 29
         assert resolver_plano("petrobras") == 30
+
+
+# ----------------------------------------------------------------------
+# CENÁRIO 6 — Médicos mapeados (origem: smoke test 29/05/2026 22:30)
+# Bug encontrado: "Dr. Fabricio Freitas" (sem acento) retornava 0,
+# bloqueando consulta agenda + gravação Medware pra TODO Fabricio.
+# ----------------------------------------------------------------------
+class TestMedicosMapeados:
+    """Karla e Fabricio devem casar em variações com/sem acento."""
+
+    @pytest.mark.parametrize("nome,esperado", [
+        # Karla — variantes
+        ("Dra. Karla Delalibera", 12080),
+        ("Dra. Karla Delalíbera", 12080),
+        ("Karla Delalibera", 12080),
+        ("Karla", 12080),
+        ("Dra. Karla", 12080),
+        ("Karla Delalibera Pacheco", 12080),  # como aparece no Medware
+        # Fabricio — variantes (bug histórico: sem acento falhava)
+        ("Dr. Fabricio Freitas", 12081),  # ← bug fixado 29/05/2026
+        ("Dr. Fabrício Freitas", 12081),
+        ("Fabricio", 12081),
+        ("Fabrício", 12081),
+        ("Dr. Fabricio", 12081),
+        ("Dr Freitas", 12081),
+    ])
+    def test_medico_lookup(self, nome, esperado):
+        from voice_agent.medware import MEDICO_CODES, _code_lookup
+        assert _code_lookup(MEDICO_CODES, nome) == esperado
