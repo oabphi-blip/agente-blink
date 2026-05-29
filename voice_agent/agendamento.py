@@ -39,14 +39,18 @@ EXTRATOR_PROMPT = """Você é um extrator estruturado. Analise APENAS a última 
 ÚLTIMA MENSAGEM DA LIA:
 {answer}
 
-CONTEXTO (médico e unidade conhecidos do lead):
+CONTEXTO (do lead Kommo — pode estar vazio se a conversa acabou de começar):
 - Médico: {medico}
 - Unidade: {unidade}
+
+REGRA: se o contexto está vazio mas a Lia mencionou o médico/unidade NA MENSAGEM, EXTRAIA da mensagem. Médicos válidos: "Dra. Karla Delalibera" (ou "Dra. Karla Delalíbera"), "Dr. Fabricio Freitas" (ou "Dr. Fabrício Freitas"). Unidades válidas: "Asa Norte", "Águas Claras".
 
 Retorne APENAS um JSON válido (sem markdown, sem explicação).
 
 Se a Lia CONFIRMOU um agendamento específico (mencionou data E hora exatas, p.ex. "confirmado para segunda 20/07 às 09:00"), retorne:
-{{"agendamento_confirmado": true, "data_iso": "YYYY-MM-DD", "hora": "HH:MM"}}
+{{"agendamento_confirmado": true, "data_iso": "YYYY-MM-DD", "hora": "HH:MM", "medico": "Dra. Karla Delalibera", "unidade": "Águas Claras"}}
+
+Os campos `medico` e `unidade` são OBRIGATÓRIOS no retorno positivo. Se você não consegue determinar nenhum dos dois, retorne agendamento_confirmado=false.
 
 Se a Lia NÃO confirmou (ainda está perguntando preferência, só ofereceu opções sem escolha, transferiu pra humano, ou disse "equipe vai confirmar"), retorne:
 {{"agendamento_confirmado": false}}
@@ -78,16 +82,19 @@ def detectar_agendamento_confirmado(
     if not answer or not answer.strip():
         return None
     known = (caller_context or {}).get("known") or {}
-    medico = (known.get("medico") or "").strip()
-    unidade = (known.get("unidade") or "").strip()
-    if not medico:
-        # Sem médico, não há como agendar.
-        return None
+    medico_ctx = (known.get("medico") or "").strip()
+    unidade_ctx = (known.get("unidade") or "").strip()
+    # ANTES: abortava aqui se medico_ctx estivesse vazio. Mas isso bloqueava
+    # gravação Medware sempre que paciente novo definia médico DURANTE a
+    # conversa (sync Kommo é assíncrono → caller_context não tem o médico).
+    # Origem: lead 24038029 (29/05/2026) Lia confirmou agendamento, Medware
+    # nunca foi chamado, atendente humano teve que gravar manualmente.
+    # Solução: deixar o Haiku extrair médico/unidade do próprio texto da Lia.
 
     prompt = EXTRATOR_PROMPT.format(
         answer=answer.strip()[:2000],
-        medico=medico,
-        unidade=unidade or "(não definida)",
+        medico=medico_ctx or "(não definido — extraia da mensagem da Lia)",
+        unidade=unidade_ctx or "(não definida — extraia da mensagem da Lia)",
     )
     try:
         resp = anthropic_client.messages.create(
@@ -120,15 +127,26 @@ def detectar_agendamento_confirmado(
             if slot.get("data_iso") == data_iso and slot.get("hora") == hora:
                 cod_agenda = int(slot.get("cod_agenda") or 0)
                 break
+        # Resolução de médico/unidade: ctx > Haiku-extraído > erro
+        medico_final = medico_ctx or (data.get("medico") or "").strip()
+        unidade_final = unidade_ctx or (data.get("unidade") or "").strip()
+        if not medico_final:
+            log.warning(
+                "detector agendamento: confirmado mas sem médico (ctx vazio E "
+                "Haiku não extraiu). answer=%r", answer[:200],
+            )
+            return None
         log.info(
-            "detector agendamento: confirmado %s %s (medico=%s, cod_agenda=%s)",
-            data_iso, hora, medico, cod_agenda,
+            "detector agendamento: confirmado %s %s (medico=%s, unidade=%s, "
+            "cod_agenda=%s, fonte_medico=%s)",
+            data_iso, hora, medico_final, unidade_final, cod_agenda,
+            "ctx" if medico_ctx else "haiku-extracao",
         )
         return {
             "data_iso": data_iso,
             "hora": hora,
-            "medico": medico,
-            "unidade": unidade,
+            "medico": medico_final,
+            "unidade": unidade_final,
             "cod_agenda": cod_agenda,
         }
     except Exception as e:  # noqa: BLE001

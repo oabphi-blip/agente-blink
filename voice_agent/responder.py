@@ -561,6 +561,94 @@ _COBRANCA_ANTECIPADA_FALLBACK = (
 )
 
 
+# ------------------------------------------------------------------
+# Filtro de validação dia-da-semana × data
+# ------------------------------------------------------------------
+# Origem: lead 24038029 (29/05/2026). Lia ofereceu "terça-feira, 03/06"
+# e "terça-feira, 10/06" — ambas QUARTAS. Causa raiz: janela de agenda
+# tinha sido desativada no prompt. Mesmo com janela religada, o modelo
+# pode escorregar; esse filtro é a rede de segurança final.
+
+_DIA_SEMANA_PT = {
+    0: "segunda-feira",
+    1: "terça-feira",
+    2: "quarta-feira",
+    3: "quinta-feira",
+    4: "sexta-feira",
+    5: "sábado",
+    6: "domingo",
+}
+
+# Normalização do dia falado pela Lia (com/sem acento, com/sem "-feira")
+_DIA_NORMALIZE = {
+    "segunda": "segunda-feira", "segunda-feira": "segunda-feira",
+    "terça": "terça-feira", "terca": "terça-feira",
+    "terça-feira": "terça-feira", "terca-feira": "terça-feira",
+    "quarta": "quarta-feira", "quarta-feira": "quarta-feira",
+    "quinta": "quinta-feira", "quinta-feira": "quinta-feira",
+    "sexta": "sexta-feira", "sexta-feira": "sexta-feira",
+    "sábado": "sábado", "sabado": "sábado",
+    "domingo": "domingo",
+}
+
+# Regex captura "<dia-da-semana>[,/ -] DD/MM[/AAAA]" — formatos típicos
+# que a Lia usa ("terça-feira, 03/06", "quinta 04/06", "Terça-Feira 10/06/2026")
+_DIA_DATA_REGEX = re.compile(
+    r"(segunda|ter(?:ç|c)a|quarta|quinta|sexta|s(?:á|a)bado|domingo)"
+    r"(?:[\s-]*feira)?"
+    r"\s*[,\-]?\s*"
+    r"(\d{1,2})/(\d{1,2})(?:/(\d{4}))?",
+    re.IGNORECASE,
+)
+
+
+def _viola_dia_semana(text: str) -> Optional[tuple[str, str, str]]:
+    """Detecta divergência entre dia-da-semana e data citados na resposta.
+
+    Exemplo: Lia escreve "terça-feira, 03/06". Python checa 03/06 do ano
+    corrente → quarta. Retorna ('terça-feira', '03/06/2026', 'quarta-feira').
+    Se tudo bate, retorna None.
+
+    Limitação: olha só a PRIMEIRA divergência. O fallback substitui a
+    resposta inteira de qualquer jeito, então uma já basta pra bloquear.
+    """
+    if not text:
+        return None
+    current_year = datetime.now(_TZ_BRT).year
+
+    for match in _DIA_DATA_REGEX.finditer(text):
+        dia_raw = match.group(1).lower().strip()
+        # adiciona "-feira" pra padronizar lookup
+        if dia_raw in ("segunda", "terça", "terca", "quarta", "quinta", "sexta"):
+            dia_raw_norm = dia_raw + "-feira"
+        else:
+            dia_raw_norm = dia_raw
+        dia_falado = _DIA_NORMALIZE.get(dia_raw_norm) or _DIA_NORMALIZE.get(dia_raw)
+        if not dia_falado:
+            continue
+
+        try:
+            day = int(match.group(2))
+            month = int(match.group(3))
+            year = int(match.group(4)) if match.group(4) else current_year
+            data = datetime(year, month, day).date()
+        except (ValueError, TypeError):
+            continue
+
+        dia_real = _DIA_SEMANA_PT[data.weekday()]
+        if dia_falado != dia_real:
+            return (dia_falado, f"{day:02d}/{month:02d}/{year}", dia_real)
+
+    return None
+
+
+_DIA_SEMANA_FALLBACK = (
+    "Deixa eu reconferir os horários com o calendário aqui. "
+    "Qual dia da semana e turno funcionam melhor pra você? "
+    "Assim já volto com as opções concretas — com a data e o dia da semana certinhos."
+)
+
+
 def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
 
@@ -588,6 +676,20 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             len(ctx.get("agenda", [])), text[:200],
         )
         return _FAKE_AGENDA_LOOKUP_FALLBACK
+
+    # 0b. Dia da semana INVENTADO (lead 24038029, 29/05/2026)
+    # Python valida cada par "<dia-semana>, DD/MM" do texto contra o
+    # calendário real. Se Lia escreveu "terça-feira, 03/06" e Python
+    # diz que é quarta, bloqueia e força regenerar via fallback.
+    violacao_dia = _viola_dia_semana(text)
+    if violacao_dia:
+        dia_falado, data_str, dia_real = violacao_dia
+        log.error(
+            "[FILTRO] DIA DA SEMANA INVENTADO — Lia disse '%s' para %s, "
+            "mas Python calculou '%s'. Texto bloqueado: %r",
+            dia_falado, data_str, dia_real, text[:200],
+        )
+        return _DIA_SEMANA_FALLBACK
 
     # 0a. Cobrança de sinal/Pix ANTES de slot concreto (regra 12.9 do master).
     # Lia não pode cobrar sinal sem antes ter oferecido um slot específico
@@ -755,12 +857,19 @@ class Responder:
         kb_block = self._kb.format_for_prompt(combined) if combined else ""
 
         # 2. Monta system prompt = INSTRUÇÃO MESTRA + DATA DE HOJE +
-        #    ONBOARDING + KB contextual.
-        # NOTA: o bloco "JANELA DE OFERTA DE AGENDA" foi removido de
-        # propósito — a Lia não oferece datas/horários, apenas coleta a
-        # preferência do paciente (seção 12 da instrução mestra).
+        #    ONBOARDING + JANELA DE AGENDA + KB contextual.
+        #
+        # ANTES: o bloco "JANELA DE OFERTA DE AGENDA" tinha sido removido
+        # com a justificativa de que "Lia só coleta preferência". Mas o KB
+        # tem fluxo E7 (AGENDA DISPONÍVEL) que pede pra Lia OFERECER slots,
+        # e ela seguia esse fluxo inventando datas/dias da semana.
+        # Origem do retorno: lead 24038029 (29/05/2026), onde Lia ofereceu
+        # "terça-feira, 03/06" e "terça-feira, 10/06" — ambas QUARTAS-feiras.
+        # Solução: a janela volta a ser injetada — fonte de verdade do
+        # calendário com dia da semana correto ao lado de cada data.
         system_prompt = self._base_system_prompt + _today_brt_block()
         system_prompt += _caller_context_block(caller_context)
+        system_prompt += _build_janela_agenda()
         if kb_block:
             system_prompt += (
                 "\n\n================================================================"
