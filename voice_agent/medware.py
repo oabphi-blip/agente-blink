@@ -75,6 +75,8 @@ PLANO_CODES = {
     "plan-assist": 4, "plan assist": 4, "planassist": 4, "plan-assit": 4,
     "bacen": 9, "banco central": 9,
     "stj": 3, "superior tribunal de justica": 3,
+    "pro ser stj": 3, "pro-ser stj": 3, "proser stj": 3,
+    "pro ser": 3, "pro-ser": 3, "pro ser do stj": 3, "pro-ser do stj": 3,
     "camara dos deputados": 39, "câmara dos deputados": 39, "camara": 39,
 }
 
