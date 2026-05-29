@@ -899,37 +899,26 @@ class KommoClient:
     ) -> Optional[str]:
         """Decide se o agente deve ficar em SILÊNCIO para este lead.
 
-        Retorna o motivo ou None se pode responder.
-          - 'etapa-humana': lead em 7-CIRURGIAS, 8-LENTES ou 9-FORNECEDORES
-            → agente desligado (atendimento humano ou contato fornecedor).
-          - 'ia-desativada-manual': campo ATIVADO IA? do Kommo = DESATIVADO
-            → silêncio PERMANENTE até equipe humana reativar manualmente.
-            Origem do fix: lead 24038117 (Talita, 29/05/2026) — Kommo
-            marcou IA desativada 11:16, mas Lia voltou a responder 16:24
-            porque agent_paused_for_lead só checava janela de tempo
-            (recent_human_handoff). O campo ATIVADO IA? do Kommo é a
-            fonte de verdade permanente do estado da IA.
-          - 'handoff': humano assumiu o chat há < window_min minutos
-            (proteção temporária além do campo ATIVADO IA?).
+        REGRA ÚNICA: silêncio quando o lead está em uma etapa humana do
+        funil (ST_AGENT_OFF). Toda a inteligência de "humano cuida desse
+        lead" fica centralizada no PIPELINE do Kommo — o atendente humano
+        move o lead pra etapa humana ao assumir, e move de volta quando
+        termina. A Lia só olha onde o lead está parado.
+
+        Decisão tomada em 29/05/2026 (Fábio): simplificar pra usar SÓ
+        etapas. Removidas as verificações de campo ATIVADO IA? e de
+        janela handoff temporal. Razão: 3 sinais redundantes geravam
+        comportamento confuso (lead 24038117 Talita).
+
+        IMPORTANTE: pra esse modelo funcionar bem, é OBRIGATÓRIO que o
+        atendente humano mova o lead pra etapa humana SEMPRE que assumir.
+        Recomendação: configurar regra Salesbot Kommo que move o lead
+        automaticamente quando humano responde no chat.
+
+        Retorna o motivo ('etapa-humana') ou None.
         """
         if not caller_context or not caller_context.get("found"):
             return None
         if caller_context.get("status_id") in ST_AGENT_OFF:
             return "etapa-humana"
-        # Fonte de verdade PERMANENTE: campo ATIVADO IA? do Kommo.
-        # Se foi desativado (manual ou por handoff), NUNCA responde até
-        # alguém marcar como ATIVADO de novo manualmente.
-        known = (caller_context or {}).get("known") or {}
-        ativado_ia_raw = (known.get("ativado_ia") or "")
-        ativado_ia = str(ativado_ia_raw).strip().upper()
-        if ativado_ia in (
-            "DESATIVADO", "DESATIVADA", "DESATIVAR", "DESATIVAD",
-            "OFF", "INATIVO", "INATIVA", "NAO", "NÃO",
-        ):
-            return "ia-desativada-manual"
-        # Janela temporária extra (handoff recente sem campo Kommo ainda
-        # populado pelo carimbo).
-        lead_id = caller_context.get("lead_id")
-        if lead_id and self.recent_human_handoff(lead_id, window_min):
-            return "handoff"
         return None

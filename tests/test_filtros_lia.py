@@ -210,61 +210,51 @@ class TestConveniosMapeados:
 
 
 # ----------------------------------------------------------------------
-# CENÁRIO 7 — IA desativada manualmente (lead 24038117 Talita, 29/05/2026)
-# Kommo marcou "🛑 Agentes IA desativados" 11:16. Lia DEVERIA ficar em
-# silêncio permanente. Mas voltou a responder 5h depois porque a
-# verificação só checava janela temporal (recent_human_handoff window_min).
-# Fix: agent_paused_for_lead agora respeita campo ATIVADO IA?=DESATIVADO
-# como travamento permanente.
+# CENÁRIO 7 — Silêncio Lia controlado SÓ por etapa Kommo (decisão Fábio
+# 29/05/2026). Removida verificação de campo ATIVADO IA? e janela handoff.
+# Razão: 3 sinais redundantes confundiam (lead 24038117 Talita).
+# Lia silencia QUANDO E APENAS QUANDO status_id está em ST_AGENT_OFF.
+# Operação humana: mover lead pra etapa humana ao assumir, mover de
+# volta ao terminar. Recomendado: regra Salesbot Kommo automática.
 # ----------------------------------------------------------------------
-class TestIaDesativadaManual:
-    """Lia NUNCA deve responder quando ATIVADO IA?=Desativado no Kommo,
-    independente de quanto tempo passou desde o handoff."""
+class TestSilencioPorEtapa:
+    """Único sinal de silêncio é a etapa do funil Kommo."""
 
     def _make_kommo_stub(self):
-        """Cria instância mínima de KommoClient pra testar agent_paused_for_lead."""
         from voice_agent.kommo import KommoClient
-        # Não precisa conectar — agent_paused_for_lead não chama API se
-        # não cair no recent_human_handoff
         return KommoClient.__new__(KommoClient)
 
-    def test_ativado_ia_desativado_para_lia(self):
+    def test_etapa_normal_lia_responde(self):
+        """2-AGENDAR não está em ST_AGENT_OFF → Lia responde."""
         kommo = self._make_kommo_stub()
-        ctx = {
-            "found": True,
-            "lead_id": 24038117,
-            "status_id": 102560495,  # 2-AGENDAR (não é etapa-humana)
-            "known": {"ativado_ia": "Desativado"},
-        }
-        motivo = kommo.agent_paused_for_lead(ctx, window_min=30)
-        assert motivo == "ia-desativada-manual"
+        ctx = {"found": True, "lead_id": 1, "status_id": 102560495,
+               "known": {}}
+        assert kommo.agent_paused_for_lead(ctx, 30) is None
 
-    def test_ativado_ia_uppercase_tambem_para(self):
+    def test_etapa_humana_lia_silencia(self):
+        """Lead em 7-CIRURGIAS / 8-LENTES / 9-FORNECEDORES → silêncio."""
+        from voice_agent.kommo import ST_AGENT_OFF
         kommo = self._make_kommo_stub()
-        ctx = {
-            "found": True, "lead_id": 1, "status_id": 102560495,
-            "known": {"ativado_ia": "DESATIVADO"},
-        }
-        assert kommo.agent_paused_for_lead(ctx, 30) == "ia-desativada-manual"
+        for st in list(ST_AGENT_OFF)[:3]:
+            ctx = {"found": True, "lead_id": 1, "status_id": st, "known": {}}
+            motivo = kommo.agent_paused_for_lead(ctx, 30)
+            assert motivo == "etapa-humana", f"falhou pra status_id={st}"
 
-    def test_ativado_ia_ativado_deixa_responder(self):
+    def test_ativado_ia_campo_ignorado(self):
+        """Mesmo com ATIVADO IA? = Desativado, etapa normal libera Lia.
+        Decisão Fábio 29/05: campo ATIVADO IA? não é mais sinal de silêncio."""
         kommo = self._make_kommo_stub()
         ctx = {
-            "found": True, "lead_id": 1, "status_id": 102560495,
-            "known": {"ativado_ia": "Ativado"},
+            "found": True, "lead_id": 1, "status_id": 102560495,  # 2-AGENDAR
+            "known": {"ativado_ia": "Desativado"},  # ignorado
         }
-        # Sem handoff recente e IA Ativada → motivo deve ser None
-        # MAS: como o stub não pode chamar API real, vamos forçar
-        # window_min=0 pra pular o check de handoff
-        assert kommo.agent_paused_for_lead(ctx, 0) is None
+        assert kommo.agent_paused_for_lead(ctx, 30) is None
 
-    def test_ativado_ia_vazio_deixa_responder(self):
+    def test_caller_context_vazio_lia_responde(self):
+        """Sem contexto válido (paciente novo) → Lia responde normalmente."""
         kommo = self._make_kommo_stub()
-        ctx = {
-            "found": True, "lead_id": 1, "status_id": 102560495,
-            "known": {"ativado_ia": ""},
-        }
-        assert kommo.agent_paused_for_lead(ctx, 0) is None
+        assert kommo.agent_paused_for_lead(None, 30) is None
+        assert kommo.agent_paused_for_lead({"found": False}, 30) is None
 
 
 # ----------------------------------------------------------------------
