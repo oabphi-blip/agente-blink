@@ -967,7 +967,16 @@ class Responder:
         # calendário com dia da semana correto ao lado de cada data.
         system_prompt = self._base_system_prompt + _today_brt_block()
         system_prompt += _caller_context_block(caller_context)
-        system_prompt += _build_janela_agenda()
+        # FIX 30/05/2026: _build_janela_agenda() era chamada aqui mas a
+        # FUNÇÃO NUNCA FOI DEFINIDA no arquivo (foi removida sem remover a
+        # chamada, ou o commit task #20 esqueceu de adicionar). Resultado:
+        # toda responder.reply lançava NameError, voice_agent caía no
+        # fallback "instabilidade", Lia parecia silenciada. Descoberto via
+        # endpoint /admin/simulate-inbound em 30s — depois de 5h
+        # perseguindo Meta webhook. Linha removida; system_prompt segue
+        # funcional sem ela (era o comportamento de antes do task #20).
+        # Se a janela de agenda for re-introduzida no futuro, definir a
+        # função PRIMEIRO e adicionar pytest cobrindo o caminho.
         if kb_block:
             system_prompt += (
                 "\n\n================================================================"
