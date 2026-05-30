@@ -2163,6 +2163,111 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": str(e)[:400]})
 
+    # ================================================================
+    # AMBIENTE DE TESTE/VALIDAÇÃO: simular inbound do WhatsApp Cloud
+    # ================================================================
+    # POST /admin/simulate-inbound  { phone, text, [dry_run] }
+    # Dispara o pipeline REAL do /whatsapp como se o paciente tivesse
+    # mandado a mensagem agora. Útil pra validar Lia em produção sem
+    # depender de Meta entregar payload de teste, e pra rodar smoke
+    # tests sem precisar mensagem real de paciente.
+    #
+    # dry_run=true → roda responder.reply mas NÃO envia WhatsApp nem
+    # posta nota Kommo (devolve o texto que a Lia geraria).
+    # dry_run=false → envia de verdade pelo número informado.
+    @app.post("/admin/simulate-inbound")
+    @app.get("/admin/simulate-inbound")
+    async def admin_simulate_inbound(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        if wa_cloud is None:
+            return JSONResponse({"error": "WhatsApp Cloud não configurado"})
+        # Aceita body JSON OU query params
+        data: dict[str, Any] = {}
+        try:
+            if request.method == "POST":
+                body = await request.body()
+                if body:
+                    data = json.loads(body) or {}
+        except Exception:  # noqa: BLE001
+            data = {}
+        if not data:
+            data = {
+                "phone": request.query_params.get("phone") or "",
+                "text": request.query_params.get("text") or "",
+                "dry_run": request.query_params.get("dry_run") in
+                ("1", "true", "True"),
+            }
+        phone = str(data.get("phone") or "").strip()
+        text = str(data.get("text") or "").strip()
+        dry_run = bool(data.get("dry_run", False))
+        if not phone or not text:
+            return JSONResponse({
+                "error": "informe 'phone' (E.164 sem +) e 'text'",
+                "exemplo": {"phone": "5561999999999", "text": "oi"},
+            })
+        # Em dry_run, só roda responder.reply sem efeitos colaterais.
+        if dry_run:
+            convo_key = _conversation_key(phone)
+            caller_context = None
+            try:
+                if pipeline.kommo is not None:
+                    caller_context = pipeline.kommo.get_caller_context(phone)
+            except Exception as e:  # noqa: BLE001
+                log.warning("[SIMULATE] caller_context falhou: %s", e)
+            try:
+                result = responder.reply(
+                    convo_key, text, caller_context=caller_context
+                )
+                answer = result.get("answer") or ""
+                log.info(
+                    "[SIMULATE DRY] convo=%s text=%r answer=%r",
+                    convo_key, text[:80], answer[:200],
+                )
+                return JSONResponse({
+                    "ok": True,
+                    "dry_run": True,
+                    "convo_key": convo_key,
+                    "phone": phone,
+                    "input_text": text,
+                    "answer": answer,
+                    "caller_context_found": bool(
+                        caller_context and caller_context.get("found")
+                    ),
+                })
+            except Exception as e:  # noqa: BLE001
+                log.warning("[SIMULATE DRY] responder.reply falhou: %s", e)
+                return JSONResponse({
+                    "ok": False, "error": str(e)[:400],
+                })
+        # Modo "ao vivo": chama exatamente o mesmo pipeline do /whatsapp.
+        # Roda em background pra responder rápido (igual webhook real).
+        import uuid as _uuid
+        fake_mid = f"sim_{_uuid.uuid4().hex[:16]}"
+        threading.Thread(
+            target=_process_whatsapp_cloud,
+            args=(text, phone, fake_mid),
+            daemon=True,
+        ).start()
+        log.info(
+            "[SIMULATE LIVE] enfileirado convo=%s mid=%s text=%r",
+            _conversation_key(phone), fake_mid, text[:80],
+        )
+        return JSONResponse({
+            "ok": True,
+            "dry_run": False,
+            "mid": fake_mid,
+            "phone": phone,
+            "input_text": text,
+            "note": "pipeline rodando em background — Lia responderá pelo "
+                    "WhatsApp e postará nota no lead (se identificado).",
+        })
+
     @app.post("/admin/whatsapp-subscribe-waba")
     @app.get("/admin/whatsapp-subscribe-waba")
     def admin_whatsapp_subscribe_waba(request: Request) -> JSONResponse:
