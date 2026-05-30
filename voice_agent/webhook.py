@@ -1094,6 +1094,15 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                             m.get("text") or "")
                         continue
             if mtype == "text" and (m.get("text") or "").strip():
+                # marca healthz — última mensagem inbound recebida
+                try:
+                    pipeline._redis.setex(
+                        "blink:healthz:last_inbound",
+                        7 * 24 * 3600,
+                        int(__import__("time").time()),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
                 _enqueue_cloud(m["text"], phone, mid)
             elif mtype == "audio" and m.get("media_id"):
                 threading.Thread(
@@ -2214,6 +2223,69 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "extracted_fields": extracted,
             "extracted_keys": sorted((extracted or {}).keys()),
             "would_post_kommo": bool(extracted),
+        })
+
+    # ================================================================
+    # OBSERVABILIDADE: painel operacional /admin/healthz
+    # ================================================================
+    # GET /admin/healthz
+    # Dashboard JSON consolidado pra equipe ver "Lia ok / Lia falhou"
+    # sem precisar tail de logs Easypanel. Junta:
+    #   - última atividade de cada caminho (whatsapp inbound, kommo PATCH,
+    #     extract Haiku, reactivation tick)
+    #   - blacklist de campos órfãos detectados em runtime
+    #   - estado de cada integração (kommo/medware/anthropic/whatsapp)
+    @app.get("/admin/healthz")
+    def admin_healthz(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        import voice_agent.kommo as _km
+        import time as _t
+        # Lê marcadores Redis de última atividade (best-effort).
+        last_ts: dict = {}
+        try:
+            r = pipeline._redis
+            for key, alias in [
+                ("blink:healthz:last_inbound", "last_inbound_ts"),
+                ("blink:healthz:last_lia_reply", "last_lia_reply_ts"),
+                ("blink:healthz:last_kommo_patch_ok", "last_kommo_patch_ok_ts"),
+                ("blink:healthz:last_kommo_patch_fail", "last_kommo_patch_fail_ts"),
+                ("blink:healthz:last_extract", "last_extract_ts"),
+            ]:
+                try:
+                    v = r.get(key)
+                    if v:
+                        last_ts[alias] = int(v)
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
+        now = int(_t.time())
+        return JSONResponse({
+            "status": "ok",
+            "now_ts": now,
+            "last_activity": last_ts,
+            "seconds_since": {
+                k: now - v for k, v in last_ts.items() if isinstance(v, int)
+            },
+            "kommo_dead_field_ids": sorted(_km._KOMMO_DEAD_FIELD_IDS),
+            "integrations": {
+                "kommo": pipeline.kommo is not None,
+                "medware": pipeline.medware is not None,
+                "wa_cloud": wa_cloud is not None,
+                "redis": pipeline._redis is not None,
+            },
+            "settings": {
+                "humanize_enabled": settings.humanize_enabled,
+                "humanize_debounce_sec": settings.humanize_debounce_sec,
+                "reactivation_enabled": settings.reactivation_enabled,
+                "reactivation_dry_run": settings.reactivation_dry_run,
+            },
         })
 
     # ================================================================
