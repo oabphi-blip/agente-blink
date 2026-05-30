@@ -600,7 +600,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     )
                     return
                 if _redis is not None:
-                    _redis.set(_fallback_key, "1", ex=86400)  # 24h
+                    _redis.set(_fallback_key, "1", ex=300)  # 5 min DEBUG 30-mai
             except Exception as e:  # noqa: BLE001
                 log.debug("dedup fallback ignorado: %s", e)
             answer = (
