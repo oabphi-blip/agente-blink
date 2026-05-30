@@ -380,8 +380,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception as e:  # noqa: BLE001
             log.exception("Kommo: Claude falhou")
             answer = (
-                "Tive uma instabilidade aqui. Pode me reenviar sua última "
-                "mensagem, por favor?"
+                "[VA-KOMMO-FB] Tive uma instabilidade aqui. Pode me reenviar "
+                "sua última mensagem, por favor?"
             )
         # Continua o fluxo do Salesbot. A resposta vai SÓ no campo `data`,
         # na variável `agent_answer`. O `execute_handlers` com 'show/text'
@@ -604,7 +604,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             except Exception as e:  # noqa: BLE001
                 log.debug("dedup fallback ignorado: %s", e)
             answer = (
-                "Oi! Tivemos uma instabilidade rápida por aqui 🙏 "
+                "[VA-FB-2025] Oi! Tivemos uma instabilidade rápida por aqui 🙏 "
                 "Já voltei — me conta de novo como posso te ajudar?"
             )
         if not answer:
