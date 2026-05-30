@@ -2123,6 +2123,69 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             log.warning("send_template falhou: %s", e)
             return JSONResponse({"ok": False, "error": str(e)[:300]})
 
+    # ================================================================
+    # DIAG/FIX: re-inscrever este App na WABA via Graph API
+    # ================================================================
+    # Sintoma 30/05/2026: WhatsApp 8133 entrega mensagens para o Kommo
+    # mas Meta não dispara mais o callback /whatsapp pra voice_agent.
+    # Causa raiz: a inscrição App↔WABA caiu (camada acima do webhook
+    # field subscription). Fix: POST /{WABA_ID}/subscribed_apps com o
+    # bearer token do App. Idempotente — chamar de novo se necessário.
+    @app.get("/admin/whatsapp-subscribe-status")
+    def admin_whatsapp_subscribe_status(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        waba_id = request.query_params.get("waba_id") or "1990931811727552"
+        token = settings.whatsapp_cloud_token
+        if not token:
+            return JSONResponse({"error": "WHATSAPP_CLOUD_TOKEN ausente"})
+        import httpx as _httpx
+        url = f"https://graph.facebook.com/v22.0/{waba_id}/subscribed_apps"
+        try:
+            with _httpx.Client(timeout=15.0) as c:
+                r = c.get(url, headers={"Authorization": f"Bearer {token}"})
+            return JSONResponse({
+                "status": r.status_code,
+                "body": r.json() if r.content else None,
+            })
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)[:400]})
+
+    @app.post("/admin/whatsapp-subscribe-waba")
+    @app.get("/admin/whatsapp-subscribe-waba")
+    def admin_whatsapp_subscribe_waba(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        waba_id = request.query_params.get("waba_id") or "1990931811727552"
+        token = settings.whatsapp_cloud_token
+        if not token:
+            return JSONResponse({"error": "WHATSAPP_CLOUD_TOKEN ausente"})
+        import httpx as _httpx
+        url = f"https://graph.facebook.com/v22.0/{waba_id}/subscribed_apps"
+        try:
+            with _httpx.Client(timeout=20.0) as c:
+                r = c.post(url, headers={"Authorization": f"Bearer {token}"})
+            log.info(
+                "[ADMIN SUBSCRIBE WABA] waba=%s status=%s body=%.200s",
+                waba_id, r.status_code, r.text or "",
+            )
+            return JSONResponse({
+                "status": r.status_code,
+                "body": r.json() if r.content else None,
+            })
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)[:400]})
+
     return app
 
 
