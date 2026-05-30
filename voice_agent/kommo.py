@@ -274,6 +274,17 @@ def _pick_enum(table: dict[str, int], value: str) -> Optional[int]:
     return None
 
 
+# Auto-skip blacklist — field_ids que o Kommo rejeitou com NotSupportedChoice
+# em algum momento desta execução. Populado em runtime pelo retry inteligente
+# em update_lead_fields. Sobrevive entre chamadas (class-level set).
+#
+# Resolve a classe inteira de bug "campo foi deletado/renomeado no Kommo e o
+# código continuou tentando gravar, derrubando o PATCH todo". Em vez de
+# abortar boot (drástico), na primeira falha o builder aprende e nas chamadas
+# seguintes pula o campo sozinho. Self-healing.
+_KOMMO_DEAD_FIELD_IDS: set[int] = set()
+
+
 @dataclass
 class KommoClient:
     subdomain: str
@@ -423,24 +434,15 @@ class KommoClient:
         add_select(FIELD_MOTIVOS_PERDA, fields.get("motivo_perda"))
         # NUMERO TELEFONE — canal de entrada do lead (8133 ou 0710).
         add_select(FIELD_NUMERO_TELEFONE, fields.get("numero_telefone"))
-        # ATIVADO IA? (1260635) — DESATIVADO 30/05/2026: field_id NÃO EXISTE
-        # MAIS no Kommo (foi deletado). Tentar gravar derrubava o PATCH
-        # inteiro com HTTP 400 NotSupportedChoice, e NENHUM custom_field
-        # era salvo. Por isso o lead 24045059 e outros tinham
-        # custom_fields=[] apesar da Lia conversar perfeitamente.
-        # Pra reativar: recriar o campo no Kommo (Admin → Campos
-        # personalizados → Leads) e atualizar FIELD_ATIVADO_IA com o
-        # novo field_id + enums.
-        # add_select(FIELD_ATIVADO_IA, fields.get("ativado_ia"))
-        # HORA ATIVAÇÃO (1260639) — DESATIVADO mesmo motivo (campo
-        # deletado do Kommo). Pra reativar, recriar o campo date_time.
-        # add_datetime(FIELD_HORA_ATIVACAO, fields.get("hora_ativacao_ts"))
-        # ATENDENTE (1246419 multiselect) — DESATIVADO 30/05/2026.
-        # Mesmo com enum 926681 'Lia' existindo no Kommo schema, o PATCH
-        # retorna NotSupportedChoice em production. Provavelmente
-        # multiselect exige formato diferente ou o enum está
-        # archived/inativo. Desbloqueia os 11 outros campos válidos.
-        # add_select(FIELD_ATENDENTE, fields.get("atendente"))
+        # ATIVADO IA? — estado da IA no lead (ATIVADO / DESATIVADO).
+        # Se o field_id estiver órfão, o auto-skip vai blacklistar em runtime.
+        add_select(FIELD_ATIVADO_IA, fields.get("ativado_ia"))
+        # HORA ATIVAÇÃO — timestamp de quando a IA voltou a atuar.
+        # Se o field_id estiver órfão, o auto-skip blacklista em runtime.
+        add_datetime(FIELD_HORA_ATIVACAO, fields.get("hora_ativacao_ts"))
+        # ATENDENTE — carimba "Lia" quando a IA conduz o atendimento.
+        # Se o enum estiver inválido, auto-skip blacklista em runtime.
+        add_select(FIELD_ATENDENTE, fields.get("atendente"))
         # COD-AGENDAMENTO — preenchido apos gravar consulta no Medware via API.
         cod_ag = fields.get("cod_agendamento")
         if cod_ag:
@@ -449,26 +451,79 @@ class KommoClient:
             except (TypeError, ValueError):
                 log.warning("cod_agendamento nao numerico: %s", cod_ag)
 
+        # Auto-skip campos que o Kommo já rejeitou anteriormente neste runtime.
+        cfs = [c for c in cfs if c.get("field_id") not in _KOMMO_DEAD_FIELD_IDS]
+
         if not cfs:
             return True
 
         payload = {"custom_fields_values": cfs}
-        try:
-            with httpx.Client(timeout=self.timeout) as c:
-                r = c.patch(
-                    f"{self._base}/leads/{lead_id}",
-                    json=payload,
-                    headers=self._headers,
-                )
+        # Retry com auto-skip: se o Kommo rejeitar um campo com
+        # NotSupportedChoice, identificamos qual, marcamos como morto e
+        # tentamos de novo sem ele. Máximo 4 retries pra cobrir até 4
+        # campos órfãos sem precisar reboot.
+        for tentativa in range(5):
+            try:
+                with httpx.Client(timeout=self.timeout) as c:
+                    r = c.patch(
+                        f"{self._base}/leads/{lead_id}",
+                        json=payload,
+                        headers=self._headers,
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning("Kommo update error: %s", e)
+                return False
+
             if r.status_code // 100 == 2:
-                log.info("Kommo lead %d atualizado: %d campos", lead_id, len(cfs))
+                log.info(
+                    "Kommo lead %d atualizado: %d campos (tentativa %d)",
+                    lead_id, len(cfs), tentativa + 1,
+                )
                 return True
-            log.warning(
-                "Kommo update lead %d falhou: HTTP %d — %s",
-                lead_id, r.status_code, (r.text or "")[:300],
-            )
-        except Exception as e:  # noqa: BLE001
-            log.warning("Kommo update error: %s", e)
+
+            # HTTP 400 — tenta extrair qual position do array foi rejeitada
+            # e auto-blacklist o field_id correspondente.
+            removeu = False
+            if r.status_code == 400:
+                try:
+                    err = r.json() or {}
+                    for ve in (err.get("validation-errors") or []):
+                        for it in (ve.get("errors") or []):
+                            if it.get("code") != "NotSupportedChoice":
+                                continue
+                            path = it.get("path") or ""
+                            # path = "custom_fields_values.11.field_id"
+                            parts = path.split(".")
+                            if len(parts) >= 2 and parts[1].isdigit():
+                                idx = int(parts[1])
+                                if 0 <= idx < len(cfs):
+                                    bad_fid = cfs[idx].get("field_id")
+                                    if bad_fid:
+                                        _KOMMO_DEAD_FIELD_IDS.add(int(bad_fid))
+                                        log.warning(
+                                            "Kommo: field_id %s órfão "
+                                            "(deletado/enum inválido). "
+                                            "Blacklist + retry sem ele.",
+                                            bad_fid,
+                                        )
+                                        cfs.pop(idx)
+                                        payload = {
+                                            "custom_fields_values": cfs
+                                        }
+                                        removeu = True
+                                        break
+                        if removeu:
+                            break
+                except Exception:  # noqa: BLE001
+                    pass
+            if not removeu:
+                log.warning(
+                    "Kommo update lead %d falhou (tentativa %d): HTTP %d — %s",
+                    lead_id, tentativa + 1, r.status_code, (r.text or "")[:300],
+                )
+                return False
+            if not cfs:
+                return True
         return False
 
     def update_leads_field_batch(

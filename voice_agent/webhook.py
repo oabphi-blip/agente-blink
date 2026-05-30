@@ -2217,6 +2217,34 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # AMBIENTE DE TESTE/VALIDAÇÃO: status do schema Kommo
+    # ================================================================
+    # GET /admin/schema-check
+    # Lista os field_ids que o auto-skip da Kommo blacklist neste runtime.
+    # Mostra os campos órfãos que o Kommo rejeitou em algum momento, e que
+    # agora são ignorados automaticamente. Self-healing visível.
+    @app.get("/admin/schema-check")
+    def admin_schema_check(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        import voice_agent.kommo as _km
+        dead = sorted(_km._KOMMO_DEAD_FIELD_IDS)
+        return JSONResponse({
+            "kommo_dead_field_ids": dead,
+            "count": len(dead),
+            "note": (
+                "Field_ids que o Kommo rejeitou com NotSupportedChoice e "
+                "que o builder agora pula automaticamente. Pra reativar "
+                "um campo após corrigir no Kommo: reiniciar o container."
+            ),
+        })
+
+    # ================================================================
     # AMBIENTE DE TESTE/VALIDAÇÃO: FORÇA o sync real de um lead
     # ================================================================
     # GET /admin/force-resync?lead_id=24045059
