@@ -2217,6 +2217,147 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # AMBIENTE DE TESTE/VALIDAÇÃO: FORÇA o sync real de um lead
+    # ================================================================
+    # GET /admin/force-resync?lead_id=24045059
+    # 1. Lê phone do contato Kommo do lead
+    # 2. Roda extract_lead_fields no convo_key
+    # 3. Faz PATCH REAL no Kommo (não dry)
+    # 4. Devolve resposta completa: phone, hist_len, extracted_keys,
+    #    payload_cfs_count, kommo_status_code, kommo_response_text
+    # Diagnóstico definitivo de por que custom_fields fica vazio em
+    # produção.
+    @app.get("/admin/force-resync")
+    def admin_force_resync(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        try:
+            lead_id = int(request.query_params.get("lead_id") or 0)
+        except ValueError:
+            lead_id = 0
+        if not lead_id or pipeline.kommo is None:
+            return JSONResponse({"error": "informe ?lead_id=NNNN"})
+        # 1) Lê o lead com contacts pra descobrir o phone
+        import httpx as _httpx
+        try:
+            with _httpx.Client(timeout=15.0) as c:
+                r = c.get(
+                    f"{pipeline.kommo._base}/leads/{lead_id}",
+                    params={"with": "contacts"},
+                    headers=pipeline.kommo._headers,
+                )
+            if r.status_code != 200:
+                return JSONResponse({
+                    "error": f"GET lead falhou HTTP {r.status_code}",
+                    "body": (r.text or "")[:300],
+                })
+            lead_json = r.json()
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"GET lead exception: {e}"})
+        # Phone do primeiro contato
+        contacts = (
+            lead_json.get("_embedded", {}).get("contacts") or []
+        )
+        phones: list[str] = []
+        if contacts:
+            cid = contacts[0].get("id")
+            try:
+                with _httpx.Client(timeout=15.0) as c:
+                    rc = c.get(
+                        f"{pipeline.kommo._base}/contacts/{cid}",
+                        headers=pipeline.kommo._headers,
+                    )
+                if rc.status_code == 200:
+                    cj = rc.json()
+                    for cf in (cj.get("custom_fields_values") or []):
+                        if cf.get("field_code") == "PHONE":
+                            for v in (cf.get("values") or []):
+                                if v.get("value"):
+                                    phones.append(v["value"])
+            except Exception as e:  # noqa: BLE001
+                log.warning("[force-resync] GET contact falhou: %s", e)
+        if not phones:
+            return JSONResponse({
+                "error": "nenhum phone encontrado no contato",
+                "lead_id": lead_id,
+                "contacts_count": len(contacts),
+            })
+        # Usa o primeiro phone, normalizado (só dígitos)
+        phone_raw = phones[0]
+        phone = "".join(ch for ch in phone_raw if ch.isdigit())
+        convo_key = _conversation_key(phone)
+        history = responder._convos.get(convo_key) or []
+        # 2) Roda extract
+        try:
+            extracted = responder.extract_lead_fields(convo_key) or {}
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({
+                "lead_id": lead_id, "phone": phone, "convo_key": convo_key,
+                "hist_len": len(history),
+                "extract_error": str(e)[:300],
+            })
+        # 3) Enriquece e tenta PATCH REAL
+        fields = dict(extracted)
+        fields.setdefault("numero_telefone", "81331005")
+        fields["ativado_ia"] = "ATIVADO"
+        fields["atendente"] = "Lia"
+        # Captura status code do PATCH
+        captured: dict = {"status": None, "body": "", "called": False}
+        import voice_agent.kommo as _km
+        real_client_cls = _km.httpx.Client
+
+        class _CapturingClient:
+            def __init__(self, *a, **kw):
+                self._real = real_client_cls(*a, **kw)
+
+            def __enter__(self):
+                self._real.__enter__()
+                return self
+
+            def __exit__(self, *a):
+                return self._real.__exit__(*a)
+
+            def patch(self, url, json=None, headers=None):
+                captured["called"] = True
+                captured["url"] = url
+                captured["payload_keys"] = list((json or {}).keys())
+                resp = self._real.patch(url, json=json, headers=headers)
+                captured["status"] = resp.status_code
+                captured["body"] = (resp.text or "")[:600]
+                return resp
+
+            def get(self, *a, **kw):
+                return self._real.get(*a, **kw)
+
+            def post(self, *a, **kw):
+                return self._real.post(*a, **kw)
+
+        _km.httpx.Client = _CapturingClient  # type: ignore[misc]
+        try:
+            ok = pipeline.kommo.update_lead_fields(lead_id, fields)
+        finally:
+            _km.httpx.Client = real_client_cls  # type: ignore[misc]
+        return JSONResponse({
+            "lead_id": lead_id,
+            "phone_from_contact": phone_raw,
+            "phone_normalized": phone,
+            "convo_key": convo_key,
+            "hist_len": len(history),
+            "extracted_keys": sorted(extracted.keys()),
+            "fields_sent_keys": sorted(fields.keys()),
+            "update_returned": ok,
+            "patch_called": captured.get("called"),
+            "patch_status": captured.get("status"),
+            "patch_body_preview": captured.get("body"),
+            "patch_payload_keys": captured.get("payload_keys"),
+        })
+
+    # ================================================================
     # AMBIENTE DE TESTE/VALIDAÇÃO: simular sync Kommo SEM postar (dry)
     # ================================================================
     # GET /admin/dry-sync?phone=5561xxx[&lead_id=24045059]
