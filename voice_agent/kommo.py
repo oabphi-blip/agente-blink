@@ -423,10 +423,18 @@ class KommoClient:
         add_select(FIELD_MOTIVOS_PERDA, fields.get("motivo_perda"))
         # NUMERO TELEFONE — canal de entrada do lead (8133 ou 0710).
         add_select(FIELD_NUMERO_TELEFONE, fields.get("numero_telefone"))
-        # ATIVADO IA? — estado da IA no lead (ATIVADO / DESATIVADO).
-        add_select(FIELD_ATIVADO_IA, fields.get("ativado_ia"))
-        # HORA ATIVAÇÃO — timestamp de quando a IA voltou a atuar (reativação).
-        add_datetime(FIELD_HORA_ATIVACAO, fields.get("hora_ativacao_ts"))
+        # ATIVADO IA? (1260635) — DESATIVADO 30/05/2026: field_id NÃO EXISTE
+        # MAIS no Kommo (foi deletado). Tentar gravar derrubava o PATCH
+        # inteiro com HTTP 400 NotSupportedChoice, e NENHUM custom_field
+        # era salvo. Por isso o lead 24045059 e outros tinham
+        # custom_fields=[] apesar da Lia conversar perfeitamente.
+        # Pra reativar: recriar o campo no Kommo (Admin → Campos
+        # personalizados → Leads) e atualizar FIELD_ATIVADO_IA com o
+        # novo field_id + enums.
+        # add_select(FIELD_ATIVADO_IA, fields.get("ativado_ia"))
+        # HORA ATIVAÇÃO (1260639) — DESATIVADO mesmo motivo (campo
+        # deletado do Kommo). Pra reativar, recriar o campo date_time.
+        # add_datetime(FIELD_HORA_ATIVACAO, fields.get("hora_ativacao_ts"))
         # ATENDENTE — carimba "Lia" quando a IA conduz o atendimento.
         add_select(FIELD_ATENDENTE, fields.get("atendente"))
         # COD-AGENDAMENTO — preenchido apos gravar consulta no Medware via API.
