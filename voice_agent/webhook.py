@@ -2164,6 +2164,59 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return JSONResponse({"error": str(e)[:400]})
 
     # ================================================================
+    # AMBIENTE DE TESTE/VALIDAÇÃO: debug do extrator de campos Kommo
+    # ================================================================
+    # GET /admin/debug-extract?phone=5561xxx
+    # Mostra: tamanho do histórico Redis, últimas mensagens, o que
+    # responder.extract_lead_fields() devolve, e o que SERIA postado
+    # pra Kommo via update_lead_fields. Útil pra entender por que
+    # custom_fields vem vazio no painel mesmo a Lia tendo conversado
+    # com o paciente.
+    @app.get("/admin/debug-extract")
+    def admin_debug_extract(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        phone = request.query_params.get("phone") or ""
+        convo_key = (
+            request.query_params.get("convo_key")
+            or (_conversation_key(phone) if phone else "")
+        )
+        if not convo_key:
+            return JSONResponse({
+                "error": "informe ?phone=5561xxx ou ?convo_key=...",
+            })
+        # Lê histórico do Redis via conversation_store do responder
+        history = responder._convos.get(convo_key) or []
+        last_msgs = [
+            {"role": m.get("role"), "content": (m.get("content") or "")[:200]}
+            for m in history[-6:]
+        ]
+        try:
+            extracted = responder.extract_lead_fields(convo_key)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({
+                "convo_key": convo_key,
+                "phone": phone,
+                "hist_len": len(history),
+                "last_msgs": last_msgs,
+                "extract_error": str(e)[:300],
+            })
+        return JSONResponse({
+            "convo_key": convo_key,
+            "phone": phone,
+            "hist_len": len(history),
+            "last_msgs": last_msgs,
+            "extracted_fields": extracted,
+            "extracted_keys": sorted((extracted or {}).keys()),
+            "would_post_kommo": bool(extracted),
+        })
+
+    # ================================================================
     # AMBIENTE DE TESTE/VALIDAÇÃO: simular inbound do WhatsApp Cloud
     # ================================================================
     # POST /admin/simulate-inbound  { phone, text, [dry_run] }

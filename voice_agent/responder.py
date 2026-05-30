@@ -1252,6 +1252,10 @@ class Responder:
             "se um dado de um paciente ainda não foi dito, deixe-o em branco."
         )
 
+        log.info(
+            "[EXTRACT] convo=%s hist_len=%d transcript_chars=%d",
+            conversation_key, len(history), len(conversation),
+        )
         try:
             response = self._client.messages.create(
                 model=self._haiku,
@@ -1265,8 +1269,21 @@ class Responder:
             for block in response.content:
                 if block.type == "tool_use" and block.name == "save_lead_fields":
                     extracted = dict(block.input or {})
-                    # Remove vazios
-                    return {k: v for k, v in extracted.items() if v}
+                    out = {k: v for k, v in extracted.items() if v}
+                    log.info(
+                        "[EXTRACT] convo=%s out_keys=%s",
+                        conversation_key, sorted(out.keys()),
+                    )
+                    return out
+            # Tool não foi chamado — log o que veio
+            log.warning(
+                "[EXTRACT] convo=%s Haiku NÃO chamou tool — blocks=%s",
+                conversation_key,
+                [getattr(b, "type", "?") for b in response.content],
+            )
         except Exception as e:  # noqa: BLE001
-            log.warning("extract_lead_fields falhou: %s", e)
+            log.warning(
+                "[EXTRACT] convo=%s FALHOU (%s): %s",
+                conversation_key, type(e).__name__, e,
+            )
         return {}
