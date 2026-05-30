@@ -2226,6 +2226,200 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # AMBIENTE DE TESTE/VALIDAÇÃO: fluxo Medware (agendamento)
+    # ================================================================
+    # Replica os 3 endpoints chave do padrão Lia pro fluxo Medware:
+    #   /admin/dry-medware-agendar     → payload SEM postar
+    #   /admin/force-medware-agendar   → POST real (sandbox/teste)
+    #   /admin/medware-schema-check    → cods de médico/unidade/plano
+    @app.get("/admin/dry-medware-agendar")
+    def admin_dry_medware_agendar(request: Request) -> JSONResponse:
+        """Monta o body que SERIA enviado ao Medware sem postar.
+
+        Útil pra validar mapeamento médico/unidade/plano antes de
+        gravar um agendamento real. Ex.:
+        /admin/dry-medware-agendar?medico=Dra+Karla+Delalibera
+           &unidade=Asa+Norte&data=2026-06-10&hora=14:30
+           &nome=Joao+Teste&cpf=12345678900&convenio=particular
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        if pipeline.medware is None:
+            return JSONResponse({"error": "Medware não configurado"})
+        from .medware import (
+            MEDICO_CODES, UNIDADE_CODES, _code_lookup,
+            PLANO_PARTICULAR, PROC_CONSULTA_PARTICULAR,
+            PROC_CONSULTA_PARTICULAR_DEFAULT, PROC_CONSULTA_CONVENIO,
+            resolver_plano, _data_hora_iso, _data_nasc_iso,
+        )
+        q = request.query_params
+        medico = q.get("medico") or ""
+        unidade = q.get("unidade") or ""
+        data = q.get("data") or ""
+        hora = q.get("hora") or ""
+        nome = q.get("nome") or ""
+        cpf = q.get("cpf") or ""
+        data_nasc = q.get("data_nascimento") or ""
+        celular = q.get("celular") or ""
+        convenio = q.get("convenio") or "particular"
+        cod_agenda = int(q.get("cod_agenda") or 0)
+
+        cod_medico = _code_lookup(MEDICO_CODES, medico)
+        cod_unidade = _code_lookup(UNIDADE_CODES, unidade)
+        cod_plano = (
+            PLANO_PARTICULAR
+            if str(convenio).strip().lower() in (
+                "particular", "sem convenio", "sem convênio"
+            )
+            else resolver_plano(convenio)
+        )
+        cod_proc = (
+            PROC_CONSULTA_PARTICULAR.get(
+                cod_medico or 0, PROC_CONSULTA_PARTICULAR_DEFAULT
+            )
+            if cod_plano == PLANO_PARTICULAR
+            else PROC_CONSULTA_CONVENIO
+        )
+        cel = "".join(ch for ch in (celular or "") if ch.isdigit())
+        if len(cel) > 11 and cel.startswith("55"):
+            cel = cel[2:]
+        cel_ddd = cel[:2] if len(cel) >= 10 else ""
+        cel_num = cel[2:] if len(cel) >= 10 else cel
+        cpf_digits = "".join(ch for ch in (cpf or "") if ch.isdigit())
+        body = {
+            "codAgenda": cod_agenda,
+            "codMedico": cod_medico,
+            "codProcedimento": cod_proc,
+            "codPlano": cod_plano,
+            "dataHoraAgendada": _data_hora_iso(f"{data}T{hora}") if (data and hora) else "",
+            "paciente": {
+                "nome": (nome or "").strip().upper(),
+                "dataNascimento": _data_nasc_iso(data_nasc),
+                "cpf": cpf_digits,
+                "numeroCelularddd": cel_ddd,
+                "numeroCelular": cel_num,
+            },
+        }
+        # Sinais de saúde do payload (alertas)
+        warnings = []
+        if not cod_medico:
+            warnings.append(f"medico '{medico}' não mapeado em MEDICO_CODES")
+        if not cod_unidade:
+            warnings.append(f"unidade '{unidade}' não mapeada em UNIDADE_CODES")
+        if not cod_plano:
+            warnings.append(f"convenio '{convenio}' não mapeado")
+        if not cpf_digits:
+            warnings.append("CPF vazio — Medware exige")
+        if not (data and hora):
+            warnings.append("data/hora ausente")
+        return JSONResponse({
+            "would_post_to": "Medware/Agendamento/Salvar",
+            "body": body,
+            "warnings": warnings,
+            "ready_to_send": len(warnings) == 0,
+        })
+
+    @app.post("/admin/force-medware-agendar")
+    @app.get("/admin/force-medware-agendar")
+    def admin_force_medware_agendar(request: Request) -> JSONResponse:
+        """Executa POST real ao Medware. Use SÓ com paciente de teste.
+
+        Aceita mesmos params do dry-medware-agendar. Devolve cod_agendamento
+        em sucesso ou motivo+detalhe em falha.
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        if pipeline.medware is None:
+            return JSONResponse({"error": "Medware não configurado"})
+        from .medware import MEDICO_CODES, UNIDADE_CODES, _code_lookup
+        q = request.query_params
+        cod_medico = _code_lookup(MEDICO_CODES, q.get("medico") or "")
+        cod_unidade = _code_lookup(UNIDADE_CODES, q.get("unidade") or "")
+        if not cod_medico:
+            return JSONResponse({
+                "ok": False, "motivo": "medico_nao_mapeado",
+                "medico": q.get("medico"),
+            })
+        try:
+            result = pipeline.medware.criar_agendamento(
+                cod_medico=cod_medico,
+                cod_unidade=cod_unidade or 0,
+                cod_agenda=int(q.get("cod_agenda") or 0),
+                data_hora=f"{q.get('data')}T{q.get('hora')}",
+                nome=q.get("nome") or "",
+                cpf=q.get("cpf") or "",
+                data_nascimento=q.get("data_nascimento") or "",
+                celular=q.get("celular") or "",
+                convenio=q.get("convenio") or None,
+            )
+            log.info("[ADMIN FORCE-MEDWARE] result=%s", str(result)[:200])
+            return JSONResponse(result)
+        except Exception as e:  # noqa: BLE001
+            log.warning("[ADMIN FORCE-MEDWARE] exception: %s", e)
+            return JSONResponse({"ok": False, "exception": str(e)[:300]})
+
+    @app.get("/admin/medware-schema-check")
+    def admin_medware_schema_check(request: Request) -> JSONResponse:
+        """Bate os cods hardcoded (MEDICO_CODES, UNIDADE_CODES, PLANO_CODES)
+        com os cods reais no Medware. Reporta divergências.
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        if pipeline.medware is None:
+            return JSONResponse({"error": "Medware não configurado"})
+        from .medware import MEDICO_CODES, UNIDADE_CODES, PLANO_CODES
+        report: dict = {
+            "medicos_hardcoded": len(MEDICO_CODES),
+            "unidades_hardcoded": len(UNIDADE_CODES),
+            "planos_hardcoded": len(PLANO_CODES),
+            "warnings": [],
+        }
+        try:
+            medicos_real = pipeline.medware.listar_medicos()
+            real_codes = {int(m.get("codMedico") or 0) for m in medicos_real
+                          if m.get("codMedico")}
+            hardcoded_codes = {v for v in MEDICO_CODES.values()}
+            faltando = hardcoded_codes - real_codes
+            if faltando:
+                report["warnings"].append({
+                    "campo": "MEDICO_CODES",
+                    "codigos_orfaos": sorted(faltando),
+                })
+            report["medicos_real_count"] = len(real_codes)
+        except Exception as e:  # noqa: BLE001
+            report["warnings"].append({"erro_listar_medicos": str(e)[:200]})
+        try:
+            unidades_real = pipeline.medware.listar_unidades()
+            real_uni = {int(u.get("codUnidade") or 0) for u in unidades_real
+                        if u.get("codUnidade")}
+            hardcoded_uni = {v for v in UNIDADE_CODES.values()}
+            faltando = hardcoded_uni - real_uni
+            if faltando:
+                report["warnings"].append({
+                    "campo": "UNIDADE_CODES",
+                    "codigos_orfaos": sorted(faltando),
+                })
+            report["unidades_real_count"] = len(real_uni)
+        except Exception as e:  # noqa: BLE001
+            report["warnings"].append({"erro_listar_unidades": str(e)[:200]})
+        return JSONResponse(report)
+
+    # ================================================================
     # OBSERVABILIDADE: painel operacional /admin/healthz
     # ================================================================
     # GET /admin/healthz
