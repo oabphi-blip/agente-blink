@@ -2217,6 +2217,112 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # AMBIENTE DE TESTE/VALIDAÇÃO: simular sync Kommo SEM postar (dry)
+    # ================================================================
+    # GET /admin/dry-sync?phone=5561xxx[&lead_id=24045059]
+    # Captura o estado COMPLETO do que aconteceria no sync Kommo:
+    #   - histórico Redis disponível pra extract
+    #   - fields extraídos pelo Haiku
+    #   - payload custom_fields_values que SERIA enviado ao Kommo
+    #   - warnings de enum não casado (causa típica de PATCH 400)
+    # NÃO executa o PATCH no Kommo. Para diagnosticar custom_fields=[]
+    # em lead real, basta rodar dry-sync com phone do mesmo paciente.
+    @app.get("/admin/dry-sync")
+    def admin_dry_sync(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        phone = request.query_params.get("phone") or ""
+        convo_key = (
+            request.query_params.get("convo_key")
+            or (_conversation_key(phone) if phone else "")
+        )
+        if not convo_key:
+            return JSONResponse({"error": "informe ?phone=5561xxx"})
+        # 1) Pega histórico
+        history = responder._convos.get(convo_key) or []
+        # 2) Roda extrator
+        try:
+            extracted = responder.extract_lead_fields(convo_key) or {}
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({
+                "convo_key": convo_key, "hist_len": len(history),
+                "extract_error": str(e)[:300],
+            })
+        # 3) Reproduz o enriquecimento que _sync_kommo_safely faz
+        enriched = dict(extracted)
+        enriched["numero_telefone"] = "81331005"
+        enriched["ativado_ia"] = "ATIVADO"
+        enriched["atendente"] = "Lia"
+        # 4) Calcula o payload custom_fields_values que SERIA enviado
+        #    capturando warnings de enum não casado.
+        import io as _io
+        import logging as _logging
+        log_buf = _io.StringIO()
+        h = _logging.StreamHandler(log_buf)
+        h.setLevel(_logging.WARNING)
+        root = _logging.getLogger("voice_agent.kommo")
+        root.addHandler(h)
+        try:
+            # Monkey-patch httpx.Client.patch pra capturar sem enviar
+            cfs_capturado: list = []
+
+            class _FakeResp:
+                status_code = 200
+                text = "DRY-RUN"
+
+                def json(self):
+                    return {}
+
+            class _FakeClient:
+                def __init__(self, **kw):
+                    pass
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+                def patch(self, url, json=None, headers=None):
+                    cfs_capturado.append(json or {})
+                    return _FakeResp()
+
+            import voice_agent.kommo as _km
+            real_client = _km.httpx.Client
+            _km.httpx.Client = _FakeClient  # type: ignore[misc]
+            try:
+                pipeline.kommo.update_lead_fields(
+                    int(request.query_params.get("lead_id") or 999999999),
+                    enriched,
+                )
+            finally:
+                _km.httpx.Client = real_client  # type: ignore[misc]
+        finally:
+            root.removeHandler(h)
+            h.flush()
+        payload = cfs_capturado[0] if cfs_capturado else {}
+        cfs_list = payload.get("custom_fields_values", []) if isinstance(
+            payload, dict
+        ) else []
+        return JSONResponse({
+            "convo_key": convo_key,
+            "phone": phone,
+            "hist_len": len(history),
+            "extracted_keys": sorted(extracted.keys()),
+            "enriched_keys": sorted(enriched.keys()),
+            "payload_cfs_count": len(cfs_list),
+            "payload_field_ids":
+                [c.get("field_id") for c in cfs_list],
+            "kommo_warnings_log": log_buf.getvalue()[-2000:],
+            "payload_preview": cfs_list[:30],
+        })
+
+    # ================================================================
     # AMBIENTE DE TESTE/VALIDAÇÃO: simular inbound do WhatsApp Cloud
     # ================================================================
     # POST /admin/simulate-inbound  { phone, text, [dry_run] }
