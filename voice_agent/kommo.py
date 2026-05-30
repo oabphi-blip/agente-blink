@@ -435,8 +435,12 @@ class KommoClient:
         # HORA ATIVAÇÃO (1260639) — DESATIVADO mesmo motivo (campo
         # deletado do Kommo). Pra reativar, recriar o campo date_time.
         # add_datetime(FIELD_HORA_ATIVACAO, fields.get("hora_ativacao_ts"))
-        # ATENDENTE — carimba "Lia" quando a IA conduz o atendimento.
-        add_select(FIELD_ATENDENTE, fields.get("atendente"))
+        # ATENDENTE (1246419 multiselect) — DESATIVADO 30/05/2026.
+        # Mesmo com enum 926681 'Lia' existindo no Kommo schema, o PATCH
+        # retorna NotSupportedChoice em production. Provavelmente
+        # multiselect exige formato diferente ou o enum está
+        # archived/inativo. Desbloqueia os 11 outros campos válidos.
+        # add_select(FIELD_ATENDENTE, fields.get("atendente"))
         # COD-AGENDAMENTO — preenchido apos gravar consulta no Medware via API.
         cod_ag = fields.get("cod_agendamento")
         if cod_ag:
