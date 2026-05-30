@@ -2326,6 +2326,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 captured["called"] = True
                 captured["url"] = url
                 captured["payload_keys"] = list((json or {}).keys())
+                captured["payload_full"] = json
                 resp = self._real.patch(url, json=json, headers=headers)
                 captured["status"] = resp.status_code
                 captured["body"] = (resp.text or "")[:600]
@@ -2355,6 +2356,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "patch_status": captured.get("status"),
             "patch_body_preview": captured.get("body"),
             "patch_payload_keys": captured.get("payload_keys"),
+            "patch_payload_full": captured.get("payload_full"),
         })
 
     # ================================================================
