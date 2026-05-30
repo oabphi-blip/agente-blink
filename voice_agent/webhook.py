@@ -1059,10 +1059,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         for m in _wa_parse(payload):
             mid = m.get("id") or ""
             phone = m.get("from") or ""
+            _txt_dbg = (m.get("text") or "")[:80] if isinstance(m.get("text"), str) else ""
+            log.info(
+                "[WA_INBOUND] mid=%s phone=%s type=%s text=%r",
+                mid, phone, m.get("type"), _txt_dbg,
+            )
             if not phone:
+                log.info("[WA_INBOUND] skip sem phone mid=%s", mid)
                 continue
             # Dedup — a Meta reentrega o webhook em caso de timeout.
             if mid and not conversation_store.mark_seen(f"wa:{mid}"):
+                log.info("[WA_INBOUND] DEDUP block mid=%s phone=%s", mid, phone)
                 continue
             mtype = m.get("type")
             # MODO INGESTÃO — áudios encaminhados pelo admin viram arquivos
