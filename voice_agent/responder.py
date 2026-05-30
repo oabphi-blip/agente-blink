@@ -1001,12 +1001,28 @@ class Responder:
         answer_parts = [block.text for block in response.content if block.type == "text"]
         answer = "\n".join(answer_parts).strip()
 
+        # DEBUG capturado em 30/05 — fallback 'instabilidade' aparecendo sem
+        # exception Claude. Hipótese: algum caminho retorna answer vazio sem
+        # erro. Logando tamanhos pra diagnóstico via Easypanel logs.
+        log.info(
+            "[DEBUG reply] convo=%s blocks=%d raw_answer_len=%d truncate_threshold=%d",
+            conversation_key, len(response.content), len(answer), self._max_chars,
+        )
+
         if len(answer) > self._max_chars:
             answer = answer[: self._max_chars - 1].rstrip() + "…"
 
         # 5.1. Filtro pós-geração: vocabulário vetado + alucinação de pagamento
         # + detector "fake agenda lookup" (passa ctx pra saber se há agenda real)
+        _before_scrub = answer
         answer = _scrub_prohibited(answer, ctx=caller_context)
+        if not answer or len(answer) < 5:
+            log.error(
+                "[DEBUG reply] FILTRO ZEROU answer — convo=%s before_len=%d "
+                "after_len=%d before_preview=%r",
+                conversation_key, len(_before_scrub), len(answer),
+                _before_scrub[:200],
+            )
 
         # 6. Persiste no histórico
         self._convos.append(conversation_key, "user", user_text)
