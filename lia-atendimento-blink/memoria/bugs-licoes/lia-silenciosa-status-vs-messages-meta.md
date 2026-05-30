@@ -1,8 +1,9 @@
-# Lia silenciosa: Meta entregando apenas `statuses`, não `messages`
+# Lia silenciosa: NameError oculto em `responder.py`
 
 > **Data:** 30/05/2026
-> **Incidente:** Lia parou de responder pacientes ~01:37 BR. Voice_agent vivo, /whatsapp respondendo 200 OK, mas zero processamento real.
-> **Tempo até diagnóstico:** ~4h de debugging reativo. Custou pacientes (Ariany lead 24044547 mandou 7 msgs sem resposta entre 06:55-07:50 BR).
+> **CAUSA RAIZ REAL:** linha 970 de `voice_agent/responder.py` chamava `_build_janela_agenda()` mas a função **nunca foi definida**. Toda `responder.reply` lançava NameError, answer vazio, fallback "instabilidade", e como o dedup do fallback é 24h por convo_key, a mensagem parou de aparecer no Kommo — virou silêncio puro.
+> **Origem:** commit do task #20 ("Re-injetar JANELA DE OFERTA DE AGENDA"). Adicionou a CHAMADA mas esqueceu de adicionar a FUNÇÃO.
+> **Tempo até diagnóstico:** ~5h perseguindo Meta webhook (causa falsa). **30 segundos com `/admin/simulate-inbound` dry_run** — o ambiente de teste estrutural.
 
 ## Verdade técnica (Plan agent, validada)
 
