@@ -177,3 +177,101 @@ class TestBootstrap:
         assert res2["started"] is False
         assert res2["reason"] == "ja_iniciado"
         parar_cron()
+
+
+# ---------------------------------------------------------------------------
+# Worker renovacao
+# ---------------------------------------------------------------------------
+
+class TestHorarioComercial:
+    """Worker renovacao só roda dentro do horário comercial."""
+
+    def test_horario_comercial_8_18(self, env):
+        from voice_agent.cron_interno import _renovacao_em_horario_comercial
+        # Por padrão 8-18 BRT. Função depende do tempo real → smoke test.
+        r = _renovacao_em_horario_comercial()
+        assert isinstance(r, bool)
+
+    def test_intervalo_renovacao_default_15_min(self, env):
+        from voice_agent.cron_interno import _intervalo_renovacao_seg
+        assert _intervalo_renovacao_seg() == 900
+
+
+class FakeKommoComLeads:
+    def __init__(self, leads):
+        self._leads = leads
+        self.add_note_calls = []
+
+    def list_active_leads(self, pipeline_id, limit):
+        return self._leads
+
+    def add_note(self, lead_id, text):
+        self.add_note_calls.append((lead_id, text))
+
+
+class FakeRedisInbound:
+    """Redis com chave ultima_msg_paciente preenchida pra alguns leads."""
+    def __init__(self, snapshots):
+        # snapshots = {lead_id: epoch_ts}
+        self._store = {}
+        for lid, ts in snapshots.items():
+            self._store[f"blink:janela:ultima_msg_paciente:{lid}"] = str(int(ts))
+
+    def get(self, key):
+        return self._store.get(key)
+
+    def set(self, key, value, ex=None):
+        self._store[key] = value
+
+    def delete(self, key):
+        self._store.pop(key, None)
+
+
+class TestExecutarRenovacaoVarredura:
+
+    def test_sem_kommo_devolve_erro(self, env):
+        from voice_agent.cron_interno import _executar_renovacao_varredura
+        pipeline = FakePipeline(redis_client=FakeRedis(), kommo_client=None)
+        res = _executar_renovacao_varredura(pipeline=pipeline, dry_run=True)
+        assert res["ok"] is False
+        assert res["razao"] == "sem_kommo"
+
+    def test_lead_em_status_pos_agendado_e_ignorado(self, env):
+        from voice_agent.cron_interno import _executar_renovacao_varredura
+        kommo = FakeKommoComLeads([
+            {"id": 1, "status_id": 101507507, "telefone": "5561999999999",
+             "nome_contato": "Ana"},  # AGENDADO — pula
+        ])
+        pipeline = FakePipeline(redis_client=FakeRedis(), kommo_client=kommo)
+        res = _executar_renovacao_varredura(pipeline=pipeline, dry_run=True)
+        assert res["ok"] is True
+        assert res["candidatos"] == 0
+        assert res["enviados"] == 0
+
+    def test_lead_em_pre_agendado_e_com_resposta_recente_e_processado(self, env):
+        import time as _t
+        from voice_agent.cron_interno import _executar_renovacao_varredura
+        agora = _t.time()
+        kommo = FakeKommoComLeads([
+            {"id": 42, "status_id": 102560495,
+             "telefone": "5561999990000", "nome_contato": "Marcela"},
+        ])
+        redis_cli = FakeRedisInbound({42: agora - 23 * 3600})  # 23h atrás
+        pipeline = FakePipeline(redis_client=redis_cli, kommo_client=kommo)
+        res = _executar_renovacao_varredura(pipeline=pipeline, dry_run=True)
+        assert res["ok"] is True
+        assert res["candidatos"] >= 1
+
+
+class TestIniciarCronComRenovacao:
+
+    def test_inicia_2_workers(self, env):
+        env.setenv("BLINK_CRON_ENABLED", "1")
+        import voice_agent.cron_interno as ci
+        ci._stop_event_global = None
+        ci._threads_iniciadas = []
+        res = iniciar_cron(pipeline=FakePipeline(FakeRedis()))
+        assert res["started"] is True
+        assert "classificar" in res["workers"]
+        assert "renovacao" in res["workers"]
+        parar_cron()

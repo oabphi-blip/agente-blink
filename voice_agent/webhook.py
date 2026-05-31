@@ -3508,6 +3508,27 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception as e:  # noqa: BLE001
             log.warning("[CRON BOOT] falha: %s", e)
 
+    @app.post("/admin/renovacao-varredura")
+    @app.get("/admin/renovacao-varredura")
+    def admin_renovacao_varredura(request: Request) -> JSONResponse:
+        """Roda manualmente a varredura de leads pré-AGENDADO.
+
+        Use pra ambiente de teste antes do cron ligar de verdade.
+        Default dry_run=true.
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        from voice_agent.cron_interno import _executar_renovacao_varredura
+        dry_run = (request.query_params.get("dry_run") or "true").lower() in ("1", "true", "yes")
+        return JSONResponse(
+            _executar_renovacao_varredura(pipeline=pipeline, dry_run=dry_run)
+        )
+
     @app.get("/admin/cron-status")
     def admin_cron_status(request: Request) -> JSONResponse:
         if settings.webhook_secret:

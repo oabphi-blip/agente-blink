@@ -325,8 +325,8 @@ class TestEndpointDispatch:
         )
         body = r.json()
         assert body["estrategia"] == "template_1039"
-        assert body["template_name"] == "1039_ativar_grau_de_urgencia"
-        assert body["payload_preview"]["template"]["name"] == "1039_ativar_grau_de_urgencia"
+        assert body["template_name"] == "1079_ativar_conversa_de_imediato_odlmcy"
+        assert body["payload_preview"]["template"]["name"] == "1079_ativar_conversa_de_imediato_odlmcy"
 
     def test_lead_agendado_nao_dispara(self, client):
         r = client.post(

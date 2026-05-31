@@ -134,7 +134,7 @@ class TestTemplateDispatch:
         assert len(wa.template_calls) == 1
         chamada = wa.template_calls[0]
         assert chamada["to"] == "5561999990000"
-        assert chamada["name"] == "1039_ativar_grau_de_urgencia"
+        assert chamada["name"] == "1079_ativar_conversa_de_imediato_odlmcy"
         assert chamada["body_params"] == ["Marcela"]
 
     def test_lead_frio_puro_dispara_template_1039(self):
@@ -156,8 +156,8 @@ class TestTemplateDispatch:
                                   agora=_AGORA, dry_run=True)
         assert res.skipped is True
         assert res.razao_skip == "dry_run"
-        assert res.template_name == "1039_ativar_grau_de_urgencia"
-        assert res.payload_preview["template"]["name"] == "1039_ativar_grau_de_urgencia"
+        assert res.template_name == "1079_ativar_conversa_de_imediato_odlmcy"
+        assert res.payload_preview["template"]["name"] == "1079_ativar_conversa_de_imediato_odlmcy"
 
     def test_falha_template_nao_quebra(self):
         wa = FakeWA(fail_on="template"); r = FakeRedis()
@@ -292,7 +292,7 @@ class TestNotaKommo:
         assert len(k.notes) == 1
         texto = k.notes[0]["text"]
         assert "template 1039" in texto
-        assert "1039_ativar_grau_de_urgencia" in texto
+        assert "1079_ativar_conversa_de_imediato_odlmcy" in texto
         assert "{1}" in texto and "Marcela" in texto
         assert "Botões" in texto
 

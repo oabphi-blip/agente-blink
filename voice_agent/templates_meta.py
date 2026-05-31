@@ -56,9 +56,15 @@ LANGUAGE_BR = "pt_BR"
 # vira slug. Default abaixo é o palpite mais provável — se Meta rejeitar
 # com "template_name_does_not_exist", basta corrigir a env sem deploy.
 
+# Default = "1079_ativar_conversa_de_imediato_odlmcy" — único template de
+# "ativar conversa" 100% similar ao conceito que aprovado no Meta em
+# 31/05/2026. O nome de exibição "1039 ATIVAR GRAU DE URGÊNCIA" que o
+# Fábio mostrou NÃO foi encontrado via /whatsapp/templates — pode estar
+# pendente de aprovação ou rejeitado. Quando aprovar, sobrescrever via env
+# WHATSAPP_TEMPLATE_ATIVAR_URGENCIA_NAME=<slug_exato>.
 TEMPLATE_ATIVAR_URGENCIA_NAME = os.environ.get(
     "WHATSAPP_TEMPLATE_ATIVAR_URGENCIA_NAME",
-    "1039_ativar_grau_de_urgencia",
+    "1079_ativar_conversa_de_imediato_odlmcy",
 )
 
 # Como confirmar o slug exato sem precisar de Chrome:
