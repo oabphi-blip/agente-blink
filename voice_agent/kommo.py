@@ -176,6 +176,29 @@ STATUS_CLOSED_LOST = 143
 
 # Textareas / textos livres
 FIELD_NOME_PACIENTE_1 = 1255757
+
+
+def nome_paciente_pode_ser_gravado(nome_raw: str | None) -> tuple[bool, str]:
+    """Decide se um nome de paciente está completo o suficiente pra gravar
+    no campo Kommo `N.NOME PACIENTE` (regra 5.2.4 do prompt mestre).
+
+    Retorna (pode_gravar, status_str). Em caso de erro do validador,
+    devolve (True, "fallback") — não bloqueia o fluxo principal.
+
+    Origem: bug lead 24048691 (Marcela só primeiro nome). Pluga
+    voice_agent.nomes.avaliar_nome_paciente.
+    """
+    if not nome_raw or not str(nome_raw).strip():
+        return False, "vazio"
+    try:
+        from voice_agent.nomes import NomeStatus, avaliar_nome_paciente
+        status = avaliar_nome_paciente(nome_raw)
+        if status == NomeStatus.COMPLETO:
+            return True, "completo"
+        return False, status.value
+    except Exception:  # noqa: BLE001
+        # Se validador quebrar, NÃO bloqueia (defensivo).
+        return True, "fallback"
 FIELD_MOTIVO_PACIENTE_1 = 1255727
 FIELD_DIA_TURNO_PERIODO = 1259960  # "DIA/TURNO/PERÍODO ⚠️" — preferência textual
 FIELD_DIA_CONSULTA_1 = 1255723     # "1.DIA CONSULTA" (date_time) — data/hora confirmada
@@ -495,13 +518,28 @@ class KommoClient:
         def _digits(v: Any) -> str:
             return "".join(ch for ch in str(v or "") if ch.isdigit())
 
+        # Validação de nome paciente (task 31/05/2026) — só grava se completo.
+        # nome_paciente_pode_ser_gravado() é função pública (módulo nível),
+        # pra ser testável sem entrar em update_lead_fields.
+        def _gravar_nome_paciente_se_completo(field_id: int, nome_raw: str | None) -> None:
+            ok, status_str = nome_paciente_pode_ser_gravado(nome_raw)
+            if not ok:
+                log.warning(
+                    "[KOMMO] nome paciente NÃO gravado — %s: %r",
+                    status_str, nome_raw,
+                )
+                return
+            add_text(field_id, nome_raw)
+
         pacientes = fields.get("pacientes")
         if isinstance(pacientes, list) and pacientes:
             for idx, p in enumerate(pacientes[:6], start=1):
                 if not isinstance(p, dict):
                     continue
-                add_text(FIELD_NOME_PACIENTES[idx],
-                         p.get("nome") or p.get("name"))
+                _gravar_nome_paciente_se_completo(
+                    FIELD_NOME_PACIENTES[idx],
+                    p.get("nome") or p.get("name"),
+                )
                 add_date(FIELD_NASC_PACIENTES[idx], p.get("birth_date_iso"))
                 add_text(FIELD_MOTIVO_PACIENTES[idx],
                          p.get("reason") or p.get("motivo"))
@@ -524,7 +562,9 @@ class KommoClient:
             # nº de pacientes — rede de segurança se a extração não trouxe
             fields.setdefault("num_pacientes", str(min(len(pacientes), 10)))
         else:
-            add_text(FIELD_NOME_PACIENTE_1, fields.get("name"))
+            _gravar_nome_paciente_se_completo(
+                FIELD_NOME_PACIENTE_1, fields.get("name"),
+            )
             add_text(FIELD_MOTIVO_PACIENTE_1, fields.get("reason"))
             add_text(FIELD_CPF_PACIENTE_1, _digits(fields.get("cpf")) or None)
             add_date(FIELD_DATA_NASCIMENTO_PACIENTE_1,
