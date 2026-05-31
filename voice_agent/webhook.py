@@ -2897,28 +2897,33 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         from voice_agent.classificar import (
             REDIS_KEY_AGUARDA_FMT,
-            STATUS_A_CLASSIFICAR_ID,
-            TIMEOUT_CLASSIFICAR_HORAS,
+            get_status_a_classificar_id,
+            get_timeout_classificar_horas,
             mover_lead_para_classificar,
         )
         import time as _t
 
+        # Leitura LAZY — env vista no momento da chamada (fix 31/05/2026).
+        STATUS_DESTINO = get_status_a_classificar_id()
+        TIMEOUT_DEFAULT = get_timeout_classificar_horas()
+
         q = request.query_params
         dry_run = (q.get("dry_run") or "true").lower() in ("1", "true", "yes")
         try:
-            timeout_h = int(q.get("timeout_h") or TIMEOUT_CLASSIFICAR_HORAS)
+            timeout_h = int(q.get("timeout_h") or TIMEOUT_DEFAULT)
         except ValueError:
-            timeout_h = TIMEOUT_CLASSIFICAR_HORAS
+            timeout_h = TIMEOUT_DEFAULT
 
         redis_cli = getattr(pipeline, "_redis", None)
         kommo_cli = getattr(pipeline, "kommo", None)
         agora = _t.time()
 
-        if STATUS_A_CLASSIFICAR_ID is None:
+        if STATUS_DESTINO is None:
             return JSONResponse({
                 "ok": False,
                 "error": "KOMMO_STATUS_A_CLASSIFICAR_ID não configurado",
                 "hint": "Crie etapa 'A CLASSIFICAR' no Kommo e seta no Easypanel.",
+                "debug_env_value": os.environ.get("KOMMO_STATUS_A_CLASSIFICAR_ID", "<UNSET>"),
             }, status_code=501)
 
         # Lead específico
@@ -2997,7 +3002,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         return JSONResponse({
             "ok": True, "dry_run": dry_run, "timeout_h": timeout_h,
-            "status_destino_id": STATUS_A_CLASSIFICAR_ID,
+            "status_destino_id": STATUS_DESTINO,
             "total_candidatos": len(resultados),
             "resultados": resultados,
         })

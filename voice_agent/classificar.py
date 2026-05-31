@@ -35,20 +35,49 @@ from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
 
-# Configuração via env — defaults seguros (feature OFF até Fábio configurar).
-STATUS_A_CLASSIFICAR_ID = int(
-    os.environ.get("KOMMO_STATUS_A_CLASSIFICAR_ID", "0")
-) or None
-PIPELINE_ATENDE_ID = int(os.environ.get("KOMMO_PIPELINE_ATENDE_ID", "8601819"))
+# Configuração via env — funções LAZY (lidas a cada chamada).
+# Bug 31/05/2026: as constantes top-level eram avaliadas no import e
+# ficavam None mesmo após a env ser setada. Solução: leitura dinâmica.
 
-# Quantas horas após o disparo da renovação, sem resposta → move.
-TIMEOUT_CLASSIFICAR_HORAS = int(
-    os.environ.get("CLASSIFICAR_TIMEOUT_HORAS", "24")
-)
+def get_status_a_classificar_id() -> int | None:
+    """Lê env atual. None = feature desligada."""
+    raw = (os.environ.get("KOMMO_STATUS_A_CLASSIFICAR_ID") or "").strip()
+    if not raw:
+        return None
+    try:
+        v = int(raw)
+        return v or None
+    except ValueError:
+        return None
+
+
+def get_pipeline_atende_id() -> int:
+    raw = (os.environ.get("KOMMO_PIPELINE_ATENDE_ID") or "8601819").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return 8601819
+
+
+def get_timeout_classificar_horas() -> int:
+    raw = (os.environ.get("CLASSIFICAR_TIMEOUT_HORAS") or "24").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return 24
+
+
+# Compat backwards — manter os nomes antigos como propriedades de módulo
+# que retornam o valor ATUAL. Os endpoints podem usar diretamente:
+#   from voice_agent.classificar import get_status_a_classificar_id
+#   destino = get_status_a_classificar_id()  # lê env agora.
+STATUS_A_CLASSIFICAR_ID = get_status_a_classificar_id()  # snapshot inicial
+PIPELINE_ATENDE_ID = get_pipeline_atende_id()
+TIMEOUT_CLASSIFICAR_HORAS = get_timeout_classificar_horas()
 
 # Padrões de chave Redis.
 REDIS_KEY_AGUARDA_FMT = "blink:classificar:aguardando_resposta:{lead_id}"
-REDIS_TTL_SEG_PADRAO = (TIMEOUT_CLASSIFICAR_HORAS + 1) * 3600
+REDIS_TTL_SEG_PADRAO = 25 * 3600
 
 
 # ---------------------------------------------------------------------------
