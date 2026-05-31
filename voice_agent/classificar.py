@@ -40,15 +40,18 @@ log = logging.getLogger(__name__)
 # ficavam None mesmo após a env ser setada. Solução: leitura dinâmica.
 
 def get_status_a_classificar_id() -> int | None:
-    """Lê env atual. None = feature desligada."""
-    raw = (os.environ.get("KOMMO_STATUS_A_CLASSIFICAR_ID") or "").strip()
+    """Lê env atual. Default = 106919911 (etapa 0-a classificar criada
+    em 31/05/2026). Easypanel estava descartando env nova após cada
+    rebuild — solução defensiva: hardcode com possibilidade de override
+    via env explícita."""
+    raw = (os.environ.get("KOMMO_STATUS_A_CLASSIFICAR_ID") or "106919911").strip()
     if not raw:
-        return None
+        return 106919911
     try:
         v = int(raw)
-        return v or None
+        return v or 106919911
     except ValueError:
-        return None
+        return 106919911
 
 
 def get_pipeline_atende_id() -> int:
