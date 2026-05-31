@@ -11,3 +11,7 @@ uvicorn[standard]>=0.27.0
 httpx>=0.27.0
 python-multipart>=0.0.9
 redis>=5.0.0
+
+# Memória ativa nível 1 — RAG TF-IDF (voice_agent/memoria_rag.py).
+# Adicionado em 31/05/2026 (task #85). ~50 MB instalado.
+scikit-learn>=1.4.0

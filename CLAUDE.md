@@ -61,20 +61,24 @@ de ativação via `kommo_add_note` — duplica trabalho.
 
 ---
 
-## 4. Status IDs do pipeline ATENDE (8601819)
+## 4. Status IDs do pipeline ATENDE (8601819) — atualizado 31/05/2026
 
-| ID | Etapa | Tipo |
+Fábio renumerou o funil em 31/05/2026. IDs **não mudaram**, só nomes.
+Detalhes em `lia-atendimento-blink/memoria/bugs-licoes/etapa-a-classificar-e-renumeracao-pipeline.md`.
+
+| ID | Etapa atual | Tipo |
 |---|---|---|
-| 96441724 | 0-ETAPA ENTRADA | frio (reativação cobre) |
-| 101508307 | 1.LEADS FRIO | frio (reativação cobre) |
-| 102560495 | 2-AGENDAR | frio (reativação cobre) |
-| 106184631 | 3.REAGENDAR | frio (reativação cobre) |
-| 101507507 | 4-AGENDADO | ativo |
-| 101109455 | 5-CONFIRMAR | ativo |
-| (várias) | 6-CONFIRMADO | ativo |
-| 91486864 | 7-REALIZADO | fechado positivo |
-| 106184983 | 5.1-NO-SHOW | frio (reativação cobre) |
-| 106563343 | Nota fiscal | admin |
+| 96441724 | 0-ETAPA ENTRADA | frio (renovação cobre) |
+| **106919911** | **0-a classificar** | **fila atendente humano (motor move pra cá)** |
+| 106563343 | 1-ATENDIMENTO HUMANO | handoff humano |
+| 101508307 | 2.LEADS FRIO | frio (renovação cobre) |
+| 102560495 | 3-AGENDAR | em conversa (renovação cobre) |
+| 106184631 | 4.REAGENDAR | em conversa (renovação cobre) |
+| 101507507 | 5-AGENDADO | ativo |
+| 101109455 | 6-CONFIRMAR | ativo |
+| 106653499 | 7.CONFIRMADO | ativo |
+| 106184983 | 7.1-NO-SHOW (ATIVAR) | frio (renovação cobre) |
+| 91486864 | 8-REALIZADO CONSULTA | fechado positivo |
 | 142 | Closed-won | fechado positivo |
 | 143 | Closed-lost | perdido |
 
@@ -148,6 +152,20 @@ Resumo:
 
 ---
 
+## 9-A. Duração do slot Medware por médico (31/05/2026)
+
+| Médico | Duração | Cobre |
+|---|---|---|
+| Dra. Karla Delalíbera | **30 min** | rotina, oftalmopediatria, SDP/Prisma, estrabismo |
+| Dr. Fabrício Freitas | **40 min** | avaliação inicial + pós-op catarata |
+| Dra. Kátia Delalíbera | 30 min *(placeholder — em pausa)* | retina (revisar ao voltar) |
+
+Decisões registradas: SDP NÃO tem slot separado · Catarata avaliação == pós-op no Medware.
+Centralizado em `voice_agent/mensagens_ciclo.py::DURACAO_SLOT_MIN_POR_MEDICO`.
+Lição: `lia-atendimento-blink/memoria/bugs-licoes/duracao-slot-medicos.md`.
+
+---
+
 ## 10. Comandos úteis
 
 ```bash
@@ -187,6 +205,23 @@ revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 - Testes pytest pra cenários históricos (Aurora, Fábio, cobrança antes slot)
 - Webhook Meta Lead Form → Kommo (leads novos em 30s)
 - Painel `gap de amanhã` (slots vazios → reativação focada)
+- **Pipeline autorização antecipada do convênio** (task #81): a partir do
+  `N.EXAMES` preenchido pelo `selecionar_agrupador()`, montar a guia
+  eletrônica e enviar à operadora antes do dia da consulta.
+- **Comparador pós-consulta** (task #81): função
+  `voice_agent/auditoria.py:comparar_agrupamento()` + endpoint
+  `/admin/auditoria-tick` + webhook Kommo que escuta movimentação para
+  `6-REALIZADO CONSULTA` e dispara comparação por paciente.
+- **Campo Kommo `N.AGRUPAMENTO ALTERADO`** (checkbox por paciente, 6 campos),
+  preenchido automaticamente pela auditoria + nota detalhada
+  `exames_a_mais`/`exames_a_menos`.
+- **Pytest auditoria**: 4 cenários (coincide / a_mais / a_menos / fonte_vazia).
+- **Observabilidade dupla checagem #auditoria-autorização** (task #82):
+  bot posta discrepância no canal Slack; secretaria da unidade (Asa Norte ou
+  Águas Claras) faz 1ª revisão (reaction `:white_check_mark:`); médico
+  responsável (Karla/Fabrício/Kátia) faz a 2ª; `N.AUDITORIA STATUS` só vira
+  `fechada` com as 2 assinaturas. Sem isso, financeiro não cobra o convênio.
+  Env nova: `SLACK_WEBHOOK_AUDITORIA_URL`. (Seção 25 do `_MASTER_INSTRUCTION.md`.)
 
 ---
 
@@ -199,6 +234,17 @@ revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 5. **Respeitar `ja_agendado=True`** — não oferecer slot novo
 6. **Não duplicar trabalho do motor** — não rodar batch `kommo_add_note` em
    massa, o reactivation.py já cobre a fila
+7. **Convênio só agenda com 3 pré-requisitos POR PACIENTE** — `N.DATA NASC`,
+   idade calculada (DATA DE HOJE Brasília injetada), `N.MOTIVO` classificado
+   nas 5 categorias (Rotina/Retorno/Pré-op/Urgência/Pós-op). Sem isso, NÃO
+   ofertar slot. Esses 3 dados alimentam `selecionar_agrupador()` → preenche
+   `N.EXAMES` → pipeline solicita autorização ao convênio antes da consulta.
+   (Seção 23 do `_MASTER_INSTRUCTION.md`.)
+8. **Auditoria pós-consulta é silenciosa para o paciente** — pipeline compara
+   `N.EXAMES` (planejado) vs Medware (realizado). Diferenças geram
+   `N.AGRUPAMENTO ALTERADO=true` + tarefa humana de reabrir autorização. Lia
+   não comenta a alteração com o paciente. (Seção 24 do
+   `_MASTER_INSTRUCTION.md`.)
 
 ---
 
@@ -296,13 +342,17 @@ Sessão 28/05/2026 acumulou 5+ erros do mesmo tipo. Padrão:
 Toda sessão Cowork futura, antes de mexer em código:
 
 1. Ler `CLAUDE.md` (esse arquivo) — automático
-2. `ls voice_agent/knowledge_base/` — ver artigos KB existentes
-3. `git log --oneline -20` — ver commits recentes
-4. `python -m pytest tests/ -v` — confirmar que estado atual passa testes
-5. `curl https://blink-agent.6prkfn.easypanel.host/health` — confirmar prod viva
+2. Ler o handoff mais recente: `HANDOFF_<DD-MM>_PARA_<DD-MM-AAAA>.md` no root
+3. `ls voice_agent/knowledge_base/` — ver artigos KB existentes
+4. `git log --oneline -20` — ver commits recentes
+5. `python -m pytest tests/ -v` — confirmar que estado atual passa testes
+6. `curl https://blink-agent.6prkfn.easypanel.host/health` — confirmar prod viva
 
 Só depois disso, começar trabalho. Sem isso = reincidência.
 
+**Handoff mais recente**: `HANDOFF_31-05_PARA_01-06-2026.md`.
+
 ---
 
-Última atualização: 29/05/2026 02:30 BRT
+Última atualização: 31/05/2026 — adicionadas regras 7 e 8 (trava convênio +
+auditoria pós-consulta) e novos itens em construção (auditoria pipeline).

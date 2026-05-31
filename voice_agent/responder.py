@@ -11,6 +11,7 @@ Arquitetura:
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import datetime, timedelta
 from typing import Optional
@@ -179,6 +180,75 @@ def _load_master_instruction() -> str:
     if path.is_file():
         return path.read_text(encoding="utf-8")
     return "Você é a Lia, assistente virtual da Blink Oftalmologia."
+
+
+def _prompt_caching_habilitado() -> bool:
+    """Anthropic prompt caching — economia 40-70% no system estático.
+
+    Default ON. Desligar com `ANTHROPIC_PROMPT_CACHING_DISABLED=1`
+    (kill switch para rollback rápido).
+    """
+    return os.environ.get("ANTHROPIC_PROMPT_CACHING_DISABLED") != "1"
+
+
+def _memoria_rag_habilitada() -> bool:
+    """RAG nível 1 — recupera lições da memória ativa por similaridade.
+
+    Default OFF. Ligar com `MEMORIA_RAG_ENABLED=1`. Quando off, a Lia
+    funciona exatamente como antes — zero risco.
+    """
+    return os.environ.get("MEMORIA_RAG_ENABLED") == "1"
+
+
+def _bloco_memoria_rag(mensagem_paciente: str) -> str:
+    """Recupera top-K trechos relevantes e formata pra injeção no prompt.
+
+    Limites de segurança (anti-sobrecarga):
+      - máximo de 3 trechos
+      - cada trecho cortado a 800 chars
+      - cutoff de similaridade (default 0.08) — se nada relevante, retorna ""
+      - falhas silenciosas: nunca quebra reply() em caso de erro.
+    """
+    if not _memoria_rag_habilitada():
+        return ""
+    if not mensagem_paciente or not mensagem_paciente.strip():
+        return ""
+    try:
+        # Import tardio — só carrega scikit-learn quando RAG está ativo.
+        from voice_agent import memoria_rag as _rag
+        trechos = _rag.recuperar_licoes_relevantes(mensagem_paciente, k=3)
+        return _rag.formatar_para_prompt(trechos)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("[RAG] Falha ao recuperar — seguindo sem memória: %s", exc)
+        return ""
+
+
+def _montar_system_para_anthropic(
+    bloco_estavel: str,
+    bloco_variavel: str,
+) -> list[dict] | str:
+    """Monta o `system` no formato Anthropic com cache_control.
+
+    - Cache ON  → lista de 2 blocos. Estável tem cache_control ephemeral
+      (5min TTL). Cache hit reduz 90% do custo do bloco estável.
+    - Cache OFF → string concatenada (compat com SDK antigo).
+
+    Bloco variável NUNCA é cacheado — muda por mensagem (today_brt,
+    caller_context, kb_block, RAG).
+    """
+    if not _prompt_caching_habilitado():
+        if bloco_variavel:
+            return bloco_estavel + bloco_variavel
+        return bloco_estavel
+
+    blocos: list[dict] = [{
+        "type": "text",
+        "text": bloco_estavel,
+        "cache_control": {"type": "ephemeral"},
+    }]
+    if bloco_variavel:
+        blocos.append({"type": "text", "text": bloco_variavel})
+    return blocos
 
 
 # Palavras/contextos que exigem Sonnet (mais inteligente, mais caro)
@@ -965,8 +1035,16 @@ class Responder:
         # "terça-feira, 03/06" e "terça-feira, 10/06" — ambas QUARTAS-feiras.
         # Solução: a janela volta a ser injetada — fonte de verdade do
         # calendário com dia da semana correto ao lado de cada data.
-        system_prompt = self._base_system_prompt + _today_brt_block()
-        system_prompt += _caller_context_block(caller_context)
+        # Separamos em DOIS blocos pro Anthropic prompt caching:
+        # - bloco ESTÁVEL: _base_system_prompt (MASTER_INSTRUCTION imutável).
+        #   Esse bloco é cacheado (5min TTL ephemeral) → reduz 90% custo
+        #   em mensagens subsequentes dentro de 5 min.
+        # - bloco VARIÁVEL: muda por chamada (today_brt, caller_context,
+        #   kb_block dinâmico, RAG da memória). NÃO entra no cache.
+        bloco_estavel = self._base_system_prompt
+
+        bloco_variavel = _today_brt_block()
+        bloco_variavel += _caller_context_block(caller_context)
         # FIX 30/05/2026: _build_janela_agenda() era chamada aqui mas a
         # FUNÇÃO NUNCA FOI DEFINIDA no arquivo (foi removida sem remover a
         # chamada, ou o commit task #20 esqueceu de adicionar). Resultado:
@@ -978,7 +1056,7 @@ class Responder:
         # Se a janela de agenda for re-introduzida no futuro, definir a
         # função PRIMEIRO e adicionar pytest cobrindo o caminho.
         if kb_block:
-            system_prompt += (
+            bloco_variavel += (
                 "\n\n================================================================"
                 "\nCONHECIMENTO BLINK RELEVANTE PARA ESTA CONVERSA"
                 "\n================================================================"
@@ -987,6 +1065,15 @@ class Responder:
                 "\nFIM DO CONHECIMENTO. APLIQUE COM AS REGRAS DA INSTRUÇÃO MESTRA ACIMA."
                 "\n================================================================"
             )
+
+        # RAG nível 1 (task #85) — só injeta se MEMORIA_RAG_ENABLED=1.
+        # Anti-sobrecarga: máx 3 trechos × 800 chars = ~2.4k tokens extras.
+        # Falha silenciosa: erro no RAG não bloqueia reply.
+        rag_bloco = _bloco_memoria_rag(user_text)
+        if rag_bloco:
+            bloco_variavel += "\n\n" + rag_bloco
+
+        system_field = _montar_system_para_anthropic(bloco_estavel, bloco_variavel)
 
         # 3. Monta histórico no formato Anthropic (sem system, só user/assistant)
         history = self._convos.get(conversation_key)
@@ -1001,7 +1088,7 @@ class Responder:
         response = self._client.messages.create(
             model=model,
             max_tokens=600,
-            system=system_prompt,
+            system=system_field,
             messages=messages,
             temperature=0.3,  # baixa pra seguir as regras estritas da Blink
         )

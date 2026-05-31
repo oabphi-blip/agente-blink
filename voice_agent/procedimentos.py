@@ -1,8 +1,9 @@
 """Agrupadores de procedimentos por faixa etária e motivo da consulta.
 
-Conceito definido pela Blink em 30/05/2026: secretaria escolhe UM agrupador
-em vez de selecionar exame por exame. Reduz tempo operacional e evita
-esquecimento de exames obrigatórios do protocolo.
+REGRA DE NEGÓCIO BLINK (definida 30/05/2026):
+  A clínica SÓ FAZ consulta + exame completo. Não existe "só consulta
+  avulsa". Logo, TODO agendamento usa exatamente UM dos 4 agrupadores —
+  sem opção "Personalizado", sem fallback, sem exceção.
 
 Os 4 agrupadores combinam dois eixos:
 
@@ -14,7 +15,8 @@ Os 4 agrupadores combinam dois eixos:
 Cada agrupador é uma lista de codProcedimento Medware. Quando a Lia grava
 o agendamento, ela seleciona automaticamente o agrupador baseado em:
   - Idade do paciente (calculada a partir de data_nascimento)
-  - Motivo da consulta (extraído pelo Haiku: "rotina" vs "urgência")
+  - Tipo de motivo (enum "1.TIPO MOTIVO" no Kommo, preferencial)
+  - OU motivo livre (extraído pelo Haiku: "rotina" vs "urgência")
 """
 from __future__ import annotations
 
@@ -108,6 +110,20 @@ AGRUPADORES: dict[str, list[int]] = {
     "AGRUPADOR_3_CRIANCA_ROTINA": AGRUPADOR_CRIANCA_ROTINA,
     "AGRUPADOR_4_CRIANCA_URGENCIA": AGRUPADOR_CRIANCA_URGENCIA,
 }
+
+# Mapeamento agrupador → label exato do enum no Kommo "N.EXAMES"
+# (usado pelo kommo.update_lead_fields pra preencher os campos novos
+# criados em 31/05/2026).
+AGRUPADOR_KOMMO_LABEL: dict[str, str] = {
+    "AGRUPADOR_1_ADULTO_ROTINA": "Agrupa1-Adulto Rotina (9 exames)",
+    "AGRUPADOR_2_ADULTO_EMERGENCIA": "Agrupa2-Adulto Emergência (6 exames)",
+    "AGRUPADOR_3_CRIANCA_ROTINA": "Agrupa3-Criança Rotina (6 exames)",
+    "AGRUPADOR_4_CRIANCA_URGENCIA": "Agrupa4-Criança Urgência(5 exames)",
+}
+
+# Label do enum "Personalizado" — quando atendente humano escolheu
+# manualmente, em vez da seleção automática pela Lia.
+AGRUPADOR_KOMMO_PERSONALIZADO = "Agrupa5-Personalizado (escolha manual)"
 
 
 # ============================================================

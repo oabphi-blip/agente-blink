@@ -207,6 +207,105 @@ FIELD_CPF_PACIENTES = {
     4: 1260548, 5: 1260422, 6: 1260424,
 }
 
+# ── Novos campos criados 31/05/2026 ──────────────────────────────
+# "N.MOTIVO" (multiselect) — Tipo de motivo da consulta padronizado
+# (substitui parcialmente o textarea livre 1.MOTIVO CONSULTA).
+# 5 opções: Rotina/Check-up, Retorno/Acompanhamento, Pré-operatório,
+# Emergência/Urgência, Pós-Operatório.
+# Lia preenche automático após classificar o motivo do paciente.
+FIELD_MOTIVO_TIPO_PACIENTES: dict[int, tuple[int, dict[str, int]]] = {
+    1: (1260719, {
+        "Rotina/Check-up": 926733,
+        "Retorno/Acompanhamento": 926735,
+        "Pré-operatório": 926737,
+        "Emergência/Urgência": 926739,
+        "Pós-Operatório": 926741,
+    }),
+    2: (1260723, {
+        "Rotina/Check-up": 926753,
+        "Retorno/Acompanhamento": 926755,
+        "Pré-operatório": 926757,
+        "Emergência/Urgência": 926759,
+        "Pós-Operatório": 926761,
+    }),
+    3: (1260727, {
+        "Rotina/Check-up": 926773,
+        "Retorno/Acompanhamento": 926775,
+        "Pré-operatório": 926777,
+        "Emergência/Urgência": 926779,
+        "Pós-Operatório": 926781,
+    }),
+    4: (1260731, {
+        "Rotina/Check-up": 926793,
+        "Retorno/Acompanhamento": 926795,
+        "Pré-operatório": 926797,
+        "Emergência/Urgência": 926799,
+        "Pós-Operatório": 926801,
+    }),
+    5: (1260735, {
+        "Rotina/Check-up": 926813,
+        "Retorno/Acompanhamento": 926815,
+        "Pré-operatório": 926817,
+        "Emergência/Urgência": 926819,
+        "Pós-Operatório": 926821,
+    }),
+    6: (1260739, {
+        "Rotina/Check-up": 926833,
+        "Retorno/Acompanhamento": 926835,
+        "Pré-operatório": 926837,
+        "Emergência/Urgência": 926839,
+        "Pós-Operatório": 926841,
+    }),
+}
+
+# "N.EXAMES" (select) — Agrupador de exames vinculado ao agendamento.
+# 5 opções: Agrupa1..Agrupa5 (4 automáticos + Personalizado manual).
+# Lia preenche automático via selecionar_agrupador() em procedimentos.py.
+FIELD_EXAMES_PACIENTES: dict[int, tuple[int, dict[str, int]]] = {
+    1: (1260721, {
+        "Agrupa1-Adulto Rotina (9 exames)": 926743,
+        "Agrupa2-Adulto Emergência (6 exames)": 926745,
+        "Agrupa3-Criança Rotina (6 exames)": 926747,
+        "Agrupa4-Criança Urgência(5 exames)": 926749,
+        "Agrupa5-Personalizado (escolha manual)": 926751,
+    }),
+    2: (1260725, {
+        "Agrupa1-Adulto Rotina (9 exames)": 926763,
+        "Agrupa2-Adulto Emergência (6 exames)": 926765,
+        "Agrupa3-Criança Rotina (6 exames)": 926767,
+        "Agrupa4-Criança Urgência(5 exames)": 926769,
+        "Agrupa5-Personalizado (escolha manual)": 926771,
+    }),
+    3: (1260729, {
+        "Agrupa1-Adulto Rotina (9 exames)": 926783,
+        "Agrupa2-Adulto Emergência (6 exames)": 926785,
+        "Agrupa3-Criança Rotina (6 exames)": 926787,
+        "Agrupa4-Criança Urgência(5 exames)": 926789,
+        "Agrupa5-Personalizado (escolha manual)": 926791,
+    }),
+    4: (1260733, {
+        "Agrupa1-Adulto Rotina (9 exames)": 926803,
+        "Agrupa2-Adulto Emergência (6 exames)": 926805,
+        "Agrupa3-Criança Rotina (6 exames)": 926807,
+        "Agrupa4-Criança Urgência(5 exames)": 926809,
+        "Agrupa5-Personalizado (escolha manual)": 926811,
+    }),
+    5: (1260737, {
+        "Agrupa1-Adulto Rotina (9 exames)": 926823,
+        "Agrupa2-Adulto Emergência (6 exames)": 926825,
+        "Agrupa3-Criança Rotina (6 exames)": 926827,
+        "Agrupa4-Criança Urgência(5 exames)": 926829,
+        "Agrupa5-Personalizado (escolha manual)": 926831,
+    }),
+    6: (1260741, {
+        "Agrupa1-Adulto Rotina (9 exames)": 926843,
+        "Agrupa2-Adulto Emergência (6 exames)": 926845,
+        "Agrupa3-Criança Rotina (6 exames)": 926847,
+        "Agrupa4-Criança Urgência(5 exames)": 926849,
+        "Agrupa5-Personalizado (escolha manual)": 926851,
+    }),
+}
+
 # Etapas do funil ATENDE em que o agente fica DESLIGADO — tratamento
 # conduzido por humanos ou contato que não é paciente (fornecedor).
 ST_AGENT_OFF = frozenset({
@@ -408,6 +507,20 @@ class KommoClient:
                          p.get("reason") or p.get("motivo"))
                 add_text(FIELD_CPF_PACIENTES[idx],
                          _digits(p.get("cpf")) or None)
+                # Novos campos N.MOTIVO (tipo enum) e N.EXAMES (agrupador)
+                # Lia preenche automático após selecionar_agrupador().
+                _motivo_field = FIELD_MOTIVO_TIPO_PACIENTES.get(idx)
+                if _motivo_field:
+                    add_select(
+                        _motivo_field,
+                        p.get("motivo_tipo") or p.get("tipo_motivo"),
+                    )
+                _exames_field = FIELD_EXAMES_PACIENTES.get(idx)
+                if _exames_field:
+                    add_select(
+                        _exames_field,
+                        p.get("agrupador_label") or p.get("agrupador"),
+                    )
             # nº de pacientes — rede de segurança se a extração não trouxe
             fields.setdefault("num_pacientes", str(min(len(pacientes), 10)))
         else:

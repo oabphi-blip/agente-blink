@@ -530,6 +530,16 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     except Exception as e:  # noqa: BLE001
                         log.warning("WA Cloud carimbo ATIVADO IA? (off): %s", e)
                 return
+        # Etapa A CLASSIFICAR (task #96): paciente respondeu → limpa marcador
+        # pra o cron classificar-tick não mover o lead.
+        try:
+            from voice_agent.classificar import limpar_aguardando_resposta
+            if caller_context:
+                lid = caller_context.get("lead_id")
+                if lid:
+                    limpar_aguardando_resposta(pipeline._redis, int(lid))
+        except Exception as e:  # noqa: BLE001
+            log.debug("classificar.limpar_aguardando_resposta: %s", e)
         # Follow-up pós-valor: o paciente interagiu → limpa o marcador.
         try:
             followup.clear_pending(pipeline._redis, convo_key)
@@ -2862,6 +2872,590 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "input_text": text,
             "note": "pipeline rodando em background — Lia responderá pelo "
                     "WhatsApp e postará nota no lead (se identificado).",
+        })
+
+    # ================================================================
+    # ETAPA A CLASSIFICAR — task #96
+    # ================================================================
+    @app.post("/admin/classificar-tick")
+    @app.get("/admin/classificar-tick")
+    def admin_classificar_tick(request: Request) -> JSONResponse:
+        """Cron: move leads que receberam renovação e não responderam.
+
+        Params:
+          - dry_run (default true) — não move, só lista.
+          - lead_id (opcional) — checar APENAS um lead específico.
+          - timeout_h (opcional) — override do default.
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        from voice_agent.classificar import (
+            REDIS_KEY_AGUARDA_FMT,
+            STATUS_A_CLASSIFICAR_ID,
+            TIMEOUT_CLASSIFICAR_HORAS,
+            mover_lead_para_classificar,
+        )
+        import time as _t
+
+        q = request.query_params
+        dry_run = (q.get("dry_run") or "true").lower() in ("1", "true", "yes")
+        try:
+            timeout_h = int(q.get("timeout_h") or TIMEOUT_CLASSIFICAR_HORAS)
+        except ValueError:
+            timeout_h = TIMEOUT_CLASSIFICAR_HORAS
+
+        redis_cli = getattr(pipeline, "_redis", None)
+        kommo_cli = getattr(pipeline, "kommo", None)
+        agora = _t.time()
+
+        if STATUS_A_CLASSIFICAR_ID is None:
+            return JSONResponse({
+                "ok": False,
+                "error": "KOMMO_STATUS_A_CLASSIFICAR_ID não configurado",
+                "hint": "Crie etapa 'A CLASSIFICAR' no Kommo e seta no Easypanel.",
+            }, status_code=501)
+
+        # Lead específico
+        lead_id_raw = q.get("lead_id")
+        if lead_id_raw:
+            try:
+                lead_id = int(lead_id_raw)
+            except ValueError:
+                return JSONResponse({"error": "lead_id inválido"}, status_code=400)
+            chave = REDIS_KEY_AGUARDA_FMT.format(lead_id=lead_id)
+            disparo_ts = None
+            if redis_cli is not None:
+                try:
+                    raw = redis_cli.get(chave)
+                    if raw:
+                        disparo_ts = float(raw)
+                except Exception:  # noqa: BLE001
+                    pass
+            r = mover_lead_para_classificar(
+                lead_id=lead_id,
+                disparo_renovacao_ts=disparo_ts,
+                ultima_resposta_paciente_ts=None,  # TODO: ler do Redis
+                kommo_client=None if dry_run else kommo_cli,
+                agora=agora, dry_run=dry_run,
+                timeout_horas=timeout_h,
+            )
+            return JSONResponse({"resultados": [r.__dict__]})
+
+        # Varredura em lote — scan keys
+        if redis_cli is None:
+            return JSONResponse({
+                "ok": False,
+                "error": "Redis ausente — varredura em lote indisponível",
+            }, status_code=503)
+
+        resultados = []
+        try:
+            cursor = 0
+            pattern = "blink:classificar:aguardando_resposta:*"
+            while True:
+                cursor, batch = redis_cli.scan(
+                    cursor=cursor, match=pattern, count=200,
+                )
+                for k in batch:
+                    key_str = k.decode() if isinstance(k, bytes) else k
+                    try:
+                        lead_id = int(key_str.rsplit(":", 1)[1])
+                    except (IndexError, ValueError):
+                        continue
+                    try:
+                        raw = redis_cli.get(key_str)
+                        disparo_ts = float(raw) if raw else None
+                    except Exception:  # noqa: BLE001
+                        disparo_ts = None
+                    r = mover_lead_para_classificar(
+                        lead_id=lead_id,
+                        disparo_renovacao_ts=disparo_ts,
+                        ultima_resposta_paciente_ts=None,
+                        kommo_client=None if dry_run else kommo_cli,
+                        agora=agora, dry_run=dry_run,
+                        timeout_horas=timeout_h,
+                    )
+                    if r.movido or r.razao == "timeout_excedido":
+                        resultados.append({
+                            "lead_id": r.lead_id, "movido": r.movido,
+                            "razao": r.razao, "horas": r.horas_passadas,
+                            "erro": r.erro,
+                        })
+                if cursor == 0:
+                    break
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({
+                "ok": False, "erro": str(exc)[:300],
+                "parciais": resultados,
+            })
+
+        return JSONResponse({
+            "ok": True, "dry_run": dry_run, "timeout_h": timeout_h,
+            "status_destino_id": STATUS_A_CLASSIFICAR_ID,
+            "total_candidatos": len(resultados),
+            "resultados": resultados,
+        })
+
+    # ================================================================
+    # DISPATCHER DE RENOVAÇÃO 24h — task #94
+    # Decide free-form vs template_1039 vs skip, dispara via wa_cloud.
+    # ================================================================
+    @app.post("/admin/renovacao-dispatch")
+    @app.get("/admin/renovacao-dispatch")
+    def admin_renovacao_dispatch(request: Request) -> JSONResponse:
+        """Dispara renovação para UM lead (snapshot via querystring).
+
+        Params obrigatórios:
+          - lead_id, telefone, nome_contato, status_id
+        Opcionais:
+          - horas_desde_paciente (float, default None → lead frio)
+          - ja_respondeu_na_vida (true/false, default false)
+          - dry_run (true/false, default true — segurança)
+          - forcar (true/false, ignora dedup Redis)
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        import time as _t
+        from voice_agent.renovacao_dispatcher import (
+            SnapshotLead, dispatch_renovacao,
+        )
+
+        q = request.query_params
+
+        def _bool(name, default=False):
+            v = (q.get(name) or "").lower()
+            if v in ("1", "true", "yes", "on"):
+                return True
+            if v in ("0", "false", "no", "off"):
+                return False
+            return default
+
+        try:
+            lead_id = int(q.get("lead_id") or 0)
+            status_id_raw = q.get("status_id")
+            status_id = int(status_id_raw) if status_id_raw else None
+        except ValueError:
+            return JSONResponse({"error": "lead_id/status_id inválidos"}, status_code=400)
+        telefone = q.get("telefone") or ""
+        nome_contato = q.get("nome_contato") or ""
+        horas_raw = q.get("horas_desde_paciente")
+        try:
+            horas = float(horas_raw) if horas_raw else None
+        except ValueError:
+            horas = None
+
+        if not lead_id or not telefone or not nome_contato:
+            return JSONResponse({
+                "error": "obrigatórios: lead_id, telefone, nome_contato",
+            }, status_code=400)
+
+        ultima_ts = (_t.time() - horas * 3600) if horas is not None else None
+        dry_run = _bool("dry_run", default=True)  # padrão seguro: dry
+        forcar = _bool("forcar", default=False)
+
+        snap = SnapshotLead(
+            lead_id=lead_id,
+            telefone_e164=telefone,
+            nome_contato=nome_contato,
+            status_id=status_id,
+            ultima_msg_paciente_ts=ultima_ts,
+            paciente_ja_respondeu_na_vida=_bool("ja_respondeu_na_vida"),
+        )
+
+        # Em dry_run, NÃO passa wa_client/redis/kommo (zero side-effect).
+        wa = None if dry_run else wa_cloud
+        redis_cli = None if dry_run else getattr(pipeline, "_redis", None)
+        kommo_writer = None if dry_run else getattr(pipeline, "kommo", None)
+
+        res = dispatch_renovacao(
+            snap,
+            wa_client=wa,
+            redis_client=redis_cli,
+            kommo_note_writer=kommo_writer,
+            agora=_t.time(),
+            dry_run=dry_run,
+            forcar_redispatch=forcar,
+        )
+        return JSONResponse(res.to_dict())
+
+    # ================================================================
+    # MENSAGEM DE RENOVAÇÃO DE JANELA 24h WhatsApp 8133 (task #87)
+    # ================================================================
+    @app.get("/admin/renovar-janela-preview")
+    def admin_renovar_janela_preview(request: Request) -> JSONResponse:
+        """Pré-visualiza a mensagem + elegibilidade (task #87+#88).
+
+        Query params:
+          - nome=<contato>                     (renderização)
+          - status_id=<int>                    (filtro etapa antes AGENDADO)
+          - horas_desde_paciente=<float>       (idade da última msg do paciente)
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        from voice_agent.mensagens_janela import (
+            elegivel_renovar_janela,
+            render_mensagem_renovar_janela,
+            validar_mensagem_renovacao,
+        )
+        import time as _t
+
+        nome = request.query_params.get("nome") or ""
+        msg = render_mensagem_renovar_janela(nome)
+        validacao = validar_mensagem_renovacao(msg)
+
+        elegibilidade = None
+        status_id_raw = request.query_params.get("status_id")
+        horas_raw = request.query_params.get("horas_desde_paciente")
+        if status_id_raw is not None or horas_raw is not None:
+            try:
+                status_id = int(status_id_raw) if status_id_raw else None
+            except ValueError:
+                status_id = None
+            try:
+                horas = float(horas_raw) if horas_raw else None
+            except ValueError:
+                horas = None
+            ultima_ts = (
+                _t.time() - horas * 3600 if horas is not None else None
+            )
+            elegibilidade = elegivel_renovar_janela(
+                status_id=status_id,
+                ultima_msg_paciente_ts=ultima_ts,
+                agora=_t.time(),
+            )
+
+        return JSONResponse({
+            "nome_contato": nome,
+            "mensagem": msg,
+            "tamanho_chars": len(msg),
+            "validacao": validacao,
+            "elegibilidade": elegibilidade,
+        })
+
+    # ================================================================
+    # MEMÓRIA ATIVA NÍVEL 1 — RAG TF-IDF (task #85)
+    # ================================================================
+    # Diagnóstico do índice e busca por similaridade contra
+    # lia-atendimento-blink/memoria/bugs-licoes/ + voice_agent/knowledge_base/
+    @app.get("/admin/rag-status")
+    def admin_rag_status(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        try:
+            from voice_agent import memoria_rag as _rag
+            return JSONResponse(_rag.diagnostico())
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"ok": False, "error": str(exc)[:300]})
+
+    @app.get("/admin/rag-query")
+    def admin_rag_query(request: Request) -> JSONResponse:
+        """Top-K trechos para uma consulta livre.
+
+        Query params: q=texto, k=int (default 3), tipo=licao|kb (opcional).
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        q = request.query_params.get("q") or ""
+        if not q.strip():
+            return JSONResponse({"error": "q obrigatório"}, status_code=400)
+        try:
+            from voice_agent import memoria_rag as _rag
+            k_raw = request.query_params.get("k") or "3"
+            try:
+                k = max(1, min(int(k_raw), 20))
+            except ValueError:
+                k = 3
+            tipo = request.query_params.get("tipo")
+            if tipo not in (None, "licao", "kb"):
+                return JSONResponse({"error": "tipo deve ser licao ou kb"}, status_code=400)
+            trechos = _rag.recuperar_licoes_relevantes(
+                q, k=k, filtrar_tipo=tipo,
+            )
+            return JSONResponse({
+                "query": q, "k": k, "filtrar_tipo": tipo,
+                "total_recuperado": len(trechos),
+                "trechos": [
+                    {
+                        "fonte": t.fonte, "titulo": t.titulo,
+                        "fonte_tipo": t.fonte_tipo,
+                        "similaridade": round(t.similaridade, 4),
+                        "preview": t.conteudo[:300],
+                    }
+                    for t in trechos
+                ],
+            })
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"error": str(exc)[:300]})
+
+    @app.post("/admin/rag-rebuild")
+    def admin_rag_rebuild(request: Request) -> JSONResponse:
+        """Força reconstrução do índice (depois de adicionar lições novas)."""
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        try:
+            from voice_agent import memoria_rag as _rag
+            _rag.limpar_cache()
+            idx = _rag.obter_indice()
+            return JSONResponse({"ok": True, "total_trechos": idx.total()})
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"ok": False, "error": str(exc)[:300]})
+
+    # ================================================================
+    # AUDITORIA PÓS-CONSULTA — task #82 (seções 24 e 25 do prompt)
+    # ================================================================
+    # Dispara comparação planejado vs realizado por paciente do lead,
+    # posta no Slack #auditoria-autorização e atualiza o Kommo.
+    def _auditoria_check_secret(request: Request) -> None:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+    @app.post("/admin/auditoria-tick")
+    @app.get("/admin/auditoria-tick")
+    async def admin_auditoria_tick(request: Request) -> JSONResponse:
+        """Roda a auditoria para UM lead específico.
+
+        Query:
+          - lead_id (obrigatório)
+          - dry_run=true (não posta Slack nem grava Kommo)
+        Body JSON (opcional, pra simular sem Medware real):
+          - pacientes: [{idx, nome, medico_nome, unidade, convenio,
+                         agrupador_planejado, planejado_codigos[],
+                         realizado_codigos[]}, ...]
+        """
+        _auditoria_check_secret(request)
+        import voice_agent.auditoria as _aud
+
+        lead_id_raw = request.query_params.get("lead_id")
+        if not lead_id_raw:
+            return JSONResponse({"error": "lead_id obrigatório"}, status_code=400)
+        try:
+            lead_id = int(lead_id_raw)
+        except ValueError:
+            return JSONResponse({"error": "lead_id inválido"}, status_code=400)
+        dry_run = (request.query_params.get("dry_run") or "").lower() in ("1", "true", "yes")
+
+        # 1) Snapshot dos pacientes:
+        pacientes: list[_aud.PacienteAuditoria] = []
+        body_pacientes = None
+        try:
+            body = await request.json()
+            body_pacientes = (body or {}).get("pacientes")
+        except Exception:  # noqa: BLE001
+            pass
+
+        if body_pacientes:
+            # Modo simulação — usa o que o caller mandou.
+            for p in body_pacientes:
+                pacientes.append(_aud.PacienteAuditoria(
+                    idx=int(p.get("idx", 1)),
+                    nome=str(p.get("nome", "?")),
+                    medico_nome=str(p.get("medico_nome", "?")),
+                    unidade=str(p.get("unidade", "?")),
+                    convenio=str(p.get("convenio", "?")),
+                    agrupador_planejado=str(p.get("agrupador_planejado", "?")),
+                    planejado_codigos=list(p.get("planejado_codigos") or []),
+                    realizado_codigos=list(p.get("realizado_codigos") or []),
+                    nomes_procedimentos=p.get("nomes_procedimentos") or {},
+                ))
+        else:
+            # Modo prod — pendente integração Kommo + Medware.
+            # TODO #82.2: ler N.PACIENTES + N.EXAMES + N.NOME + Medware.
+            return JSONResponse({
+                "status": "not_implemented",
+                "lead_id": lead_id,
+                "hint": (
+                    "Modo prod ainda não plugado em Kommo+Medware. "
+                    "Envie body JSON com `pacientes` pra rodar simulação."
+                ),
+            }, status_code=501)
+
+        # 2) Senders — dry_run desliga I/O real.
+        if dry_run:
+            slack_sender = lambda msg: {  # noqa: E731
+                "ok": True, "skipped": True, "ts": None,
+                "channel": _aud.SLACK_AUDITORIA_CHANNEL_ID,
+                "reason": "dry_run", "preview": msg,
+            }
+            kommo_writer = None
+        else:
+            slack_sender = _aud.enviar_slack_auditoria
+            def kommo_writer(lid, p_idx, enum_id, alterado):
+                if not pipeline.kommo or not enum_id:
+                    return {"ok": False, "skipped": True, "reason": "kommo ausente"}
+                try:
+                    fid_status = _aud.kommo_field_id(p_idx, "status")
+                    fid_alt = _aud.kommo_field_id(p_idx, "alterado")
+                    fields = []
+                    if fid_status:
+                        fields.append({"field_id": fid_status,
+                                       "values": [{"enum_id": enum_id}]})
+                    if fid_alt:
+                        fields.append({"field_id": fid_alt,
+                                       "values": [{"value": bool(alterado)}]})
+                    if not fields:
+                        return {"ok": False, "reason": "campos não mapeados"}
+                    # PATCH direto via kommo client.
+                    pipeline.kommo.update_lead_custom_fields(lid, fields)
+                    return {"ok": True}
+                except Exception as exc:  # noqa: BLE001
+                    return {"ok": False, "error": str(exc)[:300]}
+
+        # 3) Roda orquestrador.
+        kommo_url = (
+            f"https://univeja.kommo.com/leads/detail/{lead_id}"
+        )
+        resultados = _aud.processar_lead_realizado(
+            lead_id=lead_id, pacientes=pacientes, kommo_url=kommo_url,
+            slack_sender=slack_sender, kommo_writer=kommo_writer,
+        )
+
+        # 4) Serializa pra JSON.
+        out = []
+        for r in resultados:
+            out.append({
+                "paciente_idx": r.paciente_idx,
+                "status": r.status.value,
+                "coincide": r.comparacao.coincide,
+                "exames_a_mais": r.comparacao.exames_a_mais,
+                "exames_a_menos": r.comparacao.exames_a_menos,
+                "fonte_vazia": r.comparacao.fonte_vazia,
+                "razao_fonte_vazia": r.comparacao.razao_fonte_vazia,
+                "slack": r.slack,
+                "kommo": r.kommo,
+            })
+        return JSONResponse({
+            "lead_id": lead_id, "dry_run": dry_run,
+            "resultados": out,
+        })
+
+    @app.post("/admin/auditoria-confirma")
+    @app.get("/admin/auditoria-confirma")
+    def admin_auditoria_confirma(request: Request) -> JSONResponse:
+        """Registra a assinatura (secretaria ou médico) e avança status."""
+        _auditoria_check_secret(request)
+        import voice_agent.auditoria as _aud
+        q = request.query_params
+        try:
+            lead_id = int(q.get("lead_id") or 0)
+            paciente_idx = int(q.get("paciente_idx") or 0)
+        except ValueError:
+            return JSONResponse({"error": "lead_id/paciente_idx inválidos"}, status_code=400)
+        papel = q.get("papel") or ""
+        decisao = q.get("decisao") or "ok"
+        autor = q.get("autor") or "?"
+        status_atual_raw = q.get("status_atual") or "aguardando_secretaria"
+
+        try:
+            decisao_result = _aud.confirmar_assinatura(
+                lead_id=lead_id, paciente_idx=paciente_idx,
+                papel=papel, decisao=decisao, autor=autor,
+                status_atual=status_atual_raw,
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+        # Persiste no Kommo se possível.
+        kommo_resp = None
+        novo_status = decisao_result["novo_status"]
+        if pipeline.kommo:
+            try:
+                fid_status = _aud.kommo_field_id(paciente_idx, "status")
+                enum_id = _aud.kommo_status_enum_id(paciente_idx, novo_status)
+                campo_ass = decisao_result.get("campo_assinatura")
+                assinatura = decisao_result.get("assinatura")
+                fields = []
+                if fid_status and enum_id:
+                    fields.append({"field_id": fid_status,
+                                   "values": [{"enum_id": enum_id}]})
+                if campo_ass and assinatura:
+                    fid_ass = _aud.kommo_field_id(paciente_idx, campo_ass)
+                    if fid_ass:
+                        fields.append({"field_id": fid_ass,
+                                       "values": [{"value": assinatura}]})
+                if fields:
+                    pipeline.kommo.update_lead_custom_fields(lead_id, fields)
+                kommo_resp = {"ok": True, "campos_gravados": len(fields)}
+            except Exception as exc:  # noqa: BLE001
+                kommo_resp = {"ok": False, "error": str(exc)[:300]}
+
+        return JSONResponse({
+            "lead_id": lead_id,
+            "paciente_idx": paciente_idx,
+            "papel": papel,
+            "decisao": decisao,
+            "novo_status": novo_status.value if hasattr(novo_status, "value") else str(novo_status),
+            "campo_assinatura": decisao_result.get("campo_assinatura"),
+            "assinatura": decisao_result.get("assinatura"),
+            "criar_tarefa_humana": decisao_result.get("criar_tarefa_humana"),
+            "ja_assinado": decisao_result.get("ja_assinado", False),
+            "ciclo_fechado": decisao_result.get("ciclo_fechado", False),
+            "erro": decisao_result.get("erro"),
+            "kommo": kommo_resp,
+        })
+
+    @app.get("/admin/secretaria-auditoria")
+    def admin_secretaria_auditoria(request: Request) -> JSONResponse:
+        """Fila da secretaria (placeholder — task #82.3)."""
+        _auditoria_check_secret(request)
+        unidade = (request.query_params.get("unidade") or "").lower()
+        if unidade not in {"asa-norte", "aguas-claras", ""}:
+            return JSONResponse({"error": "unidade deve ser asa-norte ou aguas-claras"}, status_code=400)
+        return JSONResponse({
+            "unidade": unidade or "todas",
+            "fila": [],
+            "status": "stub",
+            "hint": "TODO #82.3: query Kommo por N.AUDITORIA STATUS=aguardando_secretaria filtrado por unidade.",
+        })
+
+    @app.get("/admin/medico-auditoria")
+    def admin_medico_auditoria(request: Request) -> JSONResponse:
+        """Fila do médico (placeholder — task #82.3)."""
+        _auditoria_check_secret(request)
+        medico = (request.query_params.get("medico") or "").lower()
+        if medico and medico not in {"karla", "fabricio", "katia"}:
+            return JSONResponse({"error": "medico deve ser karla, fabricio ou katia"}, status_code=400)
+        return JSONResponse({
+            "medico": medico or "todos",
+            "fila": [],
+            "status": "stub",
+            "hint": "TODO #82.3: query Kommo por N.AUDITORIA STATUS=aguardando_medico filtrado por médico.",
         })
 
     @app.post("/admin/whatsapp-subscribe-waba")
