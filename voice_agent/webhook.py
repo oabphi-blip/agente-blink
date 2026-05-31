@@ -3494,6 +3494,40 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": str(e)[:400]})
 
+    # ================================================================
+    # CRON INTERNO (task #105) — sobe workers em thread daemon.
+    # Liga apenas se BLINK_CRON_ENABLED=1. Idempotente.
+    # Hook de startup do FastAPI.
+    # ================================================================
+    @app.on_event("startup")
+    def _bootstrap_cron_interno() -> None:
+        try:
+            from voice_agent.cron_interno import iniciar_cron
+            res = iniciar_cron(pipeline)
+            log.info("[CRON BOOT] %s", res)
+        except Exception as e:  # noqa: BLE001
+            log.warning("[CRON BOOT] falha: %s", e)
+
+    @app.get("/admin/cron-status")
+    def admin_cron_status(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        from voice_agent.cron_interno import (
+            _enabled, _dry_run_default, _intervalo_classificar_seg,
+            _threads_iniciadas,
+        )
+        return JSONResponse({
+            "enabled": _enabled(),
+            "dry_run": _dry_run_default(),
+            "intervalo_classificar_seg": _intervalo_classificar_seg(),
+            "threads_ativas": [t.name for t in _threads_iniciadas if t.is_alive()],
+        })
+
     return app
 
 

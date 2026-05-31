@@ -245,7 +245,9 @@ class TestEndpointRenovarJanela:
         assert "Marcela" in body["mensagem"]
         assert "Souza" not in body["mensagem"]
         assert body["validacao"]["ok"] is True
-        assert body["tamanho_chars"] < 600
+        # Limite subido pra 700 chars em 31/05/2026 (mensagem com
+        # explicação completa da regra WhatsApp).
+        assert body["tamanho_chars"] < 700
 
     def test_preview_sem_nome(self, client):
         r = client.get("/admin/renovar-janela-preview")

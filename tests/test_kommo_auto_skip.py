@@ -91,7 +91,7 @@ class TestAutoSkipUmCampo:
                 "numero_telefone": "81331005",
                 "atendente": "Lia",
                 "pacientes": [{
-                    "nome": "João Carlos",
+                    "nome": "João Carlos Silva",
                     "birth_date_iso": "1973-05-14",
                     "reason": "Catarata",
                     "cpf": "12345678900",
@@ -114,7 +114,7 @@ class TestAutoSkipUmCampo:
         with patch.object(kommo_mod, "httpx") as mock_httpx:
             mock_httpx.Client = MagicMock(return_value=mock_client)
             fields = {
-                "name": "Teste",
+                "name": "Joao Silva Souza",
                 "unidade": "Águas Claras",
                 "atendente": "Lia",  # vai ser filtrado
             }
@@ -147,7 +147,7 @@ class TestAutoSkipMultiplosCampos:
         with patch.object(kommo_mod, "httpx") as mock_httpx:
             mock_httpx.Client = MagicMock(return_value=mock_client)
             fields = {
-                "name": "Teste",
+                "name": "Joao Silva Souza",
                 "convenio": "Não se aplica",
                 "unidade": "Águas Claras",
                 "medico": "Dr. Fabrício Freitas",
@@ -157,7 +157,7 @@ class TestAutoSkipMultiplosCampos:
                 "numero_telefone": "81331005",
                 "atendente": "Lia",
                 "pacientes": [{
-                    "nome": "Teste",
+                    "nome": "Paciente Auto Teste",
                     "birth_date_iso": "1973-05-14",
                     "reason": "Catarata",
                     "cpf": "12345678900",
@@ -182,7 +182,7 @@ class TestRetryGracefulFailure:
         mock_client.patch = mock_patch
         with patch.object(kommo_mod, "httpx") as mock_httpx:
             mock_httpx.Client = MagicMock(return_value=mock_client)
-            fields = {"name": "Teste"}
+            fields = {"name": "Joao Silva Souza"}
             ok = client.update_lead_fields(11111, fields)
         assert ok is False
         # Só 1 tentativa porque não conseguiu identificar campo pra remover
