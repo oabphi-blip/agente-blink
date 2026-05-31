@@ -166,12 +166,45 @@ def is_menor_de_3(perfil_kommo: str | None = None,
     return False
 
 
-def is_urgencia(motivo: str | None) -> bool:
-    """Decide se o motivo descrito é uma consulta de urgência/emergência.
+# Enums padronizados do novo campo "1.TIPO MOTIVO" no Kommo (a ser criado).
+# Quando preenchido, prevalece sobre detecção por palavra-chave.
+KOMMO_TIPO_MOTIVO_URGENCIA = {
+    "Emergência / Urgência",
+    "Emergencia / Urgencia",
+    "Emergência",
+    "Urgência",
+}
+KOMMO_TIPO_MOTIVO_ROTINA = {
+    "Rotina / Check-up",
+    "Rotina / Check up",
+    "Rotina",
+    "Check-up",
+    "Retorno / Acompanhamento",
+    "Acompanhamento",
+    "Pré-operatório",
+    "Pós-operatório",
+}
 
-    Match case-insensitive em palavras-chave conhecidas. Se nenhuma bater,
-    assume rotina (caso mais comum).
+
+def is_urgencia(motivo: str | None,
+                tipo_motivo_kommo: str | None = None) -> bool:
+    """Decide se a consulta é de urgência/emergência.
+
+    Prioridade:
+      1. `tipo_motivo_kommo` — enum do campo "1.TIPO MOTIVO" (preferido,
+         sem ambiguidade).
+      2. `motivo` — texto livre do campo "1.MOTIVO CONSULTA" — match em
+         palavras-chave conhecidas.
+
+    Se nenhuma fonte indica urgência, assume rotina (caso mais comum).
     """
+    if tipo_motivo_kommo:
+        clean = tipo_motivo_kommo.strip()
+        if clean in KOMMO_TIPO_MOTIVO_URGENCIA:
+            return True
+        if clean in KOMMO_TIPO_MOTIVO_ROTINA:
+            return False
+        # Enum desconhecido → cai pro fallback de palavra-chave
     if not motivo:
         return False
     m = motivo.lower()
@@ -183,6 +216,8 @@ def selecionar_agrupador(
     perfil_kommo: str | None = None,
     birth_date_iso: str | None = None,
     motivo: str | None = None,
+    tipo_motivo_kommo: str | None = None,
+    agrupador_manual_kommo: str | None = None,
     hoje: date | None = None,
 ) -> tuple[str, list[int]]:
     """Seleciona o agrupador correto baseado em idade + motivo.
@@ -204,8 +239,41 @@ def selecionar_agrupador(
         >>> nome
         'AGRUPADOR_2_ADULTO_EMERGENCIA'
     """
+    # 1) Override manual: se atendente humano escolheu agrupador no Kommo
+    #    (campo "1.AGRUPADOR EXAMES" a ser criado), respeita sem reavaliar.
+    if agrupador_manual_kommo:
+        clean = agrupador_manual_kommo.strip().lower()
+        if "adulto" in clean and "rotina" in clean:
+            return ("AGRUPADOR_1_ADULTO_ROTINA", AGRUPADOR_ADULTO_ROTINA)
+        if "adulto" in clean and (
+            "emerg" in clean or "urg" in clean
+        ):
+            return (
+                "AGRUPADOR_2_ADULTO_EMERGENCIA",
+                AGRUPADOR_ADULTO_EMERGENCIA,
+            )
+        if (
+            ("crianca" in clean or "criança" in clean or "bebê" in clean
+             or "bebe" in clean)
+            and "rotina" in clean
+        ):
+            return ("AGRUPADOR_3_CRIANCA_ROTINA", AGRUPADOR_CRIANCA_ROTINA)
+        if (
+            ("crianca" in clean or "criança" in clean or "bebê" in clean
+             or "bebe" in clean)
+            and (
+                "emerg" in clean or "urg" in clean
+            )
+        ):
+            return (
+                "AGRUPADOR_4_CRIANCA_URGENCIA",
+                AGRUPADOR_CRIANCA_URGENCIA,
+            )
+        # Manual desconhecido → cai pra escolha automática
+
+    # 2) Escolha automática: idade × motivo
     crianca = is_menor_de_3(perfil_kommo, birth_date_iso, hoje)
-    urgencia = is_urgencia(motivo)
+    urgencia = is_urgencia(motivo, tipo_motivo_kommo)
 
     if crianca and urgencia:
         return ("AGRUPADOR_4_CRIANCA_URGENCIA", AGRUPADOR_CRIANCA_URGENCIA)

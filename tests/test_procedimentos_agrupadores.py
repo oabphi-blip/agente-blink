@@ -188,5 +188,74 @@ class TestIsMenorDe3:
         assert is_menor_de_3("Acima de 50 anos") is False
 
 
+class TestTipoMotivoKommo:
+    """Quando o novo campo '1.TIPO MOTIVO' do Kommo está preenchido,
+    ele prevalece sobre detecção por palavra-chave (mais determinístico)."""
+
+    def test_tipo_motivo_urgencia_explicita(self):
+        nome, _ = selecionar_agrupador(
+            perfil_kommo="Adulto de 19 a 49",
+            tipo_motivo_kommo="Emergência / Urgência",
+            motivo="só uma consulta rápida",  # texto livre diz rotina
+        )
+        # tipo_motivo do Kommo ganha — emergência
+        assert nome == "AGRUPADOR_2_ADULTO_EMERGENCIA"
+
+    def test_tipo_motivo_rotina_explicita(self):
+        nome, _ = selecionar_agrupador(
+            perfil_kommo="Adulto de 19 a 49",
+            tipo_motivo_kommo="Rotina / Check-up",
+            motivo="tá com dor",  # texto sugere urgência
+        )
+        # tipo_motivo do Kommo ganha — rotina
+        assert nome == "AGRUPADOR_1_ADULTO_ROTINA"
+
+    def test_tipo_motivo_acompanhamento_e_rotina(self):
+        nome, _ = selecionar_agrupador(
+            perfil_kommo="Acima de 50 anos",
+            tipo_motivo_kommo="Retorno / Acompanhamento",
+        )
+        assert nome == "AGRUPADOR_1_ADULTO_ROTINA"
+
+    def test_tipo_motivo_desconhecido_cai_no_texto_livre(self):
+        nome, _ = selecionar_agrupador(
+            perfil_kommo="Adulto de 19 a 49",
+            tipo_motivo_kommo="Categoria que ainda não existe",
+            motivo="dor forte urgente",
+        )
+        # Como enum não bate, usa texto livre → urgência
+        assert nome == "AGRUPADOR_2_ADULTO_EMERGENCIA"
+
+
+class TestAgrupadorManualKommo:
+    """Atendente humano pode sobrescrever no campo '1.AGRUPADOR EXAMES'."""
+
+    def test_manual_adulto_rotina(self):
+        nome, _ = selecionar_agrupador(
+            perfil_kommo="Bebê de 0 a 2 anos",  # bebê
+            motivo="urgência absoluta",         # urgência
+            # Mas atendente forçou:
+            agrupador_manual_kommo="Agrupador 1 — Adulto Rotina (9 exames)",
+        )
+        assert nome == "AGRUPADOR_1_ADULTO_ROTINA"
+
+    def test_manual_crianca_urgencia(self):
+        nome, _ = selecionar_agrupador(
+            perfil_kommo="Acima de 50 anos",
+            motivo="rotina",
+            agrupador_manual_kommo="Agrupador 4 — Criança Urgência",
+        )
+        assert nome == "AGRUPADOR_4_CRIANCA_URGENCIA"
+
+    def test_manual_desconhecido_cai_automatica(self):
+        nome, _ = selecionar_agrupador(
+            perfil_kommo="Adulto de 19 a 49",
+            motivo="rotina",
+            agrupador_manual_kommo="Personalizado",
+        )
+        # Manual não bate → escolha automática vira rotina adulto
+        assert nome == "AGRUPADOR_1_ADULTO_ROTINA"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
