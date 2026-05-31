@@ -88,22 +88,33 @@ def _primeiro_nome(nome_contato: str | None) -> str:
 
 
 def render_mensagem_renovar_janela(nome_contato: str | None) -> str:
-    """Mensagem curta de renovação de janela 24h.
+    """Mensagem de renovação de janela 24h — clareza total (taska Fábio 31/05).
 
     Personaliza com primeiro nome do contato. Se sem nome, usa saudação
     neutra ("Olá!").
+
+    Explica:
+      - por que é necessário (regra do WhatsApp Business — 24h)
+      - o que o paciente precisa fazer (qualquer mensagem, "oi" basta)
+      - o ciclo (vai se repetir a cada 24h até concluirmos o agendamento)
+      - a opção de adiar (sem pressão)
     """
     primeiro = _primeiro_nome(nome_contato)
     saudacao = f"Olá, {primeiro}!" if primeiro else "Olá!"
 
     return (
         f"{saudacao} Aqui é a Lia, da Blink Oftalmologia 👋\n\n"
-        f"Sua conversa por aqui está há quase 24 horas em pausa. "
-        f"Pra eu continuar te ajudando sem interrupção, "
-        f"me envia um \"oi\" — qualquer mensagem reabre nosso atendimento "
-        f"por mais 24h, e seguimos assim até concluirmos seu agendamento.\n\n"
-        f"Se preferir retomar em outro momento, é só me avisar — fico "
-        f"disponível pra continuar quando você quiser."
+        f"Nossa conversa por aqui está perto de completar 24 horas em "
+        f"pausa. Pelas regras do WhatsApp, depois desse tempo eu fico "
+        f"impedida de continuar te respondendo de forma aberta — então, "
+        f"pra eu seguir te ajudando até concluirmos seu agendamento, "
+        f"preciso que você me mande qualquer mensagem (um \"oi\" já "
+        f"basta).\n\n"
+        f"Cada mensagem sua reabre nosso atendimento por mais 24 horas. "
+        f"Vou enviar esse lembrete novamente a cada renovação, até "
+        f"fecharmos seu agendamento.\n\n"
+        f"Se preferir retomar em outro momento — quando estiver mais "
+        f"confortável pra agendar — é só me avisar que eu fico no aguardo."
     )
 
 

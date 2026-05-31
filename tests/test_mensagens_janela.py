@@ -98,11 +98,13 @@ class TestRenderMensagem:
         for proibido in ("💙", "❤️", "😊", "🧸", "👁️", "🩺"):
             assert proibido not in msg, f"emoji proibido: {proibido}"
 
-    def test_concisa_max_600_chars(self):
-        # Ping 24h precisa ser curto (~ 600 chars). Limite global do
-        # validador é 900 pra acomodar D-1 do ciclo.
+    def test_concisa_max_700_chars(self):
+        # Ping 24h precisa ser curto. Subido de 600→700 chars em 31/05/2026
+        # pra acomodar explicação completa (regra WhatsApp + ciclo de
+        # renovação + opção de adiar). Pedido Fábio: clareza > brevidade.
+        # Limite global do validador é 900 pra acomodar D-1 do ciclo.
         msg = render_mensagem_renovar_janela("Ana Carolina Almeida Souza")
-        assert len(msg) < 600, f"ping 24h com {len(msg)} chars — longo demais"
+        assert len(msg) < 700, f"ping 24h com {len(msg)} chars — longo demais"
 
 
 class TestVocabularioVetado:
