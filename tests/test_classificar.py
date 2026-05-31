@@ -162,8 +162,9 @@ class TestMoverLead:
         assert r.razao == "dry_run"
         assert k.calls == []
 
-    def test_sem_status_destino_devolve_erro(self):
-        # Quando KOMMO_STATUS_A_CLASSIFICAR_ID não está setado.
+    def test_sem_status_destino_usa_hardcode_default(self):
+        # Após fix 31/05/2026: STATUS_A_CLASSIFICAR_ID tem default 106919911
+        # (etapa "0-a classificar" criada pelo Fábio). Easypanel descarta env.
         k = FakeKommo()
         r = mover_lead_para_classificar(
             lead_id=1,
@@ -171,8 +172,12 @@ class TestMoverLead:
             ultima_resposta_paciente_ts=None,
             kommo_client=k, agora=AGORA, status_destino_id=None,
         )
-        assert r.movido is False
-        assert "KOMMO_STATUS_A_CLASSIFICAR_ID" in r.erro
+        # Quando status_destino_id=None, módulo usa STATUS_A_CLASSIFICAR_ID
+        # (snapshot inicial). Como hardcode é 106919911, move com sucesso.
+        assert r.movido is True
+        assert r.status_id_destino == 106919911
+        assert len(k.calls) == 1
+        assert k.calls[0]["status_id"] == 106919911
 
     def test_falha_kommo_nao_quebra(self):
         k = FakeKommo(fail=True)
