@@ -534,6 +534,39 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
         except Exception:  # noqa: BLE001
             pre_agenda_block = ""
 
+    # Bloco TRAVA MÉDICO/UNIDADE (origem lead Diones 23742328 — 01/06/2026).
+    # Caso: ctx tinha 'Médico: Dra. Karla Delalibera' mas Lia ofereceu
+    # slots de Fabricio. Bloco explícito + regex pós-geração impedem.
+    trava_medico = ""
+    if known.get("medico") or known.get("unidade"):
+        partes = []
+        if known.get("medico"):
+            partes.append(f"MÉDICO: **{known['medico']}** (NÃO trocar)")
+        if known.get("unidade"):
+            partes.append(f"UNIDADE: **{known['unidade']}** (NÃO trocar)")
+        if known.get("dia_turno"):
+            partes.append(f"PREFERÊNCIA dia/turno: **{known['dia_turno']}** (respeitar)")
+        trava_medico = (
+            "\n\n----------------------------------------------------------------"
+            "\nTRAVA MÉDICO/UNIDADE — FONTE DE VERDADE"
+            "\n----------------------------------------------------------------"
+            "\n🚨 ESTES VALORES JÁ ESTÃO REGISTRADOS PARA ESTE PACIENTE:"
+            "\n  • " + "\n  • ".join(partes)
+            + "\n"
+            "\n⚠️ PROIBIDO oferecer slot de OUTRO médico, OUTRA unidade,"
+            "\nou ignorar a preferência de dia/turno acima."
+            "\nSe a AGENDA REAL injetada abaixo trouxer slots de outro médico,"
+            "\nFILTRE manualmente e ofereça SÓ os do médico acima."
+            "\nSe NÃO houver slot do médico correto na lista, diga ao paciente"
+            "\nhonestamente: 'No momento não tenho horários de {médico} disponíveis"
+            "\nem {unidade} na sua preferência — me dá 2 minutos pra reconsultar"
+            "\nas datas e turnos completos.' (Não invente dias da semana)."
+            "\n"
+            "\n❌ PROIBIDO inventar dias fixos de atendimento (ex: 'Karla atende"
+            "\nterças e quintas') — a fonte é APENAS a AGENDA REAL abaixo."
+            "\n----------------------------------------------------------------"
+        )
+
     return (
         "\n\n================================================================"
         "\nONBOARDING — CONTATO JÁ CONHECIDO PELO CRM"
@@ -542,6 +575,7 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
         "\nO CRM já tem estes dados deste contato:"
         f"\n{dados}"
         f"{alerta}"
+        f"{trava_medico}"
         "\n"
         "\nREGRA: É PROIBIDO reperguntar qualquer dado já listado acima. Trate-os"
         "\ncomo confirmados e avance direto para a próxima etapa pendente do"
@@ -866,6 +900,53 @@ def _viola_afirmacao_gravacao(text: str) -> bool:
 
 
 # ------------------------------------------------------------------
+# Filtro MÉDICO TROCADO — origem lead Diones 23742328 (01/06/2026)
+# ------------------------------------------------------------------
+# Bug: ctx tinha 'Médico: Dra. Karla Delalibera' mas Lia ofereceu
+# slots com Dr. Fabrício Freitas. Padrão clássico de alucinação:
+# Medware retornou slots de outro médico e Lia ofereceu sem cruzar
+# com o que está no ONBOARDING.
+#
+# Detecção: se ctx.known.medico contém "Karla" mas resposta menciona
+# "Fabricio" como médico atendente, é violação. (Vice-versa também.)
+_RE_KARLA_NA_RESPOSTA = re.compile(
+    r"\b(?:dra?\.?\s+)?karla\b", re.IGNORECASE,
+)
+_RE_FABRICIO_NA_RESPOSTA = re.compile(
+    r"\b(?:dr\.?\s+)?fabr[íi]cio\b", re.IGNORECASE,
+)
+
+
+def _viola_medico_trocado(
+    text: str, ctx: Optional[dict] = None,
+) -> Optional[str]:
+    """True se Lia ofereceu/mencionou médico diferente do ONBOARDING.
+
+    Retorna o motivo ('ctx=karla mas resposta=fabricio' etc) ou None.
+    """
+    if not text or not ctx:
+        return None
+    known = (ctx or {}).get("known") or {}
+    medico_ctx = (known.get("medico") or "").lower()
+    if not medico_ctx:
+        return None
+    tem_karla_resp = bool(_RE_KARLA_NA_RESPOSTA.search(text))
+    tem_fabr_resp = bool(_RE_FABRICIO_NA_RESPOSTA.search(text))
+    if "karla" in medico_ctx and tem_fabr_resp and not tem_karla_resp:
+        return "ctx=karla mas resposta menciona fabricio"
+    if "fabr" in medico_ctx and tem_karla_resp and not tem_fabr_resp:
+        return "ctx=fabricio mas resposta menciona karla"
+    return None
+
+
+_MEDICO_TROCADO_FALLBACK = (
+    "Deixa eu reconferir aqui qual médico você tinha preferência. "
+    "Pode me confirmar o nome do médico que você quer atender? Assim "
+    "eu te trago os horários certos."
+)
+
+
+# ------------------------------------------------------------------
 # Filtro PROMESSA DE RETORNO HUMANO — origem lead 24053159 (31/05/2026)
 # ------------------------------------------------------------------
 # Bug: Juliene escolheu Terça/manhã/meio. Lia recebeu ctx["agenda"]
@@ -965,6 +1046,16 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             "Texto bloqueado: %r", text[:200],
         )
         return _AFIRMACAO_GRAVACAO_FALLBACK
+
+    # 0c-bis. MÉDICO TROCADO (lead 23742328 Diones, 01/06/2026)
+    # Detecta se Lia ofereceu/mencionou médico diferente do ONBOARDING.
+    motivo_med = _viola_medico_trocado(text, ctx)
+    if motivo_med:
+        log.error(
+            "[FILTRO] MEDICO TROCADO bloqueado — %s. Texto: %r",
+            motivo_med, text[:200],
+        )
+        return _MEDICO_TROCADO_FALLBACK
 
     # 0d. PROMESSA RETORNO HUMANO (lead 24053159 Juliene, 31/05/2026)
     # Lia inventou "vou registrar preferência → equipe finaliza → retorno

@@ -362,9 +362,10 @@ ST_NAMES = {
 # Etapas que significam que o lead JÁ TEM consulta marcada ou realizada —
 # a conversa é confirmação/dúvida, NUNCA um novo agendamento do zero.
 ST_JA_AGENDADO = frozenset({
-    101507507,  # 4-AGENDADO
-    101109455,  # 5-CONFIRMAR OU CONFIRMADO
-    91486864,   # 6-REALIZADO CONSULTA
+    101507507,  # 4-AGENDADO / 5-AGENDADO (renumeração 31/05/2026)
+    101109455,  # 5-CONFIRMAR OU CONFIRMADO / 6-CONFIRMAR
+    106653499,  # 7.CONFIRMADO (adicionado 01/06/2026, bug Diones 23742328)
+    91486864,   # 6-REALIZADO CONSULTA / 8-REALIZADO CONSULTA
     106157327,  # 10-PRÓXIMA CONSULTA
 })
 
