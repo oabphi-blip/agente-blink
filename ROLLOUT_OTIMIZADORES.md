@@ -123,3 +123,40 @@ LIA_TOOLS_ENABLED=0  # Easypanel env
 3. Em 24h, decidir se vira `LIA_TOOLS_ENABLED=1`
 4. Catalogar novos bugs em `lia-atendimento-blink/memoria/bugs-licoes/`
 5. Adicionar cenário smoke a cada bug novo (`smoke_continuous.py::CENARIOS_CORE`)
+
+---
+
+## 8. Ativar ponte Slack → auditoria (task #82 + #131, commit 911a833)
+
+Os endpoints e parser já estão deployados. Pra ligar o fluxo real, faltam 3 envs no Easypanel + configuração no app Slack.
+
+### 8.1 No Easypanel → Ambiente
+
+```
+SLACK_BOT_TOKEN_AUDITORIA=xoxb-...     # bot OAuth do app
+SLACK_AUDIT_MAPPING_JSON={"U_id_sec_AN":"sec:asa-norte:Maria Santos","U_id_sec_AC":"sec:aguas-claras:Joana","U_id_karla":"med:karla:Doutora Karla Delalíbera","U_id_fabricio":"med:fabricio:Doutor Fabrício Freitas"}
+SLACK_VERIFICATION_TOKEN=...           # opcional (legacy)
+```
+
+Salvar + Implantar.
+
+### 8.2 No app Slack (api.slack.com/apps → seu app)
+
+**Bot Token Scopes:** `channels:history`, `reactions:read`, `chat:write` (já tinha pra postar).
+
+**Event Subscriptions:**
+1. Habilita Events
+2. Request URL: `https://blink-agent.6prkfn.easypanel.host/admin/slack-event`
+3. Subscribe to bot events: `reaction_added`
+4. Reinstall app no workspace pra aplicar scopes novos
+
+### 8.3 Testar fim-a-fim
+
+1. `POST /admin/auditoria-tick?lead_id=...&dry_run=false` (com lead que tem discrepância) → bot posta no canal `#auditoria-autorização`
+2. Secretária reage `:white_check_mark:` → Kommo atualiza `N.AUDITORIA STATUS = aguardando_medico` + `N.AUDITORIA ASSINATURA SEC = Maria — DD/MM/YYYY HH:MM`
+3. Médico reage `:white_check_mark:` → status vira `fechada` + grava `N.AUDITORIA ASSINATURA MED = Doutora Karla — DD/MM/YYYY HH:MM`
+4. Só agora financeiro cobra convênio
+
+### 8.4 Como descobrir os user_id Slack
+
+Slack App → People → clica na pessoa → "More" → "Copy member ID" (formato `U01ABC...`). Ou via `users.list` API.

@@ -189,6 +189,34 @@ Lição: `lia-atendimento-blink/memoria/bugs-licoes/lia-inventou-retorno-humano-
 
 ---
 
+## 9-C. Ponte Slack → assinatura de auditoria (task #82, commit 911a833)
+
+Implementada a ligação entre reaction `:white_check_mark:` no canal
+`#auditoria-autorização` (C0B83BK5SMN) e gravação `confirmar_assinatura`
+no Kommo. Antes os endpoints `/admin/auditoria-*` existiam mas faltava
+a ponte Slack → backend.
+
+| Componente | Local | Função |
+|---|---|---|
+| Parser de payload | `voice_agent/slack_auditoria.py::parsear_reaction_event` | Aceita só `event_callback` + `reaction_added` + `item.type=message` |
+| Mapping user→papel | `carregar_mapping_env()` lê `SLACK_AUDIT_MAPPING_JSON` | Formato `"U_id":"sec:asa-norte:Nome"` ou `"med:karla:Nome"` |
+| Extração lead/paciente | `extrair_lead_paciente(texto)` regex `Lead: \d+ · Paciente \d+` | Casa formato produzido por `montar_mensagem_slack` |
+| Processador end-to-end | `processar_evento_slack()` retorna `ResultadoProcessamento` | Filtra reaction + canal + user no mapping + busca msg original |
+| Endpoint webhook | `POST /admin/slack-event` em `voice_agent/webhook.py` | Handshake URL verify + chama parser + grava Kommo |
+
+Envs novas pra ativar (Easypanel → Ambiente):
+- `SLACK_BOT_TOKEN_AUDITORIA=xoxb-...` (necessário pra ler msgs via `conversations.history`)
+- `SLACK_AUDIT_MAPPING_JSON={"U01...":"sec:asa-norte:Maria",...}`
+- `SLACK_VERIFICATION_TOKEN` (opcional)
+- `SLACK_AUDITORIA_CHANNEL_ID` (default `C0B83BK5SMN`)
+- `SLACK_AUDITORIA_REACTION` (default `white_check_mark`)
+
+No Slack: Event Subscriptions → URL = `/admin/slack-event` → subscribe `reaction_added`. Scopes bot: `channels:history`, `reactions:read`, `chat:write`.
+
+Detalhes completos: `ROLLOUT_OTIMIZADORES.md` seção 8.
+
+---
+
 ## 10. Comandos úteis
 
 ```bash
