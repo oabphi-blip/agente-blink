@@ -339,6 +339,46 @@ class VoicePipeline:
                 model_used=model_used, articles_used=articles_used,
             )
 
+        # 4a) Áudios Fabricio (task #68) — detecta marcador [AUDIO:audio_id]
+        # na resposta, valida guardas (janela 24h, limite, preferência texto),
+        # envia texto SEM marcador + áudio em sequência. Falha silenciosa
+        # mantém só o texto. Toggle: AUDIOS_FABRICIO_ENABLED.
+        audio_id_pra_enviar: Optional[str] = None
+        try:
+            from voice_agent import audios_fabricio as _af
+            if _af.audios_habilitados():
+                _id = _af.detectar_marcador(answer)
+                if _id:
+                    # Pega last_inbound_ts do Redis ou caller_context
+                    _last_in = None
+                    try:
+                        if isinstance(caller_context, dict):
+                            _last_in = caller_context.get("last_inbound_ts")
+                    except Exception:  # noqa: BLE001
+                        pass
+                    _prefere_texto = bool(
+                        (caller_context or {}).get(
+                            "paciente_prefere_texto", False
+                        )
+                    )
+                    _guarda = _af.pode_enviar_audio(
+                        conversation_key,
+                        redis_client=getattr(self, "_redis", None),
+                        last_inbound_ts=_last_in,
+                        paciente_prefere_texto=_prefere_texto,
+                    )
+                    if _guarda.pode_enviar:
+                        audio_id_pra_enviar = _id
+                    else:
+                        log.info(
+                            "[AUDIO FABRICIO] %s bloqueado: %s",
+                            _id, _guarda.motivo,
+                        )
+                    # Sempre limpa o marcador antes do envio textual
+                    answer = _af.limpar_marcador(answer)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[AUDIO FABRICIO] detecção falhou: %s", exc)
+
         try:
             self.evolution.send_text(
                 number=reply_to_number,
@@ -352,6 +392,32 @@ class VoicePipeline:
                 model_used=model_used, articles_used=articles_used,
                 error=f"evolution: {e}",
             )
+
+        # 4a-bis) Envia áudio em sequência (depois do texto pra paciente
+        # ler primeiro a explicação). Se método send_audio não existir
+        # no client, degrada silenciosa.
+        if audio_id_pra_enviar:
+            try:
+                from voice_agent import audios_fabricio as _af2
+                url = _af2.url_audio(audio_id_pra_enviar)
+                send_audio = getattr(self.evolution, "send_audio", None)
+                if url and callable(send_audio):
+                    send_audio(number=reply_to_number, url=url)
+                    _af2.incrementar_contador(
+                        conversation_key,
+                        redis_client=getattr(self, "_redis", None),
+                    )
+                    log.info(
+                        "[AUDIO FABRICIO] %s enviado pra %s",
+                        audio_id_pra_enviar, reply_to_number,
+                    )
+                else:
+                    log.warning(
+                        "[AUDIO FABRICIO] send_audio indisponível ou url=%r",
+                        url,
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning("[AUDIO FABRICIO] envio áudio falhou: %s", e)
 
         # 4b) Follow-up: se a resposta apresentou o VALOR, arma o marcador
         # pós-valor (template). Caso contrário, arma o de PRIMEIRO CONTATO
