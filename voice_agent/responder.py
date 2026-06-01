@@ -1007,6 +1007,116 @@ _PROMETE_RETORNO_HUMANO_FALLBACK_SEM_AGENDA = (
 )
 
 
+# ------------------------------------------------------------------
+# Filtro OFERTA DE SLOT APÓS JÁ TER AGENDADO
+# Origem: lead 24060221 Esther Dias Guimarães (01/06/2026 17:39 BRT).
+# ------------------------------------------------------------------
+# Cenário: Esther já tinha consulta gravada (5-AGENDADO em 09/06 às
+# 18:30 com Karla, Águas Claras). Paciente enviou foto da carteirinha.
+# Handler de imagem do webhook gerou o user_text sintético:
+#     "[Paciente enviou imagem (...). Confirme o recebimento de forma
+#     calorosa, diga que a equipe vai conferir, e siga o atendimento
+#     normalmente.]"
+# O "siga o atendimento normalmente" foi interpretado pelo LLM como
+# permissão pra re-oferecer slots. Resposta produzida:
+#     "Recebi, obrigado! Nossa equipe vai conferir os documentos.
+#     Enquanto isso, deixa eu trazer os horários disponíveis para a
+#     Esther com a Dra. Karla em Águas Claras no início da noite.
+#     Me dá só mais um instante! ⏳"
+# A TRAVA "🚨 JÁ TEM CONSULTA MARCADA" estava injetada no prompt MAS
+# o LLM priorizou a instrução no user_text. Filtro pós-geração é a
+# defesa final.
+_OFERTA_POS_AGENDADO_PATTERNS = [
+    # "deixa eu trazer / buscar / consultar os horários"
+    re.compile(
+        r"(?:deixa\s+eu|vou)\s+(?:trazer|buscar|consultar|listar|"
+        r"verificar|olhar|mostrar)\s+(?:os?|a)\s+(?:hor[áa]rios?|agenda|"
+        r"op[çc][õo]es?|disponibilidad[es]?)",
+        re.IGNORECASE,
+    ),
+    # "horários disponíveis para / com a Dra"
+    re.compile(
+        r"hor[áa]rios?\s+dispon[íi]ve(?:l|is).{0,30}(?:para|pra|com)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    # "tenho essas opções com" (oferta de slots)
+    re.compile(
+        r"tenho\s+(?:essas|estas|as)?\s*(?:duas|2|tr[êe]s|3)?\s*op[çc][õo]es?",
+        re.IGNORECASE,
+    ),
+    # "vou consultar a agenda" (mesmo de _viola_oferta_agenda, mas
+    # aqui dispara independente de has_agenda — basta ja_agendado)
+    re.compile(
+        r"vou\s+(?:consultar|verificar|buscar|olhar)\s+(?:a|na)\s+agenda",
+        re.IGNORECASE,
+    ),
+    # "1️⃣ ... 2️⃣ ..." formatação de lista de slots
+    re.compile(r"1️⃣.{0,200}2️⃣", re.IGNORECASE | re.DOTALL),
+    # "quer agendar / posso agendar" (re-coleta)
+    re.compile(
+        r"(?:quer|gostaria|posso)\s+(?:de\s+)?agendar",
+        re.IGNORECASE,
+    ),
+    # Pergunta de coleta nova de preferência: "qual (dia|turno|período)
+    # você (prefere|gostaria|deseja)" ou "manhã ou tarde/noite"
+    re.compile(
+        r"qual\s+(?:dia|turno|per[íi]odo|hor[áa]rio).{0,40}"
+        r"(?:prefere|gostaria|deseja|escolhe|quer|prefer[êe]ncia)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"(?:manh[ãa]|tarde|noite|in[íi]cio\s+da\s+noite).{0,20}"
+        r"(?:ou|/)\s*(?:tarde|noite|manh[ãa])",
+        re.IGNORECASE,
+    ),
+]
+
+
+def _viola_oferta_apos_agendado(
+    text: str, ctx: Optional[dict] = None,
+) -> bool:
+    """True se Lia ofereceu/quis oferecer slot novo num lead JÁ AGENDADO.
+
+    Dispara SOMENTE quando ctx.ja_agendado=True (status_id em
+    ST_JA_AGENDADO OU 1.DIA CONSULTA no futuro). É independente do
+    has_agenda do `_viola_oferta_agenda` — aqui o problema não é fingir
+    consultar; é refazer triagem sobre lead já fechado.
+    """
+    if not text or not ctx:
+        return False
+    if not ctx.get("ja_agendado"):
+        return False
+    return any(p.search(text) for p in _OFERTA_POS_AGENDADO_PATTERNS)
+
+
+def _gerar_oferta_pos_agendado_fallback(ctx: Optional[dict]) -> str:
+    """Fallback informa data marcada (se conhecida) + agradece doc/contato."""
+    if not ctx:
+        ctx = {}
+    known = ctx.get("known") or {}
+    nome = known.get("nome_paciente") or ""
+    dia_iso = known.get("dia_consulta_iso")
+    data_humano = ""
+    if dia_iso:
+        try:
+            from datetime import datetime as _dt
+            _d = _dt.fromisoformat(dia_iso)
+            data_humano = _d.strftime("%d/%m às %H:%M")
+        except (ValueError, TypeError):
+            data_humano = ""
+    paciente_str = f" da {nome}" if nome else ""
+    if data_humano:
+        marcada = f" já está marcada para **{data_humano}**"
+    else:
+        marcada = " já está marcada (data no campo 1.DIA CONSULTA)"
+    return (
+        f"Recebi, obrigada! A consulta{paciente_str}{marcada}. "
+        "Nossa equipe vai conferir tudo. Se precisar **remarcar** ou "
+        "**cancelar**, é só me avisar — caso contrário, te espero "
+        "no dia marcado!"
+    )
+
+
 def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
 
@@ -1024,6 +1134,19 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
         return text
 
     has_agenda = bool((ctx or {}).get("agenda"))
+
+    # 0-pre. OFERTA APÓS JÁ AGENDADO (lead 24060221 Esther, 01/06/2026)
+    # Lead em 5-AGENDADO + paciente envia carteirinha → Lia volta a
+    # oferecer slot. Filtro pós-geração é a defesa final quando o LLM
+    # ignora a TRAVA "🚨 JÁ AGENDADO" do system prompt. Dispara antes
+    # de qualquer outro filtro porque, se vale aqui, vale logo.
+    if _viola_oferta_apos_agendado(text, ctx):
+        log.error(
+            "[FILTRO] OFERTA POS-AGENDADO bloqueada — Lia tentou oferecer "
+            "slot novo num lead já com consulta marcada. ja_agendado=True. "
+            "Texto: %r", text[:200],
+        )
+        return _gerar_oferta_pos_agendado_fallback(ctx)
 
     # 0. Fingiu consultar agenda — quando JÁ tem horários no contexto.
     # Esse bug deixa a Lia em loop de "deixa eu consultar..." sem nunca voltar.
