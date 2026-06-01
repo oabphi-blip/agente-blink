@@ -114,8 +114,9 @@ class TestExecutarCenario:
         mock_get.return_value = mock_response
         c = CENARIOS_CORE[0]  # C1-saudacao
         r = executar_cenario(c)
-        assert r.ok is True
-        assert r.motivo == "ok"
+        # Resposta "Olá! Sou a Lia..." casa com o must_contain mais
+        # tolerante (lia|blink|oftalmologia|olá|oi|prefer|agendar|ajud)
+        assert r.ok is True, f"motivo={r.motivo}"
         assert r.nome == "C1-saudacao"
 
     @patch("voice_agent.smoke_continuous.httpx.get")

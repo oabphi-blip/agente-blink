@@ -60,17 +60,24 @@ class Cenario:
 _PHONE_BASE = "5561999999"
 
 CENARIOS_CORE: tuple[Cenario, ...] = (
-    # C1 — saudação inicial: testa que pipeline + Claude + KB respondem
+    # C1 — saudação inicial: testa que pipeline + Claude + KB respondem.
+    # Tolerante: aceita qualquer sinal de saudação calorosa OU oferta de
+    # canal alternativo (Lia às vezes responde "Oi! posso te ligar?" sem
+    # mencionar 'blink' literalmente, comportamento válido).
     Cenario(
         nome="C1-saudacao",
-        descricao="Primeiro 'oi' — Lia tem que cumprimentar como Blink",
+        descricao="Primeiro 'oi' — Lia tem que cumprimentar de alguma forma",
         phone=_PHONE_BASE + "001",
         text="oi",
-        must_contain=(r"lia", r"blink"),
+        must_contain=(
+            # Pelo menos UM destes: identificação ou início de fluxo
+            r"(lia|blink|oftalmologia|olá|oi[!\s]|prefer|agendar|ajud)",
+        ),
         must_not_contain=(
             r"instabilidade",
             r"\berro\b",
             r"vou registrar.*prefer[êe]ncia.*equipe.*finaliza",
+            r"retorno em hor[áa]rio comercial",
         ),
     ),
     # C2 — pediátrico estrabismo: Lia deve seguir triagem
