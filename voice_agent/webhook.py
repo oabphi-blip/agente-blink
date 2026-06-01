@@ -3436,6 +3436,190 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "kommo": kommo_resp,
         })
 
+    # ----------------------------------------------------------------
+    # SLACK EVENTS API → assinatura de auditoria (task #82 + #131)
+    # POST /admin/slack-event
+    # ----------------------------------------------------------------
+    @app.post("/admin/slack-event")
+    async def admin_slack_event(request: Request) -> JSONResponse:
+        """Recebe POST do Slack Events API (subscription do app).
+
+        Trata 3 tipos de payload:
+          - url_verification (handshake inicial Slack) → echo challenge
+          - reaction_added (white_check_mark no canal de auditoria) →
+            converte em chamada a confirmar_assinatura
+          - outros → ignorar silenciosamente
+        """
+        import os as _os
+        from voice_agent import slack_auditoria as _sa
+        import voice_agent.auditoria as _aud
+        import httpx as _httpx
+
+        # Parse JSON body
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse(
+                {"error": "json inválido"}, status_code=400,
+            )
+
+        # Handshake Slack — URL Verification
+        if payload.get("type") == "url_verification":
+            return JSONResponse({"challenge": payload.get("challenge", "")})
+
+        # (Opcional) verificação por Verification Token legacy
+        verification = _os.environ.get("SLACK_VERIFICATION_TOKEN") or ""
+        if verification:
+            got = payload.get("token") or ""
+            if got != verification:
+                return JSONResponse(
+                    {"error": "verification token inválido"},
+                    status_code=401,
+                )
+
+        # Buscador de mensagem original via Slack conversations.history
+        slack_bot_token = (
+            _os.environ.get("SLACK_BOT_TOKEN_AUDITORIA") or ""
+        ).strip()
+
+        def buscar_mensagem(channel_id: str, ts: str) -> str | None:
+            if not slack_bot_token:
+                return None
+            try:
+                with _httpx.Client(timeout=10.0) as cli:
+                    r = cli.get(
+                        "https://slack.com/api/conversations.history",
+                        params={
+                            "channel": channel_id,
+                            "latest": ts,
+                            "limit": 1,
+                            "inclusive": "true",
+                        },
+                        headers={
+                            "Authorization": f"Bearer {slack_bot_token}",
+                        },
+                    )
+                if r.status_code != 200:
+                    return None
+                data = r.json() or {}
+                if not data.get("ok"):
+                    return None
+                msgs = data.get("messages") or []
+                if not msgs:
+                    return None
+                return str(msgs[0].get("text") or "")
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "[SLACK-EVENT] buscar_mensagem falhou: %s", e,
+                )
+                return None
+
+        mapping = _sa.carregar_mapping_env()
+        canal_esperado = (
+            _os.environ.get("SLACK_AUDITORIA_CHANNEL_ID")
+            or "C0B83BK5SMN"
+        )
+        reaction = (
+            _os.environ.get("SLACK_AUDITORIA_REACTION")
+            or "white_check_mark"
+        )
+        resultado = _sa.processar_evento_slack(
+            payload,
+            mapping=mapping,
+            reaction_esperada=reaction,
+            canal_esperado=canal_esperado,
+            buscar_mensagem=buscar_mensagem,
+        )
+
+        log.info(
+            "[SLACK-EVENT] acao=%s motivo=%s user=%s lead=%s paciente=%s",
+            resultado.acao, resultado.motivo,
+            resultado.reaction_user_id,
+            resultado.lead_id, resultado.paciente_idx,
+        )
+
+        if resultado.acao != "assinar":
+            return JSONResponse({
+                "ok": True,
+                "acao": resultado.acao,
+                "motivo": resultado.motivo,
+            })
+
+        # Status atual lido do Kommo (papel:secretaria_*→inicial; medico_*→precisa
+        # estar em aguardando_medico). Pra simplificar, deixamos
+        # confirmar_assinatura inferir pelo papel + status default.
+        status_atual = "aguardando_secretaria"
+        if resultado.papel and resultado.papel.startswith("medico_"):
+            status_atual = "aguardando_medico"
+
+        try:
+            decisao = _aud.confirmar_assinatura(
+                lead_id=resultado.lead_id,
+                paciente_idx=resultado.paciente_idx,
+                papel=resultado.papel,
+                decisao="ok",
+                autor=resultado.autor or "?",
+                status_atual=status_atual,
+            )
+        except ValueError as exc:
+            return JSONResponse({
+                "ok": False, "error": str(exc),
+            }, status_code=400)
+
+        # Persiste no Kommo se possível (mesmo padrão de auditoria-confirma)
+        kommo_resp = None
+        novo_status = decisao["novo_status"]
+        if pipeline.kommo:
+            try:
+                fid_status = _aud.kommo_field_id(
+                    resultado.paciente_idx, "status",
+                )
+                enum_id = _aud.kommo_status_enum_id(
+                    resultado.paciente_idx, novo_status,
+                )
+                campo_ass = decisao.get("campo_assinatura")
+                assinatura = decisao.get("assinatura")
+                fields = []
+                if fid_status and enum_id:
+                    fields.append({
+                        "field_id": fid_status,
+                        "values": [{"enum_id": enum_id}],
+                    })
+                if campo_ass and assinatura:
+                    fid_ass = _aud.kommo_field_id(
+                        resultado.paciente_idx, campo_ass,
+                    )
+                    if fid_ass:
+                        fields.append({
+                            "field_id": fid_ass,
+                            "values": [{"value": assinatura}],
+                        })
+                if fields:
+                    pipeline.kommo.update_lead_custom_fields(
+                        resultado.lead_id, fields,
+                    )
+                kommo_resp = {
+                    "ok": True, "campos_gravados": len(fields),
+                }
+            except Exception as exc:  # noqa: BLE001
+                kommo_resp = {"ok": False, "error": str(exc)[:300]}
+
+        return JSONResponse({
+            "ok": True,
+            "acao": "assinar",
+            "lead_id": resultado.lead_id,
+            "paciente_idx": resultado.paciente_idx,
+            "papel": resultado.papel,
+            "autor": resultado.autor,
+            "novo_status": (
+                novo_status.value if hasattr(novo_status, "value")
+                else str(novo_status)
+            ),
+            "ja_assinado": decisao.get("ja_assinado", False),
+            "ciclo_fechado": decisao.get("ciclo_fechado", False),
+            "kommo": kommo_resp,
+        })
+
     @app.get("/admin/secretaria-auditoria")
     def admin_secretaria_auditoria(request: Request) -> JSONResponse:
         """Fila da secretaria (placeholder — task #82.3)."""
