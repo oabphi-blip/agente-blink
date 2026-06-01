@@ -208,8 +208,35 @@ class VoicePipeline:
                         len(slots), medico_param,
                         "ctx" if known.get("medico") else "default_karla",
                     )
+                else:
+                    # Lead em status AGENDAR/REAGENDAR com agenda vazia é
+                    # SINTOMA: Medware silenciou, JWT vencido, ou médico/unidade
+                    # erradamente mapeados. Origem: lead 24053159 Juliene
+                    # (31/05/2026) — Lia acabou inventando "vou registrar pra
+                    # equipe finalizar". ERROR pra Easypanel/Slack pegar.
+                    _status_id = (caller_context.get("status_id")
+                                  if isinstance(caller_context, dict) else None)
+                    _STATUS_AGENDAR_REAGENDAR = {
+                        102560495,  # 3-AGENDAR
+                        106184631,  # 4.REAGENDAR
+                    }
+                    if _status_id in _STATUS_AGENDAR_REAGENDAR:
+                        log.error(
+                            "[AGENDA VAZIA EM AGENDAR] lead=%s status=%s "
+                            "medico=%r unidade=%r → Lia vai cair no fallback "
+                            "AGENDA INDISPONÍVEL. Investigar Medware/cache.",
+                            caller_context.get("lead_id"), _status_id,
+                            medico_param, unidade_param,
+                        )
+                    else:
+                        log.info(
+                            "Medware: 0 horários para %s/%s (status=%s)",
+                            medico_param, unidade_param, _status_id,
+                        )
             except Exception as e:  # noqa: BLE001
-                log.warning("Medware horários falhou: %s", e)
+                # WARNING não basta — origem do bug Juliene foi silêncio
+                # silencioso. Subir pra ERROR.
+                log.error("Medware horários falhou: %s", e)
 
         # 2e) Gap 5: status real da gravação Medware (se houver) — pra Lia
         # poder responder com VERDADE quando paciente perguntar "gravou?".

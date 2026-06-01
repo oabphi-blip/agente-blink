@@ -32,6 +32,9 @@ from voice_agent.responder import (  # noqa: E402
     _viola_afirmacao_gravacao,
     _viola_cobranca_antes_slot,
     _viola_oferta_agenda,
+    _viola_promete_retorno_humano,
+    _scrub_prohibited,
+    _agenda_block,
 )
 from voice_agent.medware import resolver_plano  # noqa: E402
 
@@ -255,6 +258,114 @@ class TestSilencioPorEtapa:
         kommo = self._make_kommo_stub()
         assert kommo.agent_paused_for_lead(None, 30) is None
         assert kommo.agent_paused_for_lead({"found": False}, 30) is None
+
+
+# ----------------------------------------------------------------------
+# CENÁRIO 7 — Promessa retorno humano (lead 24053159 Juliene, 31/05/2026)
+# Lia inventou "Vou registrar sua preferência para a equipe finalizar
+# — retorno em horário comercial (seg–sex, 8h–18h)" quando ctx[agenda]
+# chegou vazio. Frase NÃO existe em nenhum arquivo — alucinação pura
+# que driblou os outros 4 filtros.
+# ----------------------------------------------------------------------
+class TestPromessaRetornoHumano:
+    """Filtro `_viola_promete_retorno_humano` bloqueia variações."""
+
+    # Frase EXATA da Juliene
+    FRASE_JULIENE = (
+        "Perfeito, Juliene! Terça-feira de manhã, meio do turno.\n\n"
+        "Vou registrar sua preferência para a equipe finalizar — "
+        "retorno em horário comercial (seg–sex, 8h–18h)."
+    )
+
+    def test_frase_juliene_exata_eh_bloqueada(self):
+        """Padrão original que motivou o filtro."""
+        assert _viola_promete_retorno_humano(self.FRASE_JULIENE) is True
+
+    @pytest.mark.parametrize("texto,esperado", [
+        # Padrão 1: registrar preferência + equipe finalizar
+        ("Vou registrar a sua preferência para a equipe finalizar.", True),
+        ("Registrarei sua preferência e a equipe finaliza pra você.", True),
+        ("Preferência registrada — equipe finaliza no horário comercial.", True),
+        # Padrão 2: retorno em horário comercial
+        ("Retorno em horário comercial.", True),
+        ("Te dou retorno em horário comercial, ok?", True),
+        ("Retorno em Horario Comercial seg a sex.", True),
+        # Padrão 3: equipe humana + horário comercial
+        ("A equipe humana entra em contato em horário comercial.", True),
+        ("Nossa equipe entrará em contato, horário comercial.", True),
+        # Padrão 4: seg–sex 8h–18h
+        ("Atendemos seg-sex 8h-18h.", True),
+        ("Seg a sex, das 8h às 18h.", True),
+        # Não deve bater: oferta normal de slot
+        ("Tenho terça-feira, 02/06 às 09:00. Fica bom?", False),
+        ("A consulta com a Doutora Karla é Doc 15, certinho.", False),
+        ("", False),
+        ("Oi Juliene, vamos seguir!", False),
+    ])
+    def test_padroes_variantes(self, texto, esperado):
+        assert _viola_promete_retorno_humano(texto) is esperado
+
+    def test_scrub_sem_agenda_substitui_por_honesto(self):
+        """Sem agenda no ctx → frase honesta pedindo 1 minuto."""
+        out = _scrub_prohibited(self.FRASE_JULIENE, ctx={"agenda": []})
+        # Não deve ter mais a frase inventada
+        assert "horário comercial" not in out.lower()
+        assert "equipe finaliza" not in out.lower()
+        # Deve ter as 3 ideias-chave do fallback
+        baixa = out.lower()
+        assert "reconsult" in baixa or "consult" in baixa
+        assert "minuto" in baixa or "min" in baixa
+
+    def test_scrub_com_agenda_reescreve_com_slots_concretos(self):
+        """Com agenda no ctx → reescreve oferecendo os 2 primeiros slots."""
+        ctx = {"agenda": [
+            {"dia_semana": "terça-feira", "data_br": "02/06", "hora": "09:00"},
+            {"dia_semana": "terça-feira", "data_br": "09/06", "hora": "09:30"},
+            {"dia_semana": "quinta-feira", "data_br": "04/06", "hora": "10:00"},
+        ]}
+        out = _scrub_prohibited(self.FRASE_JULIENE, ctx=ctx)
+        # Filtro bateu
+        assert "horário comercial" not in out.lower()
+        # Apresentou 2 slots concretos
+        assert "02/06" in out and "09:00" in out
+        assert "09/06" in out and "09:30" in out
+        # Não vazou o terceiro slot (regra de escassez)
+        assert "04/06" not in out
+
+
+# ----------------------------------------------------------------------
+# CENÁRIO 8 — Agenda vazia → instrução POSITIVA injetada
+# Origem: mesmo bug Juliene. Hoje além do filtro reativo, o
+# _agenda_block injeta no system prompt um bloco AGENDA INDISPONÍVEL
+# com lista de frases proibidas + único caminho aceito.
+# ----------------------------------------------------------------------
+class TestAgendaBlockVazia:
+    """Defesa PREVENTIVA: bloco no prompt quando agenda=[]."""
+
+    def test_agenda_vazia_injeta_bloco_indisponivel(self):
+        bloco = _agenda_block({"agenda": []})
+        assert "AGENDA INDISPONÍVEL" in bloco
+        # Tem que listar as frases proibidas pra modelo evitar
+        baixa = bloco.lower()
+        assert "registrar sua preferência" in baixa
+        assert "retorno em horário comercial" in baixa
+        assert "equipe humana" in baixa
+        # Tem que ensinar o caminho correto
+        assert "reconsult" in baixa
+        assert "1 minuto" in baixa or "um minuto" in baixa
+
+    def test_agenda_vazia_quando_ctx_none(self):
+        bloco = _agenda_block(None)
+        assert "AGENDA INDISPONÍVEL" in bloco
+
+    def test_agenda_com_slots_NAO_injeta_bloco_indisponivel(self):
+        ctx = {"agenda": [
+            {"dia_semana": "terça-feira", "data_br": "02/06", "hora": "09:00"},
+        ]}
+        bloco = _agenda_block(ctx)
+        assert "AGENDA INDISPONÍVEL" not in bloco
+        # Em vez disso, tem o bloco AGENDA REAL
+        assert "AGENDA REAL" in bloco
 
 
 # ----------------------------------------------------------------------

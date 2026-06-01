@@ -275,10 +275,43 @@ SONNET_TRIGGERS = {
 
 
 def _agenda_block(ctx: Optional[dict]) -> str:
-    """Bloco de HORÁRIOS REAIS — vagas livres consultadas no Medware."""
+    """Bloco de HORÁRIOS REAIS — vagas livres consultadas no Medware.
+
+    Quando NÃO há agenda no contexto (Medware silencioso, lento ou
+    sem slots), entrega instrução POSITIVA pra Lia pedir 1min ao
+    paciente, em vez de inventar "vou registrar pra equipe finalizar".
+    Origem do FIX: lead 24053159 Juliene (31/05/2026).
+    """
     agenda = (ctx or {}).get("agenda") or []
     if not agenda:
-        return ""
+        return (
+            "\n\n----------------------------------------------------------------"
+            "\nAGENDA INDISPONÍVEL NESTE MOMENTO"
+            "\n----------------------------------------------------------------"
+            "\n⚠️ O Medware não devolveu slots agora. Pode ser:"
+            "\n  - cache de token expirado"
+            "\n  - médico/unidade ainda não identificados"
+            "\n  - lentidão temporária da API"
+            "\n"
+            "\n🚨 PROIBIDO inventar um caminho 'humano' tipo:"
+            "\n  • 'Vou registrar sua preferência para a equipe finalizar'"
+            "\n  • 'Retorno em horário comercial (seg–sex, 8h–18h)'"
+            "\n  • 'A equipe entra em contato' / 'Nossa recepção retoma'"
+            "\n  • 'Vou encaminhar para a equipe humana'"
+            "\nIsso é ALUCINAÇÃO — não há equipe humana esperando."
+            "\n"
+            "\n✅ ÚNICO CAMINHO VÁLIDO quando a agenda está indisponível:"
+            "\nResponda EXATAMENTE no espírito da frase abaixo (palavras"
+            "\npodem variar, MAS as 3 ideias têm que estar):"
+            "\n  1) 'Deixa eu reconsultar a agenda real aqui pra você'"
+            "\n  2) Peça 1 minuto"
+            "\n  3) Diga que volta com 2 opções concretas (dia + data + hora)"
+            "\nExemplo aprovado:"
+            '\n  "Deixa eu reconsultar a agenda real aqui pra você. Me '
+            'responde \'oi\' em 1 minuto que eu volto com 2 opções '
+            'concretas — dia, data e hora — pra você escolher."'
+            "\n----------------------------------------------------------------"
+        )
     por_dia: dict = {}
     ordem: list = []
     for s in agenda:
@@ -805,6 +838,67 @@ def _viola_afirmacao_gravacao(text: str) -> bool:
     return any(p.search(text) for p in _AFIRMACAO_GRAVACAO_PATTERNS)
 
 
+# ------------------------------------------------------------------
+# Filtro PROMESSA DE RETORNO HUMANO — origem lead 24053159 (31/05/2026)
+# ------------------------------------------------------------------
+# Bug: Juliene escolheu Terça/manhã/meio. Lia recebeu ctx["agenda"]
+# VAZIO (Medware sem slots, ou silenciado) e inventou:
+#   "Vou registrar sua preferência para a equipe finalizar
+#    — retorno em horário comercial (seg–sex, 8h–18h)."
+# Frase não existe em nenhum arquivo do voice_agent — alucinação pura
+# que driblou os outros 4 filtros (não menciona "consultar", não cobra
+# Pix, não afirma gravação, não tem dia-da-semana).
+#
+# Cosmoética Blink: NUNCA fingir que a equipe humana vai retomar quando
+# isso não está garantido. Ou Lia oferece slot real, ou pede ao paciente
+# aguardar 1 minuto enquanto ela busca de novo.
+_PROMETE_RETORNO_HUMANO_PATTERNS = [
+    re.compile(
+        r"registrar(?:ei)?\s+(?:sua|a)\s+prefer[êe]ncia.{0,40}equipe.{0,40}finaliza",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"prefer[êe]ncia\s+(?:para|pra)\s+(?:a\s+)?equipe.{0,40}finaliza",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"retorno\s+em\s+hor[áa]rio\s+comercial",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"equipe\s+(?:humana|finaliza|entra(?:r[áa])?\s+em\s+contato).{0,80}"
+        r"hor[áa]rio\s+comercial",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"seg(?:unda)?[\s\-]*(?:a|para|–|-|à)?\s*sex(?:ta)?.{0,60}(?:8h|08h).{0,15}18h",
+        re.IGNORECASE | re.DOTALL,
+    ),
+]
+
+
+def _viola_promete_retorno_humano(text: str) -> bool:
+    """True se a Lia inventou que a equipe humana vai finalizar/retornar.
+
+    Pega o padrão "vou registrar preferência → equipe finaliza → retorno
+    em horário comercial" e variações. Tem que ser bloqueado SEMPRE
+    porque é evasão: ou Lia oferece slot real agora, ou pede 1 min para
+    re-consultar.
+    """
+    if not text:
+        return False
+    return any(p.search(text) for p in _PROMETE_RETORNO_HUMANO_PATTERNS)
+
+
+# Fallback quando NÃO há agenda real no contexto — Lia diz a verdade:
+# que está re-consultando, e pede 1 minuto.
+_PROMETE_RETORNO_HUMANO_FALLBACK_SEM_AGENDA = (
+    "Deixa eu reconsultar a agenda real aqui pra você. "
+    "Me responde 'oi' em 1 minuto que eu volto com 2 opções concretas — "
+    "dia, data e hora — pra você escolher."
+)
+
+
 def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
 
@@ -844,6 +938,37 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             "Texto bloqueado: %r", text[:200],
         )
         return _AFIRMACAO_GRAVACAO_FALLBACK
+
+    # 0d. PROMESSA RETORNO HUMANO (lead 24053159 Juliene, 31/05/2026)
+    # Lia inventou "vou registrar preferência → equipe finaliza → retorno
+    # em horário comercial". Sem o filtro, escapa dos outros 4 detectores.
+    # Se já temos agenda → reformula oferecendo os 2 melhores slots.
+    # Se NÃO temos agenda → pede 1min e prometendo voltar com opções reais.
+    if _viola_promete_retorno_humano(text):
+        log.error(
+            "[FILTRO] PROMESSA RETORNO HUMANO BLOQUEADA — Lia inventou "
+            "encaminhamento humano. has_agenda=%s. Texto: %r",
+            has_agenda, text[:200],
+        )
+        if has_agenda:
+            # Tem agenda — pega 2 primeiros slots e oferece concreto.
+            agenda = ctx.get("agenda", [])[:2]
+            linhas = []
+            for s in agenda:
+                dia = s.get("dia_semana", "")
+                dbr = s.get("data_br", "")
+                hora = s.get("hora", "")
+                if dia and dbr and hora:
+                    linhas.append(f"• {dia.capitalize()}, {dbr} às {hora}")
+            if linhas:
+                return (
+                    "Consultei a agenda real aqui. Tenho essas duas "
+                    "opções concretas que cabem na sua preferência:\n\n"
+                    + "\n".join(linhas)
+                    + "\n\nQual fica melhor pra você?"
+                )
+        # Sem agenda — honestidade: re-consulto e volto em 1 min.
+        return _PROMETE_RETORNO_HUMANO_FALLBACK_SEM_AGENDA
 
     # 0b. Dia da semana INVENTADO (lead 24038029, 29/05/2026)
     # Python valida cada par "<dia-semana>, DD/MM" do texto contra o
