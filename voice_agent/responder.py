@@ -1250,18 +1250,96 @@ class Responder:
         # 4. Decide modelo
         model = _route_model(user_text, len(history), self._sonnet, self._haiku)
 
-        # 5. Chama Claude
-        response = self._client.messages.create(
-            model=model,
-            max_tokens=600,
-            system=system_field,
-            messages=messages,
-            temperature=0.3,  # baixa pra seguir as regras estritas da Blink
+        # 5. Chama Claude — com tool calling estruturado se habilitado
+        # (task #126). Toggle via LIA_TOOLS_ENABLED — default off.
+        from voice_agent.tools_lia import (
+            ALL_TOOLS,
+            executar_tool,
+            tools_habilitadas,
         )
-
-        # Extrai texto da resposta
-        answer_parts = [block.text for block in response.content if block.type == "text"]
-        answer = "\n".join(answer_parts).strip()
+        tool_iter_log: list[dict] = []
+        if tools_habilitadas():
+            # Loop de tool_use — máximo 4 iterações pra evitar runaway
+            messages_acc = list(messages)
+            answer = ""
+            for _iter in range(4):
+                response = self._client.messages.create(
+                    model=model,
+                    max_tokens=600,
+                    system=system_field,
+                    messages=messages_acc,
+                    temperature=0.3,
+                    tools=ALL_TOOLS,
+                )
+                # Processa blocks: text vai direto pra answer; tool_use
+                # dispara handler + injeta tool_result.
+                tool_uses = [
+                    b for b in response.content if b.type == "tool_use"
+                ]
+                texts = [
+                    b.text for b in response.content if b.type == "text"
+                ]
+                answer = "\n".join(texts).strip()
+                if not tool_uses or response.stop_reason != "tool_use":
+                    break  # texto final, sai do loop
+                # Executa cada tool e prepara tool_result
+                assistant_blocks = list(response.content)
+                tool_results = []
+                for tu in tool_uses:
+                    if caller_context is not None:
+                        caller_context.setdefault(
+                            "conversation_key", conversation_key,
+                        )
+                    res = executar_tool(
+                        tu.name,
+                        tu.input,
+                        caller_context,
+                        kommo_client=getattr(self, "_kommo", None),
+                        medware_client=getattr(self, "_medware", None),
+                        redis_client=getattr(self, "_redis", None),
+                    )
+                    tool_iter_log.append({
+                        "name": tu.name,
+                        "erro": res.erro,
+                        "efeitos": res.efeitos_colaterais,
+                    })
+                    payload = {
+                        "ok": res.erro is None,
+                        "texto_para_paciente": res.texto_para_paciente,
+                    }
+                    if res.erro:
+                        payload["erro"] = res.erro
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tu.id,
+                        "content": __import__("json").dumps(payload),
+                    })
+                # Adiciona ao histórico pra próxima rodada
+                messages_acc.append({
+                    "role": "assistant",
+                    "content": assistant_blocks,
+                })
+                messages_acc.append({
+                    "role": "user",
+                    "content": tool_results,
+                })
+            if tool_iter_log:
+                log.info(
+                    "[TOOLS] convo=%s iters=%d log=%s",
+                    conversation_key, len(tool_iter_log), tool_iter_log,
+                )
+        else:
+            response = self._client.messages.create(
+                model=model,
+                max_tokens=600,
+                system=system_field,
+                messages=messages,
+                temperature=0.3,  # baixa pra seguir regras estritas
+            )
+            answer_parts = [
+                block.text for block in response.content if block.type == "text"
+            ]
+            answer = "\n".join(answer_parts).strip()
 
         # DEBUG capturado em 30/05 — fallback 'instabilidade' aparecendo sem
         # exception Claude. Hipótese: algum caminho retorna answer vazio sem
