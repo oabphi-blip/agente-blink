@@ -246,6 +246,22 @@ Estão no root do repo:
 Todos têm token GitHub embedded. **Token `ghp_7NNf...3H20m8` está comprometido** —
 revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 
+### 11-A. Rotação de chaves — histórico (01/06/2026)
+
+- **OPENAI_API_KEY rotacionada** em 01/06/2026 14:33 BRT.
+  - Antiga `sk-proj-VDF6Q...WcIA` (criada 19/05/2026) — **REVOGADA via OpenAI dashboard.**
+  - Nova `sk-proj-EbB4M...DyMA` (nome `blink-agent-rotacao-01-06-2026`, tracking `key_xDdiVvnrWck3d…`) — ativa.
+  - Substituída na linha 1 do bloco "Variáveis de Ambiente" do app `blink/agent` no Easypanel.
+  - Validação pós-rotação: `/health` 200 OK, `/admin/smoke-tick` 6/6 verde em 26,7s.
+- **Procedimento padrão de rotação** (próximas vezes):
+  1. OpenAI dashboard → Create new secret key com nome `blink-agent-rotacao-DD-MM-AAAA`.
+  2. Copiar imediatamente (só aparece 1 vez).
+  3. Easypanel → `blink/agent` → Ambiente → substituir linha `OPENAI_API_KEY=`.
+  4. Salvar → Implantar → aguardar ~60s.
+  5. `curl /health` + `curl /admin/smoke-tick` — esperar 6/6.
+  6. Voltar pro OpenAI → revogar chave antiga.
+  7. Registrar nesta seção (data + sufixo terminal da chave antiga e nova).
+
 ---
 
 ## 12. O que está em construção

@@ -3301,16 +3301,33 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     nomes_procedimentos=p.get("nomes_procedimentos") or {},
                 ))
         else:
-            # Modo prod — pendente integração Kommo + Medware.
-            # TODO #82.2: ler N.PACIENTES + N.EXAMES + N.NOME + Medware.
-            return JSONResponse({
-                "status": "not_implemented",
-                "lead_id": lead_id,
-                "hint": (
-                    "Modo prod ainda não plugado em Kommo+Medware. "
-                    "Envie body JSON com `pacientes` pra rodar simulação."
-                ),
-            }, status_code=501)
+            # Modo prod (#82.2): lê o lead no Kommo (N.EXAMES + N.NOME +
+            # médico/unidade/convênio + cod_agendamento) e o realizado no
+            # Medware, monta os snapshots via auditoria.montar_snapshot_pacientes.
+            if not pipeline.kommo:
+                return JSONResponse({
+                    "status": "kommo_indisponivel",
+                    "lead_id": lead_id,
+                    "hint": "Sem cliente Kommo. Envie body JSON com `pacientes`.",
+                }, status_code=503)
+            lead_json = pipeline.kommo.get_lead(lead_id)
+            if not lead_json:
+                return JSONResponse({
+                    "status": "lead_nao_encontrado",
+                    "lead_id": lead_id,
+                }, status_code=404)
+            fetcher = None
+            if pipeline.medware:
+                fetcher = pipeline.medware.listar_procedimentos_realizados
+            pacientes = _aud.montar_snapshot_pacientes(
+                lead_json, realizado_fetcher=fetcher,
+            )
+            if not pacientes:
+                return JSONResponse({
+                    "status": "sem_pacientes_auditaveis",
+                    "lead_id": lead_id,
+                    "hint": "Nenhum paciente com N.EXAMES preenchido neste lead.",
+                })
 
         # 2) Senders — dry_run desliga I/O real.
         if dry_run:
@@ -3620,32 +3637,75 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "kommo": kommo_resp,
         })
 
+    # Pipeline + etapa onde buscar leads pós-consulta para auditar.
+    # Default: ATENDE 8601819 / "8-REALIZADO CONSULTA" 91486864 (CLAUDE.md §4).
+    _AUDITORIA_PIPELINE_ID = int(os.getenv("KOMMO_PIPELINE_ATENDE_ID", "8601819"))
+    _AUDITORIA_STATUS_REALIZADO = int(os.getenv("KOMMO_STATUS_REALIZADO_ID", "91486864"))
+    _AUDITORIA_FILA_MAX = int(os.getenv("AUDITORIA_FILA_MAX_LEADS", "60"))
+
+    def _coletar_leads_auditaveis() -> list[dict]:
+        """Lê os leads em REALIZADO e busca cada um completo (custom fields).
+
+        Bounded por AUDITORIA_FILA_MAX_LEADS pra não martelar a API do Kommo.
+        """
+        if not pipeline.kommo:
+            return []
+        resumos = pipeline.kommo.list_leads_by_status(
+            _AUDITORIA_PIPELINE_ID, [_AUDITORIA_STATUS_REALIZADO],
+            limit=_AUDITORIA_FILA_MAX,
+        )
+        leads = []
+        for r in resumos[:_AUDITORIA_FILA_MAX]:
+            lid = r.get("id")
+            if not lid:
+                continue
+            full = pipeline.kommo.get_lead(lid)
+            if full:
+                leads.append(full)
+        return leads
+
     @app.get("/admin/secretaria-auditoria")
     def admin_secretaria_auditoria(request: Request) -> JSONResponse:
-        """Fila da secretaria (placeholder — task #82.3)."""
+        """Fila da secretaria — pacientes aguardando 1ª assinatura (#82.3)."""
         _auditoria_check_secret(request)
+        import voice_agent.auditoria as _aud
         unidade = (request.query_params.get("unidade") or "").lower()
         if unidade not in {"asa-norte", "aguas-claras", ""}:
             return JSONResponse({"error": "unidade deve ser asa-norte ou aguas-claras"}, status_code=400)
+        if not pipeline.kommo:
+            return JSONResponse({"unidade": unidade or "todas", "fila": [],
+                                 "status": "kommo_indisponivel"}, status_code=503)
+        leads = _coletar_leads_auditaveis()
+        fila = _aud.montar_fila_auditoria(
+            leads, status_alvo="aguardando_secretaria",
+            unidade=unidade or None,
+        )
         return JSONResponse({
             "unidade": unidade or "todas",
-            "fila": [],
-            "status": "stub",
-            "hint": "TODO #82.3: query Kommo por N.AUDITORIA STATUS=aguardando_secretaria filtrado por unidade.",
+            "leads_varridos": len(leads),
+            "fila": fila,
         })
 
     @app.get("/admin/medico-auditoria")
     def admin_medico_auditoria(request: Request) -> JSONResponse:
-        """Fila do médico (placeholder — task #82.3)."""
+        """Fila do médico — pacientes aguardando 2ª assinatura (#82.3)."""
         _auditoria_check_secret(request)
+        import voice_agent.auditoria as _aud
         medico = (request.query_params.get("medico") or "").lower()
         if medico and medico not in {"karla", "fabricio", "katia"}:
             return JSONResponse({"error": "medico deve ser karla, fabricio ou katia"}, status_code=400)
+        if not pipeline.kommo:
+            return JSONResponse({"medico": medico or "todos", "fila": [],
+                                 "status": "kommo_indisponivel"}, status_code=503)
+        leads = _coletar_leads_auditaveis()
+        fila = _aud.montar_fila_auditoria(
+            leads, status_alvo="aguardando_medico",
+            medico=medico or None,
+        )
         return JSONResponse({
             "medico": medico or "todos",
-            "fila": [],
-            "status": "stub",
-            "hint": "TODO #82.3: query Kommo por N.AUDITORIA STATUS=aguardando_medico filtrado por médico.",
+            "leads_varridos": len(leads),
+            "fila": fila,
         })
 
     @app.post("/admin/whatsapp-subscribe-waba")

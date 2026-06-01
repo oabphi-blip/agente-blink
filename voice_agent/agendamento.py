@@ -268,8 +268,51 @@ def executar_agendamento(
 
         # Carimba codAgendamento no campo do Kommo (Gap 4) — best effort.
         # Só funciona se o campo "cod_agendamento" estiver mapeado em update_lead_fields.
+        #
+        # Task #80: junto do cod_agendamento, injeta N.MOTIVO (motivo_tipo)
+        # e N.EXAMES (agrupador_label) do paciente recém-agendado. O auto-fill
+        # em kommo.update_lead_fields consome `pacientes[].motivo_tipo` e
+        # `pacientes[].agrupador_label`. Isso alimenta a autorização antecipada
+        # do convênio (selecionar_agrupador → N.EXAMES → pipeline guia).
+        #
+        # num_pacientes="" suprime a escrita desse campo (o setdefault interno
+        # NÃO sobrescreve valor já presente, mesmo vazio) — evita clobbar a
+        # contagem real do lead num agendamento de paciente único.
+        extra_fields: dict = {"cod_agendamento": cod_ag, "num_pacientes": ""}
         try:
-            kommo.update_lead_fields(int(lead_id), {"cod_agendamento": cod_ag})
+            from .procedimentos import (
+                agrupador_label_kommo,
+                classificar_motivo_tipo_kommo,
+                selecionar_agrupador,
+            )
+            from .medware import _data_nasc_iso
+
+            _motivo = (known.get("motivo") or "").strip() or None
+            _perfil = (known.get("perfil_paciente") or "").strip() or None
+            _nasc_iso = _data_nasc_iso(data_nasc) if data_nasc else None
+            _nasc_iso = _nasc_iso or None  # _data_nasc_iso devolve "" se inválida
+
+            nome_agr, _ = selecionar_agrupador(
+                perfil_kommo=_perfil,
+                birth_date_iso=_nasc_iso,
+                motivo=_motivo,
+            )
+            paciente_dict = {
+                "motivo": _motivo,
+                "motivo_tipo": classificar_motivo_tipo_kommo(_motivo, _perfil),
+                "agrupador_label": agrupador_label_kommo(nome_agr),
+            }
+            extra_fields["pacientes"] = [paciente_dict]
+            log.info(
+                "task#80 lead %s: motivo_tipo=%s agrupador=%s",
+                lead_id, paciente_dict["motivo_tipo"], nome_agr,
+            )
+        except Exception as e:  # noqa: BLE001
+            # Nunca quebra a gravação do cod_agendamento por causa do agrupador.
+            log.warning("task#80 agrupador falhou (%s): %s", lead_id, e)
+
+        try:
+            kommo.update_lead_fields(int(lead_id), extra_fields)
         except Exception as e:  # noqa: BLE001
             log.warning("kommo cod_agendamento falhou (%s): %s", lead_id, e)
 

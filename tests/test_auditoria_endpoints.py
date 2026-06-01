@@ -34,13 +34,13 @@ class TestEndpointAuditoriaTick:
         r = client.post("/admin/auditoria-tick?lead_id=abc")
         assert r.status_code == 400
 
-    def test_sem_body_pacientes_devolve_501(self, client):
-        """Modo prod ainda não plugado em Kommo+Medware."""
+    def test_sem_body_sem_kommo_devolve_503(self, client):
+        """Modo prod exige cliente Kommo; ausente no env de teste → 503."""
         r = client.post("/admin/auditoria-tick?lead_id=999")
-        assert r.status_code == 501
+        assert r.status_code == 503
         body = r.json()
         assert body["lead_id"] == 999
-        assert "Kommo" in body["hint"]
+        assert body["status"] == "kommo_indisponivel"
 
     def test_dry_run_com_pacientes_simulados_coincide(self, client):
         payload = {
@@ -167,21 +167,20 @@ class TestEndpointConfirma:
 
 class TestEndpointFilas:
 
-    def test_fila_secretaria_unidade_valida(self, client):
+    def test_fila_secretaria_unidade_valida_sem_kommo_503(self, client):
+        # Validação passa (400 só pra unidade inválida); sem Kommo no env → 503.
         r = client.get("/admin/secretaria-auditoria?unidade=asa-norte")
-        assert r.status_code == 200
-        body = r.json()
-        assert body["unidade"] == "asa-norte"
-        assert body["status"] == "stub"
+        assert r.status_code == 503
+        assert r.json()["status"] == "kommo_indisponivel"
 
     def test_fila_secretaria_unidade_invalida_400(self, client):
         r = client.get("/admin/secretaria-auditoria?unidade=brasilia")
         assert r.status_code == 400
 
-    def test_fila_medico_valido(self, client):
+    def test_fila_medico_valido_sem_kommo_503(self, client):
         r = client.get("/admin/medico-auditoria?medico=karla")
-        assert r.status_code == 200
-        assert r.json()["medico"] == "karla"
+        assert r.status_code == 503
+        assert r.json()["status"] == "kommo_indisponivel"
 
     def test_fila_medico_invalido_400(self, client):
         r = client.get("/admin/medico-auditoria?medico=jose")

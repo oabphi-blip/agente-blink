@@ -125,6 +125,36 @@ AGRUPADOR_KOMMO_LABEL: dict[str, str] = {
 # manualmente, em vez da seleção automática pela Lia.
 AGRUPADOR_KOMMO_PERSONALIZADO = "Agrupa5-Personalizado (escolha manual)"
 
+# Nome interno do agrupador → lista de codProcedimento. Usado pela
+# auditoria (task #82) pra reconstruir o PLANEJADO a partir do N.EXAMES
+# lido do Kommo.
+AGRUPADOR_NOME_CODIGOS: dict[str, list[int]] = {
+    "AGRUPADOR_1_ADULTO_ROTINA": AGRUPADOR_ADULTO_ROTINA,
+    "AGRUPADOR_2_ADULTO_EMERGENCIA": AGRUPADOR_ADULTO_EMERGENCIA,
+    "AGRUPADOR_3_CRIANCA_ROTINA": AGRUPADOR_CRIANCA_ROTINA,
+    "AGRUPADOR_4_CRIANCA_URGENCIA": AGRUPADOR_CRIANCA_URGENCIA,
+}
+
+# Reverso do label do enum N.EXAMES → nome interno do agrupador.
+_KOMMO_LABEL_PARA_NOME: dict[str, str] = {
+    label: nome for nome, label in AGRUPADOR_KOMMO_LABEL.items()
+}
+
+
+def codigos_por_label_kommo(label: str | None) -> tuple[str, list[int]]:
+    """Inverso de agrupador_label_kommo: label do N.EXAMES → (nome, códigos).
+
+    Usado pela auditoria pra reconstruir o conjunto PLANEJADO a partir do
+    que está gravado no Kommo. "Personalizado"/desconhecido → ("", []) —
+    a auditoria trata como fonte indefinida (não inventa procedimentos).
+    """
+    if not label:
+        return ("", [])
+    nome = _KOMMO_LABEL_PARA_NOME.get(label.strip())
+    if not nome:
+        return ("", [])
+    return (nome, list(AGRUPADOR_NOME_CODIGOS.get(nome, [])))
+
 
 # ============================================================
 # LÓGICA DE SELEÇÃO
@@ -225,6 +255,95 @@ def is_urgencia(motivo: str | None,
         return False
     m = motivo.lower()
     return any(palavra in m for palavra in PALAVRAS_URGENCIA)
+
+
+# ============================================================
+# CLASSIFICAÇÃO N.MOTIVO (5 categorias) — task #80
+# ============================================================
+# Labels EXATOS do enum "N.MOTIVO" no Kommo (FIELD_MOTIVO_TIPO_PACIENTES).
+# Estes textos têm que casar com _pick_enum em kommo.py (case/acento
+# insensitive), então mantemos a grafia idêntica à tabela de enum.
+MOTIVO_TIPO_ROTINA = "Rotina/Check-up"
+MOTIVO_TIPO_RETORNO = "Retorno/Acompanhamento"
+MOTIVO_TIPO_PRE_OP = "Pré-operatório"
+MOTIVO_TIPO_URGENCIA = "Emergência/Urgência"
+MOTIVO_TIPO_POS_OP = "Pós-Operatório"
+
+# Palavras-chave por categoria (sobre o texto livre do motivo).
+_PALAVRAS_POS_OP = {
+    "pos-op", "pós-op", "pos op", "pós op",
+    "pos-operatorio", "pós-operatório", "pos operatorio", "pós operatório",
+    "depois da cirurgia", "depois da operacao", "depois da operação",
+    "pos cirurgia", "pós cirurgia", "retorno da cirurgia", "ja operei",
+    "já operei", "operei", "fiz a cirurgia", "fiz cirurgia",
+}
+_PALAVRAS_PRE_OP = {
+    "pre-op", "pré-op", "pre op", "pré op",
+    "pre-operatorio", "pré-operatório", "pre operatorio", "pré operatório",
+    "antes da cirurgia", "avaliacao cirurgica", "avaliação cirúrgica",
+    "vou operar", "pre cirurgico", "pré-cirúrgico", "pre-cirurgico",
+    "avaliacao pre operatoria", "avaliação pré operatória",
+}
+_PALAVRAS_RETORNO = {
+    "retorno", "acompanhamento", "revisao", "revisão",
+    "reavaliacao", "reavaliação", "ja consultei", "já consultei",
+    "controle", "rever", "mostrar exame", "trazer exame",
+    "resultado de exame", "resultado do exame",
+}
+
+
+def classificar_motivo_tipo_kommo(
+    motivo: str | None,
+    tipo_motivo_kommo: str | None = None,
+) -> str:
+    """Classifica o motivo livre numa das 5 categorias do enum N.MOTIVO.
+
+    Retorna sempre um dos cinco labels (default: Rotina/Check-up).
+
+    Prioridade:
+      1. `tipo_motivo_kommo` — se já vier num dos 5 labels conhecidos,
+         respeita (atendente humano classificou).
+      2. urgência (reaproveita `is_urgencia`, que cobre palavras-chave).
+      3. pós-operatório > pré-operatório > retorno (mais específico antes).
+      4. fallback: rotina (caso mais comum).
+    """
+    # 1) Enum explícito já classificado.
+    if tipo_motivo_kommo:
+        clean = tipo_motivo_kommo.strip()
+        for label in (
+            MOTIVO_TIPO_ROTINA, MOTIVO_TIPO_RETORNO, MOTIVO_TIPO_PRE_OP,
+            MOTIVO_TIPO_URGENCIA, MOTIVO_TIPO_POS_OP,
+        ):
+            if clean.lower() == label.lower():
+                return label
+
+    # 2) Urgência tem prioridade absoluta (segurança clínica).
+    if is_urgencia(motivo, tipo_motivo_kommo):
+        return MOTIVO_TIPO_URGENCIA
+
+    m = (motivo or "").lower()
+    # 3) Pós antes de pré (quem já operou não é mais pré-op).
+    if any(p in m for p in _PALAVRAS_POS_OP):
+        return MOTIVO_TIPO_POS_OP
+    if any(p in m for p in _PALAVRAS_PRE_OP):
+        return MOTIVO_TIPO_PRE_OP
+    if any(p in m for p in _PALAVRAS_RETORNO):
+        return MOTIVO_TIPO_RETORNO
+
+    # 4) Default.
+    return MOTIVO_TIPO_ROTINA
+
+
+def agrupador_label_kommo(nome_agrupador: str | None) -> str:
+    """Converte o nome interno do agrupador no label do enum N.EXAMES.
+
+    Desconhecido/None → label "Personalizado" (escolha manual humana).
+    """
+    if not nome_agrupador:
+        return AGRUPADOR_KOMMO_PERSONALIZADO
+    return AGRUPADOR_KOMMO_LABEL.get(
+        nome_agrupador, AGRUPADOR_KOMMO_PERSONALIZADO,
+    )
 
 
 def selecionar_agrupador(

@@ -360,6 +360,137 @@ class ResultadoAuditoria:
     kommo: dict | None = None
 
 
+def _norm_txt(s: str | None) -> str:
+    import unicodedata
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFD", str(s).strip())
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    return s.lower().replace("-", " ")
+
+
+def montar_fila_auditoria(
+    leads_jsons: list[dict],
+    *,
+    status_alvo: str,
+    unidade: str | None = None,
+    medico: str | None = None,
+) -> list[dict]:
+    """Monta a fila de pendências de auditoria a partir de leads já lidos.
+
+    Para cada lead, varre os 6 slots de paciente e coleta os que estão no
+    `status_alvo` (ex.: 'aguardando_secretaria'). Filtra opcionalmente por
+    unidade (secretaria) ou médico. Função pura — endpoint injeta os JSONs.
+    """
+    from . import kommo as _k
+
+    alvo = _norm_txt(status_alvo)
+    filtro_uni = _norm_txt(unidade) if unidade else None
+    filtro_med = _norm_txt(medico) if medico else None
+
+    fila: list[dict] = []
+    for lead in leads_jsons or []:
+        if not isinstance(lead, dict):
+            continue
+        lead_unidade = _k.ler_cf_valor(lead, _k.FIELD_UNIDADE[0])
+        lead_medico = _k.ler_cf_valor(lead, _k.FIELD_MEDICOS[0])
+        if filtro_uni and filtro_uni not in _norm_txt(lead_unidade):
+            continue
+        if filtro_med and filtro_med not in _norm_txt(lead_medico):
+            continue
+        pendentes = []
+        for idx in range(1, 7):
+            fid = kommo_field_id(idx, "status")
+            if not fid:
+                continue
+            val = _k.ler_cf_valor(lead, fid)
+            if val and _norm_txt(val) == alvo:
+                nome = (_k.ler_cf_valor(lead, _k.FIELD_NOME_PACIENTES[idx])
+                        or f"Paciente {idx}")
+                pendentes.append({"paciente_idx": idx, "nome": nome})
+        if pendentes:
+            fila.append({
+                "lead_id": lead.get("id"),
+                "nome": lead.get("name"),
+                "unidade": lead_unidade,
+                "medico": lead_medico,
+                "pendentes": pendentes,
+            })
+    return fila
+
+
+def montar_snapshot_pacientes(
+    lead_json: dict,
+    realizado_por_idx: dict[int, list[int]] | None = None,
+    *,
+    cod_agendamento: int | None = None,
+    realizado_fetcher=None,   # callable(cod_agendamento) -> list[int]
+) -> list[PacienteAuditoria]:
+    """Constrói os PacienteAuditoria a partir do JSON bruto do lead Kommo.
+
+    Lê, por paciente (1..6), o N.EXAMES (planejado) e o N.NOME; do lead lê
+    médico/unidade/convênio (campos únicos). O conjunto REALIZADO vem de:
+      - `realizado_por_idx[idx]` (injetado — modo teste/simulação), OU
+      - `realizado_fetcher(cod_agendamento)` (modo prod — Medware).
+
+    Só inclui pacientes com N.EXAMES preenchido (slots vazios são ignorados).
+    Função desacoplada de I/O: o fetcher é injetado. Pura e testável.
+
+    NOTA prod: o Kommo guarda UM cod_agendamento por lead
+    (FIELD_COD_AGENDAMENTO), então o realizado do fetcher é o mesmo pra todos
+    os pacientes do lead — limitação conhecida e aceita (o caso comum é lead
+    de 1 paciente). Quando houver agendamento por paciente, evoluir aqui.
+    """
+    from . import kommo as _k
+    from . import procedimentos as _p
+
+    realizado_por_idx = realizado_por_idx or {}
+
+    medico = _k.ler_cf_valor(lead_json, _k.FIELD_MEDICOS[0]) or "?"
+    unidade = _k.ler_cf_valor(lead_json, _k.FIELD_UNIDADE[0]) or "?"
+    convenio = _k.ler_cf_valor(lead_json, _k.FIELD_CONVENIO[0]) or "?"
+
+    if cod_agendamento is None:
+        cod_raw = _k.ler_cf_valor(lead_json, _k.FIELD_COD_AGENDAMENTO)
+        try:
+            cod_agendamento = int(cod_raw) if cod_raw else None
+        except (TypeError, ValueError):
+            cod_agendamento = None
+
+    # Cache do realizado por cod_agendamento (1 chamada Medware por lead).
+    _realizado_cache: list[int] | None = None
+
+    pacientes: list[PacienteAuditoria] = []
+    for idx in range(1, 7):
+        exames_field = _k.FIELD_EXAMES_PACIENTES.get(idx)
+        if not exames_field:
+            continue
+        label = _k.ler_cf_valor(lead_json, exames_field[0])
+        if not label:
+            continue  # paciente sem agrupador planejado → fora da auditoria
+        nome_agr, planejado = _p.codigos_por_label_kommo(label)
+        nome_pac = _k.ler_cf_valor(lead_json, _k.FIELD_NOME_PACIENTES[idx]) or f"Paciente {idx}"
+
+        if idx in realizado_por_idx:
+            realizado = list(realizado_por_idx[idx])
+        else:
+            if _realizado_cache is None and realizado_fetcher and cod_agendamento:
+                try:
+                    _realizado_cache = list(realizado_fetcher(cod_agendamento))
+                except Exception:  # noqa: BLE001
+                    _realizado_cache = []
+            realizado = list(_realizado_cache or [])
+
+        pacientes.append(PacienteAuditoria(
+            idx=idx, nome=nome_pac, medico_nome=medico, unidade=unidade,
+            convenio=convenio,
+            agrupador_planejado=nome_agr or label,
+            planejado_codigos=planejado,
+            realizado_codigos=realizado,
+        ))
+    return pacientes
+
+
 def processar_lead_realizado(
     lead_id: int,
     pacientes: list[PacienteAuditoria],

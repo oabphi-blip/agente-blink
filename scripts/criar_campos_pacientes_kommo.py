@@ -1,31 +1,39 @@
 #!/usr/bin/env python3
 """Cria 10 campos no Kommo: 2.MOTIVO + 2.EXAMES até 6.MOTIVO + 6.EXAMES.
 
-Replica os campos 1.MOTIVO (multiselect 5 opções) e 1.EXAMES (select 5
-opções) já criados pelo Fábio, agora para os pacientes 2 a 6.
+INTERATIVO E IDEMPOTENTE — basta rodar:
 
-USO no terminal do Mac:
     cd "/Users/fabiophilipecostamartins/Documents/Claude/Projects/AGENTE IA BLINK"
     python3 scripts/criar_campos_pacientes_kommo.py
 
-Token vem do env KOMMO_TOKEN. Pra setar:
-    export KOMMO_TOKEN="eyJ0eXAi..."  (o mesmo do Easypanel)
+O script:
+  1. Tenta ler KOMMO_TOKEN do env. Se não tiver, pede pra colar.
+  2. Conecta ao Kommo e valida o token (GET /account).
+  3. Lista os custom_fields existentes hoje.
+  4. Mostra o plano: campos a criar (pula os que já existem).
+  5. Pergunta confirmação [s/N].
+  6. Cria, mostrando progresso.
+  7. Resume no final.
 
-Idempotente: antes de criar, lista campos existentes e pula os que já
-existem (verifica por nome — ex.: se "2.MOTIVO" já existe, pula).
-
-Roda em modo DRY-RUN por padrão. Pra criar de verdade:
-    python3 scripts/criar_campos_pacientes_kommo.py --apply
+Sem flags, sem export manual obrigatório, sem export prévio.
 """
 from __future__ import annotations
 
 import os
 import sys
 import time
-import json
-import argparse
+import getpass
 
-import httpx
+try:
+    import httpx
+except ImportError:
+    print(
+        "ERRO: biblioteca 'httpx' não instalada.\n"
+        "Instale com:  pip3 install --user httpx\n"
+        "Ou:  python3 -m pip install --user --break-system-packages httpx",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 
 # ============================================================
@@ -54,20 +62,79 @@ ENUMS_EXAMES = [
 ]
 
 
+# ============================================================
+# UI helpers
+# ============================================================
+
+def linha(c: str = "─", n: int = 60) -> None:
+    print(c * n)
+
+
+def cabecalho(titulo: str) -> None:
+    print()
+    linha("=")
+    print(f"  {titulo}")
+    linha("=")
+
+
+def ok(msg: str) -> None:
+    print(f"  ✓ {msg}")
+
+
+def fail(msg: str) -> None:
+    print(f"  ✗ {msg}", file=sys.stderr)
+
+
+def warn(msg: str) -> None:
+    print(f"  ⚠ {msg}")
+
+
+# ============================================================
+# Token
+# ============================================================
+
 def get_token() -> str:
-    tok = os.environ.get("KOMMO_TOKEN") or os.environ.get("KOMMO_LONGLIVED")
-    if not tok:
-        print(
-            "ERRO: setar KOMMO_TOKEN no env antes de rodar.\n"
-            "  export KOMMO_TOKEN='eyJ0eXAi...'",
-            file=sys.stderr,
-        )
+    """Lê token do env. Se vazio ou for placeholder, pede ao usuário."""
+    tok = (os.environ.get("KOMMO_TOKEN") or "").strip()
+    if tok and "COLE" not in tok.upper() and len(tok) > 100:
+        ok("Token encontrado no env KOMMO_TOKEN")
+        return tok
+
+    print(
+        "\nKOMMO_TOKEN não encontrado no ambiente."
+        "\nPra obter:"
+        "\n  1. Abrir: https://6prkfn.easypanel.host/projects/blink/app/agent/environment"
+        "\n  2. Copiar o VALOR de KOMMO_TOKEN (JWT longo, começa com 'eyJ0eXAi')"
+        "\n  3. Colar abaixo (não aparecerá na tela — é seguro):\n"
+    )
+    tok = getpass.getpass("KOMMO_TOKEN: ").strip()
+    if not tok or len(tok) < 100:
+        fail("Token vazio ou muito curto. Abortando.")
         sys.exit(1)
     return tok
 
 
-def get_existing_field_names(client: httpx.Client, headers: dict) -> set[str]:
-    """Lista todos os custom_fields de leads e retorna set de nomes."""
+# ============================================================
+# HTTP
+# ============================================================
+
+def validar_token(
+    client: httpx.Client, headers: dict
+) -> dict:
+    """GET /account pra validar token e mostrar o subdomain."""
+    r = client.get(f"{BASE}/account", headers=headers, timeout=15.0)
+    if r.status_code == 401:
+        fail("Token rejeitado (HTTP 401 Unauthorized). Verifique se é válido.")
+        sys.exit(1)
+    if r.status_code != 200:
+        fail(f"Falha ao validar conta: HTTP {r.status_code} {r.text[:200]}")
+        sys.exit(1)
+    return r.json() or {}
+
+
+def listar_campos_existentes(
+    client: httpx.Client, headers: dict
+) -> set[str]:
     names: set[str] = set()
     page = 1
     while True:
@@ -75,10 +142,13 @@ def get_existing_field_names(client: httpx.Client, headers: dict) -> set[str]:
             f"{BASE}/leads/custom_fields",
             params={"limit": 250, "page": page},
             headers=headers,
+            timeout=15.0,
         )
         if r.status_code == 204:
             break
-        r.raise_for_status()
+        if r.status_code != 200:
+            fail(f"Falha ao listar campos: HTTP {r.status_code}")
+            sys.exit(1)
         data = r.json() or {}
         items = (data.get("_embedded") or {}).get("custom_fields") or []
         for f in items:
@@ -92,7 +162,6 @@ def get_existing_field_names(client: httpx.Client, headers: dict) -> set[str]:
 
 
 def construir_payload_motivo(numero: int) -> dict:
-    """multiselect com 5 opções (igual 1.MOTIVO)."""
     return {
         "name": f"{numero}.MOTIVO",
         "type": "multiselect",
@@ -104,7 +173,6 @@ def construir_payload_motivo(numero: int) -> dict:
 
 
 def construir_payload_exames(numero: int) -> dict:
-    """select com 5 opções (igual 1.EXAMES)."""
     return {
         "name": f"{numero}.EXAMES",
         "type": "select",
@@ -118,8 +186,6 @@ def construir_payload_exames(numero: int) -> dict:
 def criar_campo(
     client: httpx.Client, headers: dict, payload: dict
 ) -> dict | None:
-    """POST /api/v4/leads/custom_fields. Kommo aceita lista de campos
-    OU um único objeto. Aqui usamos lista de 1 elemento."""
     r = client.post(
         f"{BASE}/leads/custom_fields",
         json=[payload],
@@ -131,61 +197,101 @@ def criar_campo(
             "custom_fields", []
         )
         return items[0] if items else None
-    print(
-        f"  ERRO HTTP {r.status_code}: {r.text[:300]}", file=sys.stderr,
-    )
+    fail(f"HTTP {r.status_code}: {r.text[:300]}")
     return None
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--apply", action="store_true",
-        help="Cria os campos no Kommo. Sem essa flag roda em dry-run.",
-    )
-    args = parser.parse_args()
+# ============================================================
+# MAIN
+# ============================================================
 
+def main() -> int:
+    cabecalho("CRIAR CAMPOS KOMMO — pacientes 2 a 6")
+    print(
+        "Replica 1.MOTIVO + 1.EXAMES (já criados) para os pacientes\n"
+        "2, 3, 4, 5 e 6 — total 10 campos."
+    )
+
+    cabecalho("PASSO 1/4 — TOKEN")
     token = get_token()
+
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
 
-    # Lista o que serão os 10 campos a criar
-    campos: list[dict] = []
-    for n in range(2, 7):
-        campos.append(construir_payload_motivo(n))
-        campos.append(construir_payload_exames(n))
-
-    if not args.apply:
-        print("=== DRY-RUN — nenhum campo será criado ===\n")
-        print(
-            "Pra criar de verdade, rode novamente com --apply:\n"
-            "  python3 scripts/criar_campos_pacientes_kommo.py --apply\n"
-        )
-        print("Campos que serão criados:\n")
-        for c in campos:
-            n_enums = len(c.get("enums", []))
-            print(f"  • {c['name']:<14}  type={c['type']:<11}  {n_enums} opções")
-        return 0
-
+    cabecalho("PASSO 2/4 — VALIDANDO TOKEN")
     with httpx.Client(timeout=15.0) as client:
-        print("=== Conectando ao Kommo ===")
-        existentes = get_existing_field_names(client, headers)
-        print(f"Total de custom_fields hoje: {len(existentes)}\n")
+        acc = validar_token(client, headers)
+        ok(f"Conta: {acc.get('name', 'desconhecida')} "
+           f"(subdomain: {acc.get('subdomain', '?')})")
 
+        cabecalho("PASSO 3/4 — DETECTANDO CAMPOS JÁ EXISTENTES")
+        existentes = listar_campos_existentes(client, headers)
+        ok(f"Total de custom_fields atuais: {len(existentes)}")
+        if "1.MOTIVO" in existentes:
+            ok("1.MOTIVO já existe (será replicado)")
+        else:
+            warn(
+                "1.MOTIVO NÃO foi encontrado — verifique se foi criado "
+                "antes de continuar."
+            )
+        if "1.EXAMES" in existentes:
+            ok("1.EXAMES já existe (será replicado)")
+        else:
+            warn(
+                "1.EXAMES NÃO foi encontrado — verifique se foi criado "
+                "antes de continuar."
+            )
+
+        # Plano
+        a_criar = []
+        a_pular = []
+        for n in range(2, 7):
+            for payload_fn in (
+                construir_payload_motivo,
+                construir_payload_exames,
+            ):
+                p = payload_fn(n)
+                if p["name"] in existentes:
+                    a_pular.append(p["name"])
+                else:
+                    a_criar.append(p)
+
+        cabecalho(
+            f"PASSO 4/4 — PLANO: "
+            f"{len(a_criar)} novos · {len(a_pular)} já existem"
+        )
+        if a_pular:
+            print("  Pular (já existem):")
+            for n in a_pular:
+                print(f"    • {n}")
+        if a_criar:
+            print("  Criar:")
+            for p in a_criar:
+                print(f"    • {p['name']:<14}  {p['type']:<11}  "
+                      f"{len(p['enums'])} opções")
+        else:
+            cabecalho("RESULTADO")
+            ok("Nada a fazer — todos os 10 campos já existem.")
+            return 0
+
+        # Confirmação
+        print()
+        resp = input(
+            f"Criar os {len(a_criar)} campos no Kommo agora? [s/N]: "
+        ).strip().lower()
+        if resp not in ("s", "sim", "y", "yes"):
+            warn("Abortado pelo usuário. Nenhum campo foi criado.")
+            return 0
+
+        cabecalho("CRIANDO CAMPOS")
         criados = 0
-        pulados = 0
         falhas = 0
-        for c in campos:
-            nome = c["name"]
-            if nome in existentes:
-                print(f"  [SKIP] {nome:<14} — já existe")
-                pulados += 1
-                continue
-            print(f"  [POST] {nome:<14} ...", end=" ", flush=True)
-            res = criar_campo(client, headers, c)
+        for p in a_criar:
+            print(f"  POST  {p['name']:<14} ...", end=" ", flush=True)
+            res = criar_campo(client, headers, p)
             if res:
                 fid = res.get("id")
                 print(f"OK (field_id={fid})")
@@ -193,15 +299,26 @@ def main() -> int:
             else:
                 print("FALHOU")
                 falhas += 1
-            # Respeitar rate-limit
             time.sleep(0.4)
 
+        cabecalho("RESUMO")
+        ok(f"{criados} campos criados")
+        if a_pular:
+            ok(f"{len(a_pular)} já existiam (pulados)")
+        if falhas:
+            fail(f"{falhas} falharam — verifique os erros acima")
+            return 1
         print(
-            f"\n=== Final: {criados} criados, {pulados} pulados, "
-            f"{falhas} falhas ==="
+            "\n  Próximo passo: abra qualquer lead → aba Pacientes → role\n"
+            "  até SEGUNDO/TERCEIRO/QUARTO/QUINTO/SEXTO PACIENTE e confirme\n"
+            "  que os campos N.MOTIVO e N.EXAMES aparecem."
         )
-        return 0 if falhas == 0 else 1
+        return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\n\nAbortado (Ctrl+C).", file=sys.stderr)
+        sys.exit(130)

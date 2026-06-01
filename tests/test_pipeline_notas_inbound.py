@@ -1,11 +1,15 @@
-"""Pytest da gravação dupla de notas Kommo (paciente + Lia).
+"""Pytest da gravação de notas Kommo — APENAS Lia (outbound).
 
-Origem: lead 23742328 Diones Alves Santos (01/06/2026). Notas do Kommo
-mostravam apenas "Lia (WhatsApp):" — respostas do paciente sumiam, virando
-monólogo impossível de auditar.
+Histórico:
+- 01/06/2026 manhã: introduzimos gravação dupla (paciente + Lia) pra
+  facilitar auditoria de coerência (origem bug Diones 23742328).
+- 01/06/2026 17:39 — Fábio decidiu reverter parcialmente: nota do
+  paciente NÃO precisa virar nota Kommo (a mensagem já aparece no chat
+  nativo). Mantemos APENAS a nota outbound da Lia, pra preservar
+  observabilidade do agente sem poluir o feed.
 
-Garantia: TODA chamada ao _sync_kommo_safely com user_text não vazio grava
-ANTES uma nota "💬 Paciente (WhatsApp):" + DEPOIS a nota da Lia.
+Garantia: _sync_kommo_safely grava SOMENTE 1 nota por turno (a da Lia)
+quando há `answer`. Não grava nada do `user_text`.
 """
 from __future__ import annotations
 
@@ -40,12 +44,13 @@ def _carregar_metodo():
 
 
 # ----------------------------------------------------------------------
-# Casos
+# Política nova: SOMENTE Lia em notas
 # ----------------------------------------------------------------------
 
-class TestNotasInbound:
+class TestNotasApenasLia:
 
-    def test_grava_nota_paciente_antes_nota_lia(self):
+    def test_user_text_e_answer_grava_so_lia(self):
+        """Mesmo com user_text presente, NÃO grava nota inbound."""
         sync = _carregar_metodo()
         p = _FakePipeline()
         sync(
@@ -57,19 +62,16 @@ class TestNotasInbound:
             channel="81331005",
         )
         calls = p.kommo.add_note.call_args_list
-        # Deve ter 2 chamadas: 1 do paciente + 1 da Lia
-        assert len(calls) == 2, f"esperado 2 chamadas add_note, veio {len(calls)}"
-        # Primeira = paciente
-        primeira_text = calls[0][0][1]
-        assert "Paciente" in primeira_text
-        assert "oi, quero agendar consulta" in primeira_text
-        # Segunda = Lia
-        segunda_text = calls[1][0][1]
-        assert "Lia" in segunda_text
-        assert "Olá!" in segunda_text
+        assert len(calls) == 1, (
+            f"esperado 1 chamada add_note (só Lia), veio {len(calls)}"
+        )
+        nota = calls[0][0][1]
+        assert "Lia" in nota
+        assert "Olá!" in nota
+        # NÃO pode conter o cabeçalho de paciente
+        assert "Paciente" not in nota
 
     def test_user_text_vazio_so_grava_nota_lia(self):
-        """Quando user_text é None ou vazio, NÃO grava nota inbound."""
         sync = _carregar_metodo()
         p = _FakePipeline()
         sync(
@@ -96,27 +98,11 @@ class TestNotasInbound:
             channel="81331005",
         )
         calls = p.kommo.add_note.call_args_list
-        # só a Lia
         assert len(calls) == 1
         assert "Lia" in calls[0][0][1]
 
-    def test_user_text_longo_e_truncado_em_3000(self):
-        sync = _carregar_metodo()
-        p = _FakePipeline()
-        longo = "x" * 4000
-        sync(
-            p, phone="5561999999999",
-            conversation_key="x",
-            user_text=longo, answer="ok",
-            channel="81331005",
-        )
-        primeira = p.kommo.add_note.call_args_list[0][0][1]
-        # Cabeçalho + corpo truncado + reticências
-        assert "Paciente" in primeira
-        assert len(primeira) < 3100
-        assert "…" in primeira
-
-    def test_answer_vazio_so_grava_nota_paciente(self):
+    def test_answer_vazio_NAO_grava_nada(self):
+        """Sem answer, não há nada da Lia pra gravar — não grava NADA."""
         sync = _carregar_metodo()
         p = _FakePipeline()
         sync(
@@ -125,9 +111,8 @@ class TestNotasInbound:
             user_text="oi", answer="",
             channel="81331005",
         )
-        calls = p.kommo.add_note.call_args_list
-        assert len(calls) == 1
-        assert "Paciente" in calls[0][0][1]
+        # Nenhuma nota: nem paciente (política), nem Lia (answer vazio)
+        assert p.kommo.add_note.call_count == 0
 
     def test_lead_nao_encontrado_nao_grava_nada(self):
         sync = _carregar_metodo()
@@ -153,20 +138,35 @@ class TestNotasInbound:
             channel="81331005",
         )
 
-    def test_add_note_inbound_falha_nao_bloqueia_lia(self):
-        """Se nota do paciente falhar (rede flaky), a da Lia ainda grava."""
+    def test_add_note_outbound_falha_nao_bloqueia_sync(self):
+        """Se a nota da Lia falhar (rede flaky), o resto do sync continua."""
         sync = _carregar_metodo()
         p = _FakePipeline()
-        # primeira chamada: exception; segunda: ok
-        p.kommo.add_note.side_effect = [
-            RuntimeError("kommo flaky"),
-            True,
-        ]
+        p.kommo.add_note.side_effect = RuntimeError("kommo flaky")
+        # Não deve crashar — exception é capturada
         sync(
             p, phone="5561999999999",
             conversation_key="x",
             user_text="oi", answer="ola",
             channel="81331005",
         )
-        # Foi tentado 2 vezes (paciente E Lia)
-        assert p.kommo.add_note.call_count == 2
+        # Tentou 1 vez (só a Lia)
+        assert p.kommo.add_note.call_count == 1
+
+    def test_nota_lia_NAO_contem_marca_paciente(self):
+        """Sanity check: o texto da nota nunca pode vazar 'Paciente'."""
+        sync = _carregar_metodo()
+        p = _FakePipeline()
+        sync(
+            p, phone="5561x",
+            conversation_key="x",
+            user_text="texto qualquer do paciente",
+            answer="resposta da Lia normal",
+            channel="81331005",
+        )
+        calls = p.kommo.add_note.call_args_list
+        assert len(calls) == 1
+        # A única nota é da Lia — e ela NÃO carrega o texto do paciente
+        nota = calls[0][0][1]
+        assert "texto qualquer do paciente" not in nota
+        assert "Lia" in nota
