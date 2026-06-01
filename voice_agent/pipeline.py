@@ -480,9 +480,28 @@ class VoicePipeline:
             if not lead_id:
                 log.info("Kommo sync: lead não encontrado pra %s", phone)
                 return
-            # Nota da conversa — só a resposta da Lia, para a equipe
-            # acompanhar o andamento no Kommo (os canais não passam
-            # pelo chat nativo).
+            # Nota da conversa — DOIS lados: a mensagem do paciente
+            # E a resposta da Lia. Antes só a Lia entrava nas notes,
+            # o que tornava a conversa um monólogo no Kommo e
+            # dificultava auditoria de coerência lógica.
+            # Origem do fix: lead 23742328 Diones Alves Santos
+            # (01/06/2026 — sessão noite Fábio).
+            #
+            # 1) Inbound do paciente (se temos user_text)
+            if user_text and user_text.strip():
+                inbound_text = user_text.strip()
+                # Limita pra evitar nota gigante (KB §nota max ~3000c)
+                if len(inbound_text) > 3000:
+                    inbound_text = inbound_text[:3000] + "…"
+                inbound_note = f"💬 Paciente (WhatsApp):\n{inbound_text}"
+                try:
+                    self.kommo.add_note(lead_id, inbound_note)
+                except Exception as e:  # noqa: BLE001
+                    log.warning(
+                        "Kommo nota inbound falhou (%s): %s", phone, e,
+                    )
+
+            # 2) Outbound da Lia
             if answer:
                 note = f"🤖 Lia (WhatsApp):\n{answer.strip()}"
                 try:
