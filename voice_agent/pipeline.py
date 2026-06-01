@@ -208,6 +208,15 @@ class VoicePipeline:
                         len(slots), medico_param,
                         "ctx" if known.get("medico") else "default_karla",
                     )
+                    # Sucesso: zera contador do circuit breaker
+                    try:
+                        _redis = getattr(self, "_redis", None)
+                        if _redis is not None:
+                            _redis.delete(
+                                f"blink:agenda_vazia_seq:{conversation_key}"
+                            )
+                    except Exception:  # noqa: BLE001
+                        pass
                 else:
                     # Lead em status AGENDAR/REAGENDAR com agenda vazia é
                     # SINTOMA: Medware silenciou, JWT vencido, ou médico/unidade
@@ -228,6 +237,34 @@ class VoicePipeline:
                             caller_context.get("lead_id"), _status_id,
                             medico_param, unidade_param,
                         )
+                        # Circuit breaker (task #141, origem bug Adelia)
+                        # Conta falhas consecutivas POR conversa em Redis.
+                        # Após 3 falhas → escalona pra humano.
+                        try:
+                            _redis = getattr(self, "_redis", None)
+                            if _redis is not None:
+                                _key = (
+                                    f"blink:agenda_vazia_seq:"
+                                    f"{conversation_key}"
+                                )
+                                seq = int(_redis.incr(_key))
+                                _redis.expire(_key, 1800)  # 30 min de janela
+                                caller_context["agenda_vazia_seq"] = seq
+                                if seq >= 3:
+                                    caller_context[
+                                        "escalonar_humano_medware_off"
+                                    ] = True
+                                    log.error(
+                                        "[CIRCUIT BREAKER MEDWARE] %d falhas "
+                                        "seguidas conv=%s lead=%s — "
+                                        "escalonar humano",
+                                        seq, conversation_key,
+                                        caller_context.get("lead_id"),
+                                    )
+                        except Exception as _e_cb:  # noqa: BLE001
+                            log.warning(
+                                "circuit breaker contador falhou: %s", _e_cb,
+                            )
                     else:
                         log.info(
                             "Medware: 0 horários para %s/%s (status=%s)",
@@ -237,6 +274,55 @@ class VoicePipeline:
                 # WARNING não basta — origem do bug Juliene foi silêncio
                 # silencioso. Subir pra ERROR.
                 log.error("Medware horários falhou: %s", e)
+
+        # 2d-bis-2) Pré-popular 1.MOTIVO + 1.EXAMES em conversas vivas
+        # (task #140, origem bug Adelia 24056883 — 01/06/2026).
+        # Antes selecionar_agrupador só era chamado em agendamento.salvar,
+        # então leads "em conversa" (sem agendamento gravado) ficavam com
+        # 1.EXAMES vazio. Agora calculamos cedo: assim que perfil + motivo
+        # estão no caller_context. Grava no Kommo via thread separada
+        # (best-effort, não bloqueia resposta da Lia).
+        if caller_context and caller_context.get("lead_id"):
+            try:
+                _known = caller_context.get("known") or {}
+                _perfil = _known.get("perfil") or ""
+                _motivo = _known.get("motivo") or ""
+                _nasc_iso = _known.get("data_nasc_iso") or None
+                if _perfil and _motivo:
+                    from voice_agent.procedimentos import (
+                        agrupador_label_kommo,
+                        classificar_motivo_tipo_kommo,
+                        selecionar_agrupador,
+                    )
+                    _nome_agr, _ = selecionar_agrupador(
+                        perfil_kommo=_perfil,
+                        birth_date_iso=_nasc_iso,
+                        motivo=_motivo,
+                    )
+                    _agrupa_label = agrupador_label_kommo(_nome_agr)
+                    _motivo_tipo = classificar_motivo_tipo_kommo(_motivo)
+                    # Disponibiliza pro caller_context (pra responder usar)
+                    caller_context["agrupador_calculado"] = _agrupa_label
+                    caller_context["motivo_tipo_calculado"] = _motivo_tipo
+                    # Grava no Kommo em background pra não bloquear
+                    if self.kommo is not None:
+                        _lead_id = caller_context["lead_id"]
+                        _campos = {
+                            "motivo_tipo_paciente_1": _motivo_tipo,
+                            "agrupador_exames_paciente_1": _agrupa_label,
+                        }
+                        threading.Thread(
+                            target=self._gravar_agrupador_silencioso,
+                            args=(_lead_id, _campos),
+                            daemon=True,
+                        ).start()
+                        log.info(
+                            "[AGRUPADOR EARLY] lead=%s motivo_tipo=%s "
+                            "agrupador=%s",
+                            _lead_id, _motivo_tipo, _agrupa_label,
+                        )
+            except Exception as e:  # noqa: BLE001
+                log.warning("[AGRUPADOR EARLY] falhou: %s", e)
 
         # 2d-bis) Checklist dados mínimos pra gravar Medware (task #123 / 31-05-2026)
         # Origem: lead Juliene 24053159 — Lia ofereceu slot sem ter nome
@@ -459,6 +545,29 @@ class VoicePipeline:
             transcript=user_text, answer=answer, sent=True,
             model_used=model_used, articles_used=articles_used,
         )
+
+    def _gravar_agrupador_silencioso(
+        self, lead_id: int, campos: dict,
+    ) -> None:
+        """Grava motivo_tipo + agrupador no Kommo em thread background.
+
+        Task #140. Origem: bug Adelia 24056883 — 01/06/2026. Conversas
+        progrediam (perfil + motivo coletados) mas 1.EXAMES/Grupo ficava
+        vazio porque selecionar_agrupador só era chamado em
+        agendamento.salvar (que muitas vezes não chega).
+        """
+        if self.kommo is None or not lead_id:
+            return
+        try:
+            self.kommo.update_lead_fields(lead_id, campos)
+            log.info(
+                "[AGRUPADOR EARLY] gravado no Kommo lead=%s campos=%s",
+                lead_id, list(campos.keys()),
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning(
+                "[AGRUPADOR EARLY] gravação falhou lead=%s: %s", lead_id, e,
+            )
 
     def _sync_kommo_safely(
         self,

@@ -246,6 +246,46 @@ def _data_nasc_iso(value: Optional[str]) -> str:
     return v
 
 
+def _extrair_codigos_procedimento(data: Any) -> list[int]:
+    """Normaliza qualquer formato de resposta Medware num set de codProcedimento.
+
+    Tolera: lista direta, dict com chave de coleção, ou dict único.
+    Procura os nomes de campo de código conhecidos. Não levanta exceção —
+    devolve sempre uma lista (vazia se nada reconhecível).
+    """
+    if not data:
+        return []
+    registros: list[Any] = []
+    if isinstance(data, list):
+        registros = data
+    elif isinstance(data, dict):
+        for key in ("procedimentos", "itens", "items", "data", "lista", "registros"):
+            v = data.get(key)
+            if isinstance(v, list):
+                registros = v
+                break
+        else:
+            registros = [data]
+    out: list[int] = []
+    for r in registros:
+        if isinstance(r, dict):
+            for key in ("codProcedimento", "codigoProcedimento",
+                        "codProc", "codigo", "cod"):
+                val = r.get(key)
+                if val is not None:
+                    try:
+                        out.append(int(val))
+                    except (TypeError, ValueError):
+                        pass
+                    break
+        else:
+            try:
+                out.append(int(r))
+            except (TypeError, ValueError):
+                pass
+    return sorted(set(out))
+
+
 def _data_hora_iso(value: Optional[str]) -> str:
     """Normaliza data/hora do agendamento para yyyy-MM-ddTHH:mm.
 
@@ -547,6 +587,40 @@ class MedwareClient:
             return data
         return []
 
+    def listar_procedimentos_realizados(self, agendamento_id: int) -> list[int]:
+        """Lista os códigos de procedimentos REALIZADOS num agendamento.
+
+        Usado pela auditoria pós-consulta (task #82): compara o PLANEJADO
+        (N.EXAMES do Kommo, via selecionar_agrupador) com o que foi de fato
+        executado no Medware. A diferença vira `N.AGRUPAMENTO ALTERADO=true`
+        + reabertura da autorização do convênio.
+
+        ATENÇÃO — endpoint A CONFIRMAR contra a API real do Medware. A spec
+        OpenAPI v1.5.0 não documenta explicitamente "procedimentos
+        realizados"; tentamos os caminhos candidatos conhecidos e
+        normalizamos a resposta. Se nenhum responder, devolve [] e a
+        auditoria trata como `fonte_vazia` (não inventa nada — segue a
+        lição "nunca codifico mapeamento sem listar a fonte").
+
+        Devolve lista de codProcedimento (int), deduplicada e ordenada.
+        """
+        if not agendamento_id:
+            return []
+        candidatos = (
+            ("Medware/Agendamento/Procedimentos",
+             {"codAgendamento": int(agendamento_id)}),
+            ("Medware/Procedimento/Realizados",
+             {"codAgendamento": int(agendamento_id)}),
+            ("Medware/Worklist/Listar",
+             {"codAgendamento": int(agendamento_id)}),
+        )
+        for path, params in candidatos:
+            data = self._get(path, params)
+            codigos = _extrair_codigos_procedimento(data)
+            if codigos:
+                return codigos
+        return []
+
     def listar_horarios_livres(
         self,
         data_inicio: str, data_fim: str,
@@ -583,7 +657,7 @@ class MedwareClient:
 
     def horarios_para_agente(
         self, medico_nome: str, unidade_nome: Optional[str] = None,
-        dias: int = 90,
+        dias: int = 90, max_retries: int = 3,
     ) -> list[dict]:
         """Vagas livres reais para o agente OFERECER ao paciente.
 
@@ -591,7 +665,15 @@ class MedwareClient:
         consulta as vagas dos próximos `dias` e devolve uma lista limpa:
           {data_iso, data_br, dia_semana, hora}
         Devolve [] se o médico não estiver mapeado ou não houver vaga.
+
+        RETRY (task #139, origem bug Adelia 24056883 — 01/06/2026):
+        Medware é silencioso intermitente — uma chamada pode retornar
+        [] mesmo quando há slots. Hoje tentamos 3 vezes com backoff
+        0.5s → 1s → 2s antes de devolver vazio. Só tenta de novo se
+        o cod_medico foi resolvido (médico mapeado) — caso contrário
+        retorno [] é definitivo.
         """
+        import time as _time
         cod_medico = _code_lookup(MEDICO_CODES, medico_nome)
         if not cod_medico:
             return []
@@ -599,10 +681,42 @@ class MedwareClient:
         hoje = datetime.now(_TZ)
         ini = (hoje + timedelta(days=1)).strftime("%d/%m/%Y")
         fim = (hoje + timedelta(days=dias)).strftime("%d/%m/%Y")
-        raw = self.listar_horarios_livres(
-            data_inicio=ini, data_fim=fim,
-            cod_medico=cod_medico, cod_unidade=cod_unidade,
-        )
+        raw: list[dict] = []
+        delay = 0.5
+        for tentativa in range(1, max_retries + 1):
+            try:
+                raw = self.listar_horarios_livres(
+                    data_inicio=ini, data_fim=fim,
+                    cod_medico=cod_medico, cod_unidade=cod_unidade,
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "[MEDWARE horarios_para_agente tentativa %d] exception: %s",
+                    tentativa, e,
+                )
+                raw = []
+            if raw:
+                if tentativa > 1:
+                    log.info(
+                        "[MEDWARE horarios_para_agente] sucesso na tentativa %d "
+                        "(medico=%s unidade=%s)",
+                        tentativa, medico_nome, unidade_nome,
+                    )
+                break
+            if tentativa < max_retries:
+                log.warning(
+                    "[MEDWARE horarios_para_agente tentativa %d/%d VAZIA] "
+                    "medico=%s unidade=%s — backoff %ss",
+                    tentativa, max_retries, medico_nome, unidade_nome, delay,
+                )
+                _time.sleep(delay)
+                delay *= 2
+        if not raw:
+            log.error(
+                "[MEDWARE horarios_para_agente] %d tentativas TODAS VAZIAS — "
+                "medico=%s unidade=%s — escalonar humano se status AGENDAR",
+                max_retries, medico_nome, unidade_nome,
+            )
         out: list[dict] = []
         for s in raw:
             d = str(s.get("data") or "")[:10]   # YYYY-MM-DD
