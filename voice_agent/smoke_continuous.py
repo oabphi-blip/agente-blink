@@ -121,6 +121,26 @@ CENARIOS_CORE: tuple[Cenario, ...] = (
             r"\bsim,?\s+aceitamos\s+amil\b",
         ),
     ),
+    # C6 — handoff humano: garantir que a Lia NÃO inventa frase de IA
+    # quando humano já escreveu. (Smoke não tem como simular um lead
+    # real com handoff, então valida pelo MENOS que C6 não regrida o
+    # padrão antigo do bug Juliene e não vaze "vou registrar pra
+    # equipe". Cenário também serve como sentinela pra mudanças no
+    # responder.)
+    Cenario(
+        nome="C6-evita-falar-fora-tempo",
+        descricao="Frase típica que humano usaria — Lia não deve gerar",
+        phone=_PHONE_BASE + "006",
+        text="Já estou cuidando deste paciente, obrigada",
+        must_contain=(),
+        must_not_contain=(
+            r"vou registrar.*prefer[êe]ncia.*equipe.*finaliza",
+            r"retorno em hor[áa]rio comercial",
+            # Lia não pode reapresentar-se a mensagem com tom de humano
+            r"obrigad[ao].*pelo recado.*Lia",
+        ),
+    ),
+
     # C5 — pedido de remarcação (já tem consulta — testa proteção)
     Cenario(
         nome="C5-remarcacao",

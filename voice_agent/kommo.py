@@ -376,6 +376,27 @@ def _format_date_iso(iso_yyyymmdd: str) -> Optional[str]:
     return f"{iso_yyyymmdd[:10]}T00:00:00-03:00"
 
 
+def ler_cf_valor(lead_json: dict, field_id: int) -> Optional[str]:
+    """Lê o valor (texto/label) de um custom_field do lead pelo field_id.
+
+    Para campos select/multiselect o Kommo devolve o label em `value`.
+    Devolve o 1º valor encontrado como string, ou None se ausente/vazio.
+    Função pura — facilita a auditoria (task #82) testar sem rede.
+    """
+    if not isinstance(lead_json, dict):
+        return None
+    for cf in (lead_json.get("custom_fields_values") or []):
+        if not isinstance(cf, dict):
+            continue
+        if cf.get("field_id") == field_id:
+            vals = cf.get("values") or []
+            if vals and isinstance(vals[0], dict):
+                v = vals[0].get("value")
+                if v is not None and str(v).strip() != "":
+                    return str(v)
+    return None
+
+
 def _pick_enum(table: dict[str, int], value: str) -> Optional[int]:
     """Faz match case-insensitive + sem acento na tabela de enum."""
     if not value:
@@ -879,6 +900,26 @@ class KommoClient:
             log.warning("Kommo get_lead_main_phone erro (lead %s): %s", lead_id, e)
         return None
 
+    def get_lead(self, lead_id: int | str) -> Optional[dict]:
+        """Busca o lead completo (inclui custom_fields_values).
+
+        Usado pela auditoria pós-consulta (task #82) pra ler N.EXAMES,
+        N.NOME, médico/unidade/convênio e cod_agendamento. Devolve o JSON
+        bruto do Kommo ou None em erro.
+        """
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.get(
+                    f"{self._base}/leads/{lead_id}", headers=self._headers,
+                )
+            if r.status_code != 200:
+                log.warning("Kommo get_lead %s: HTTP %d", lead_id, r.status_code)
+                return None
+            return r.json() or None
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo get_lead erro (lead %s): %s", lead_id, e)
+            return None
+
     def update_lead_status(
         self, lead_id: int, status_id: int, pipeline_id: Optional[int] = None,
     ) -> bool:
@@ -1119,26 +1160,49 @@ class KommoClient:
     ) -> Optional[str]:
         """Decide se o agente deve ficar em SILÊNCIO para este lead.
 
-        REGRA ÚNICA: silêncio quando o lead está em uma etapa humana do
-        funil (ST_AGENT_OFF). Toda a inteligência de "humano cuida desse
-        lead" fica centralizada no PIPELINE do Kommo — o atendente humano
-        move o lead pra etapa humana ao assumir, e move de volta quando
-        termina. A Lia só olha onde o lead está parado.
+        DUAS REGRAS COMBINADAS (qualquer uma dispara silêncio):
 
-        Decisão tomada em 29/05/2026 (Fábio): simplificar pra usar SÓ
-        etapas. Removidas as verificações de campo ATIVADO IA? e de
-        janela handoff temporal. Razão: 3 sinais redundantes geravam
-        comportamento confuso (lead 24038117 Talita).
+        1) Lead está em etapa humana do funil (ST_AGENT_OFF). Modelo
+           ideal: atendente move lead pra etapa humana ao assumir.
 
-        IMPORTANTE: pra esse modelo funcionar bem, é OBRIGATÓRIO que o
-        atendente humano mova o lead pra etapa humana SEMPRE que assumir.
-        Recomendação: configurar regra Salesbot Kommo que move o lead
-        automaticamente quando humano responde no chat.
+        2) Kommo gerou service_message "🛑 Agentes de IA foram
+           desativados neste chat" mais recente que qualquer marca de
+           reativação. Esse sinal vem AUTOMÁTICO quando o atendente
+           humano escreve manualmente no chat — independente de mover
+           o lead. Esta é a defesa que cobre quando o atendente esquece
+           de mover o lead.
 
-        Retorna o motivo ('etapa-humana') ou None.
+        Histórico:
+        - Em 29/05/2026 ficou SÓ etapa-humana (decisão de simplificação).
+        - Em 01/06/2026 Fábio identificou que Lia continuava respondendo
+          POR CIMA quando atendente escrevia sem mover o lead. Re-plugada
+          ia_status_from_notes (que sempre existiu mas não era usada
+          pelo gate principal).
+
+        Trade-off: chamada extra de GET /leads/{id}/notes (~200ms).
+        Aceito porque o custo de Lia falar por cima é maior.
+
+        Retorna o motivo ('etapa-humana' | 'humano-escreveu-no-chat')
+        ou None.
         """
         if not caller_context or not caller_context.get("found"):
             return None
+
+        # Regra 1: etapa humana do funil
         if caller_context.get("status_id") in ST_AGENT_OFF:
             return "etapa-humana"
+
+        # Regra 2: service_message do Kommo (humano escreveu)
+        lead_id = caller_context.get("lead_id")
+        if lead_id:
+            try:
+                ia_status = self.ia_status_from_notes(lead_id)
+                if ia_status == "DESATIVADO":
+                    return "humano-escreveu-no-chat"
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "agent_paused_for_lead: ia_status_from_notes falhou "
+                    "(lead %s): %s", lead_id, e,
+                )
+
         return None
