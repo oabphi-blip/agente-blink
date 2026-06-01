@@ -639,6 +639,32 @@ class VoicePipeline:
             ).upper()
             if estado_anterior == "DESATIVADO":
                 fields["hora_ativacao_ts"] = int(time.time())
+
+            # PROTEÇÃO ANTI-ENVENENAMENTO (task #145, origem bug Diones 23742328)
+            # Bug: Lia alucinou "Dr. Fabrício" quando ctx tinha "Dra. Karla";
+            # extract_lead_fields detectou "Fabrício" no histórico; pipeline
+            # gravou MÉDICOS=Fabrício no Kommo, sobrescrevendo Karla.
+            # Próximo turn: ctx vem com medico=Fabrício, TRAVA defende o errado.
+            #
+            # Fix: MÉDICO/UNIDADE/CONVÊNIO só são gravados se o lead ainda
+            # NÃO tem valor. Atendente humano segue podendo alterar manualmente
+            # pelo Kommo (esse fluxo nem passa por aqui).
+            known_atual = ctx.get("known") or {}
+            for campo_critico in ("medico", "unidade", "convenio"):
+                if (
+                    fields.get(campo_critico)
+                    and known_atual.get(campo_critico)
+                    and str(fields[campo_critico]).strip().lower()
+                    != str(known_atual[campo_critico]).strip().lower()
+                ):
+                    log.warning(
+                        "[ANTI-ENVENENAMENTO] lead=%s campo=%s já é %r, "
+                        "NÃO sobrescrevendo com %r (provável alucinação Lia)",
+                        lead_id, campo_critico,
+                        known_atual[campo_critico], fields[campo_critico],
+                    )
+                    fields.pop(campo_critico)
+
             if fields:
                 self.kommo.update_lead_fields(lead_id, fields)
                 # Lead perdido por convênio não credenciado → fecha o card
