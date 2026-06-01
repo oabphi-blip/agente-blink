@@ -138,5 +138,63 @@ Worker daemon roda 5 cenários core a cada `SMOKE_INTERVALO_SEG` (default 3600s)
 
 ---
 
-Última atualização: **31/05/2026 23:45 BRT**.
+Última atualização: **31/05/2026 23:45 BRT** (inicial) → **01/06/2026 01:30 BRT** (extensão).
+
+---
+
+## EXTENSÃO 01:30 BRT — 3 features extras commitadas (não bloqueiam)
+
+A sessão estendeu com 3 entregas adicionais (commits aguardando push):
+
+### Commit `d787419` — Refinamento C1 smoke
+- `smoke_continuous.py` C1 `must_contain` agora aceita qualquer um de
+  `lia|blink|oftalmologia|olá|oi|prefer|agendar|ajud`.
+- Origem: smoke real em prod retornou 4/5 (Lia respondeu "Oi! posso te ligar?"
+  saudação válida sem mencionar "lia" literalmente).
+
+### Commit `911a833` — Ponte Slack → auditoria (task #82 fechada)
+- `voice_agent/slack_auditoria.py`: parser + mapping user→papel + extração lead/paciente
+- Endpoint `POST /admin/slack-event` no `webhook.py`: handshake + busca msg + `confirmar_assinatura`
+- 24 pytest novos
+- Pra ativar: setar `SLACK_BOT_TOKEN_AUDITORIA` + `SLACK_AUDIT_MAPPING_JSON` no Easypanel + Event Subscriptions no app Slack
+
+### Commit `76dbbb3` — Docs Slack (CLAUDE.md §9-C + ROLLOUT §8)
+- 3 passos pra ativar fluxo Slack real
+
+### Commit `6674739` — Áudios Fabricio (task #68 fechada)
+- `voice_agent/audios_fabricio.py`: catálogo 7 áudios + detector marcador `[AUDIO:audio_id]` + 3 guardas (preferência paciente, janela 24h, limite por conversa)
+- Integração `pipeline.py`: detecta marcador → valida guardas → envia texto SEM marcador + áudio em sequência via `evolution.send_audio`
+- 31 pytest novos
+- Pra ativar: upload de 7 mp3 físicos pra `voice_agent/static/audios/dr_fabricio/` + `AUDIOS_FABRICIO_ENABLED=1`
+
+---
+
+## Métricas finais da sessão noite (consolidado)
+
+| Métrica | Antes | Depois | Δ |
+|---|---|---|---|
+| Testes pytest | 455 | **639** | +184 |
+| Filtros pós-geração responder.py | 4 | **5** | +1 |
+| Camadas defesa preventiva | 0 | **4** | +4 |
+| Endpoints `/admin/*` novos | — | **+3** | smoke-tick · slack-event · auditoria-confirma já existia |
+| Workers cron embutidos | 2 | **3** | + smoke (opt-in) |
+| Estados FSM | 0 | **7** | TRIAGEM→...→POS_GRAVAÇÃO |
+| Tools Claude estruturadas | 0 | **3** | oferecer_slot + confirmar_dados + gravar_agendamento |
+| Tasks fechadas | — | **20+** | #82, #68, #117-#126, #129-#131 e limpeza |
+| Lições novas | 0 | **2** | bug Juliene + TTS Dra→Doutor |
+| Commits aguardando push | — | **4** | d787419 + 911a833 + 76dbbb3 + 6674739 |
+
+---
+
+## Pendências pra próxima sessão
+
+1. **Push dos 4 commits acumulados** (1 comando no Terminal)
+2. **Implantar** no Easypanel pegando `6674739` (eu cuido via Chrome após push)
+3. **Smoke contra prod** pra validar 5/5 cenários verde
+4. **Upload dos 7 mp3 áudios Fabricio** + `AUDIOS_FABRICIO_ENABLED=1`
+5. **Gerar 24 áudios Ariany TTS** (comando no clipboard do Fábio)
+6. **Setar envs opcionais** (`SMOKE_ENABLED=1`, eventualmente `LIA_TOOLS_ENABLED=1` após 24h)
+7. **Ativar ponte Slack** (configurar app Slack + envs)
+8. **Rotacionar OPENAI_API_KEY** exposta
+
 Próximo handoff a criar: `HANDOFF_01-06-2026.md` no início da próxima sessão.
