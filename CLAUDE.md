@@ -116,6 +116,7 @@ Substituem texto da Lia se detectarem violação:
 | Filtro | Detecta | Substitui por |
 |---|---|---|
 | `_scrub_prohibited` | chaves Pix inválidas | fallback seguro |
+| `_viola_promete_retorno_humano` | **(NOVO 31/05)** "vou registrar pra equipe finalizar" / "retorno em horário comercial" — bug Juliene | oferta de slot real OU honestidade "reconsulto em 1min" |
 | `_viola_oferta_agenda` | "consultar agenda" tendo agenda real | pergunta de preferência |
 | `_viola_cobranca_antes_slot` | cobrança sem slot oferecido | "Antes de qualquer pagamento, deixa eu te oferecer os horários reais..." |
 | `_agenda_block` | "Um momentinho", "deixa eu consultar" | proibido — reforço no prompt |
@@ -163,6 +164,28 @@ Resumo:
 Decisões registradas: SDP NÃO tem slot separado · Catarata avaliação == pós-op no Medware.
 Centralizado em `voice_agent/mensagens_ciclo.py::DURACAO_SLOT_MIN_POR_MEDICO`.
 Lição: `lia-atendimento-blink/memoria/bugs-licoes/duracao-slot-medicos.md`.
+
+---
+
+## 9-B. Otimizadores arquiteturais (31/05/2026 — sessão noite)
+
+A partir do bug Juliene (lead 24053159), descobrimos que os 4 filtros pós-geração existentes eram REATIVOS — pegavam padrões de bugs passados. Padrão novo escapava. Implementamos 4 camadas de defesa PREVENTIVA:
+
+| # | Otimizador | Módulo | Toggle | Default |
+|---|---|---|---|---|
+| #4 | Checklist 4 dados mínimos (nome completo + data nasc + CPF + convênio) — Lia não oferece slot sem ter como gravar Medware | `voice_agent/checklist_dados_minimos.py` | sempre-on | ativo |
+| #3 | Smoke contínuo: 5 cenários core (C1 saudação · C2 pediátrico · C3 Juliene-evasiva · C4 Amil · C5 remarcação) — cron 1h + Slack alert | `voice_agent/smoke_continuous.py` | `SMOKE_ENABLED=1` | off |
+| #2 | State machine 7 estados Redis (TRIAGEM → DADOS → CONVÊNIO → AGENDA → CONFIRMAÇÃO → GRAVAÇÃO → POS_GRAVAÇÃO) — transições válidas auditadas, atalhos proibidos bloqueados | `voice_agent/fsm_conversa.py` | sempre-on | ativo |
+| #1 | Tool calling estruturado (`oferecer_slot`, `confirmar_dados_paciente`, `gravar_agendamento_medware`) — modelo CHAMA tool, resposta humana ⊃ resultado real | `voice_agent/tools_lia.py` | `LIA_TOOLS_ENABLED=1` | off (rollout gradual) |
+
+Envs novas pra ligar (Easypanel → Ambiente):
+- `SMOKE_ENABLED=1` + `SMOKE_INTERVALO_SEG=3600` (default 1h) + `SLACK_WEBHOOK_SMOKE_URL=https://hooks.slack.com/...` (opcional)
+- `LIA_TOOLS_ENABLED=1` (quando quiser ativar tool calling)
+- `SMOKE_BASE_URL` (default já aponta pra produção)
+
+Endpoint manual: `POST /admin/smoke-tick?secret=$WEBHOOK_SECRET` — roda os 5 cenários e devolve JSON.
+
+Lição: `lia-atendimento-blink/memoria/bugs-licoes/lia-inventou-retorno-humano-quando-agenda-vazia.md`.
 
 ---
 
@@ -232,6 +255,7 @@ revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 3. **Nunca cobrar sinal antes de oferecer slot concreto**
 4. **Sempre apresentar 2 opções** (Reserva Imediata + Fila de Encaixe)
 5. **Respeitar `ja_agendado=True`** — não oferecer slot novo
+5-A. **Nunca dizer "vou registrar pra equipe finalizar — retorno em horário comercial"** (NOVO 31/05). Sem agenda real → "deixa eu reconsultar, volto em 1 min". Com agenda → oferecer slot concreto. Sem `checklist_dados_minimos.pronto_para_oferecer_slot` → coletar dados antes.
 6. **Não duplicar trabalho do motor** — não rodar batch `kommo_add_note` em
    massa, o reactivation.py já cobre a fila
 7. **Convênio só agenda com 3 pré-requisitos POR PACIENTE** — `N.DATA NASC`,
@@ -350,9 +374,13 @@ Toda sessão Cowork futura, antes de mexer em código:
 
 Só depois disso, começar trabalho. Sem isso = reincidência.
 
-**Handoff mais recente**: `HANDOFF_31-05_PARA_01-06-2026.md`.
+**Handoff mais recente**: `HANDOFF_31-05_NOITE_PARA_01-06-2026.md` (sessão noite — 4 otimizadores arquiteturais).
 
 ---
 
-Última atualização: 31/05/2026 — adicionadas regras 7 e 8 (trava convênio +
-auditoria pós-consulta) e novos itens em construção (auditoria pipeline).
+Última atualização: 31/05/2026 23:30 — sessão noite com bug Juliene 24053159,
+fix 234d4c1 deployado (filtro `_viola_promete_retorno_humano` + bloco AGENDA
+INDISPONÍVEL + log ERROR), 4 otimizadores arquiteturais commits 39fc250 +
+3a5564f (checklist dados mínimos always-on + smoke contínuo opt-in + state
+machine Redis always-on + tool calling opt-in). Total 584 testes passando,
+5/5 cenários smoke manual contra prod verde.
