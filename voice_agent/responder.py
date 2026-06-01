@@ -507,6 +507,28 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
                 "\n----------------------------------------------------------------"
             )
 
+    # Checklist dados mínimos (task #123, origem lead Juliene 24053159).
+    # Se ainda falta dado essencial, INJETA bloco PRÉ-AGENDA antes do
+    # _agenda_block — proíbe oferta de slot até dados completos.
+    pre_agenda_block = ""
+    checklist = ctx.get("checklist_dados_minimos") if isinstance(ctx, dict) else None
+    if checklist and not checklist.get("pronto_para_oferecer_slot", True):
+        try:
+            from voice_agent.checklist_dados_minimos import (
+                ChecklistResultado,
+                render_bloco_pre_agenda,
+            )
+            _resultado = ChecklistResultado(
+                nome_completo_ok=checklist.get("nome_completo_ok", False),
+                data_nascimento_ok=checklist.get("data_nascimento_ok", False),
+                cpf_ok=checklist.get("cpf_ok", False),
+                convenio_definido_ok=checklist.get("convenio_definido_ok", False),
+                campos_pendentes=tuple(checklist.get("campos_pendentes", [])),
+            )
+            pre_agenda_block = render_bloco_pre_agenda(_resultado)
+        except Exception:  # noqa: BLE001
+            pre_agenda_block = ""
+
     return (
         "\n\n================================================================"
         "\nONBOARDING — CONTATO JÁ CONHECIDO PELO CRM"
@@ -522,7 +544,7 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
         '("Você quer seguir com [convênio/médico] como da outra vez?"), mas'
         "\nnunca recolha de novo o que já está aqui."
         "\n================================================================"
-    ) + _agenda_block(ctx) + gravacao_block
+    ) + pre_agenda_block + _agenda_block(ctx) + gravacao_block
 
 
 def _sanitize_messages(msgs: list[dict]) -> list[dict]:
@@ -1170,6 +1192,25 @@ class Responder:
 
         bloco_variavel = _today_brt_block()
         bloco_variavel += _caller_context_block(caller_context)
+        # FSM (task #125) — bloco de estado da conversa pra Claude
+        # respeitar a transição válida. Persistido em Redis.
+        try:
+            from voice_agent.fsm_conversa import (
+                EstadoConversa,
+                SnapshotFSM,
+                render_bloco_estado,
+            )
+            _fsm_dict = (caller_context or {}).get("fsm") if isinstance(caller_context, dict) else None
+            if _fsm_dict:
+                _snap = SnapshotFSM(
+                    estado=EstadoConversa(_fsm_dict.get("estado", "TRIAGEM")),
+                    ultima_transicao_ts=0.0,
+                    tentativas_no_estado=int(_fsm_dict.get("tentativas_no_estado", 0)),
+                    motivo_ultima_transicao=str(_fsm_dict.get("motivo_ultima_transicao", "")),
+                )
+                bloco_variavel += render_bloco_estado(_snap)
+        except Exception:  # noqa: BLE001
+            pass
         # FIX 30/05/2026: _build_janela_agenda() era chamada aqui mas a
         # FUNÇÃO NUNCA FOI DEFINIDA no arquivo (foi removida sem remover a
         # chamada, ou o commit task #20 esqueceu de adicionar). Resultado:

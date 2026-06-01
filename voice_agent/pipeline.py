@@ -238,6 +238,69 @@ class VoicePipeline:
                 # silencioso. Subir pra ERROR.
                 log.error("Medware horários falhou: %s", e)
 
+        # 2d-bis) Checklist dados mínimos pra gravar Medware (task #123 / 31-05-2026)
+        # Origem: lead Juliene 24053159 — Lia ofereceu slot sem ter nome
+        # completo do Daniel nem CPF. Sem checklist, ela "sente" que não
+        # dá pra fechar e improvisa frase humana. Aqui validamos os 4
+        # dados mínimos (nome, data nasc, CPF, convenio) E:
+        # - se TODOS OK → ctx["checklist_ok"]=True, agenda fica livre pra ser oferecida
+        # - se falta algum → ctx["dados_pendentes"]=lista → responder injeta bloco
+        #   PRÉ-AGENDA proibindo oferta e listando campos a coletar
+        if caller_context:
+            try:
+                from voice_agent.checklist_dados_minimos import (
+                    verificar_dados_minimos,
+                )
+                _check = verificar_dados_minimos(
+                    caller_context.get("known") or {}
+                )
+                caller_context["checklist_dados_minimos"] = {
+                    "pronto_para_oferecer_slot": _check.pronto_para_oferecer_slot,
+                    "campos_pendentes": list(_check.campos_pendentes),
+                    "nome_completo_ok": _check.nome_completo_ok,
+                    "data_nascimento_ok": _check.data_nascimento_ok,
+                    "cpf_ok": _check.cpf_ok,
+                    "convenio_definido_ok": _check.convenio_definido_ok,
+                }
+                if not _check.pronto_para_oferecer_slot:
+                    log.info(
+                        "[CHECKLIST] lead=%s pendentes=%s — slot NAO sera oferecido",
+                        caller_context.get("lead_id"),
+                        _check.campos_pendentes,
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning("[CHECKLIST] falhou: %s", e)
+
+        # 2d-ter) FSM da conversa (task #125, otimizador #2 / 31-05-2026)
+        # Lê snapshot do Redis e ENRIQUECE caller_context com:
+        # - fsm.estado (TRIAGEM/DADOS/.../POS_GRAVACAO)
+        # - fsm.tentativas_no_estado (>3 indica loop preso)
+        # Se snapshot vazio, infere a partir do caller_context (status_id,
+        # ja_agendado, checklist). Persiste no Redis pra próximo turno.
+        try:
+            from voice_agent.fsm_conversa import (
+                EstadoConversa,
+                FSMManager,
+                inferir_estado_inicial,
+            )
+            _redis = getattr(self, "_redis", None)
+            _fsm_mgr = FSMManager(_redis)
+            _snap = _fsm_mgr.get(conversation_key)
+            if _snap is None and caller_context:
+                _estado_inferido = inferir_estado_inicial(caller_context)
+                _snap, _ok = _fsm_mgr.transicionar(
+                    conversation_key, _estado_inferido,
+                    motivo="boot pelo caller_context",
+                )
+            if _snap and caller_context is not None:
+                caller_context["fsm"] = {
+                    "estado": _snap.estado.value,
+                    "tentativas_no_estado": _snap.tentativas_no_estado,
+                    "motivo_ultima_transicao": _snap.motivo_ultima_transicao,
+                }
+        except Exception as e:  # noqa: BLE001
+            log.warning("[FSM] inicialização falhou: %s", e)
+
         # 2e) Gap 5: status real da gravação Medware (se houver) — pra Lia
         # poder responder com VERDADE quando paciente perguntar "gravou?".
         # Origem: lead 24038029 — Lia mentiu sem saber.

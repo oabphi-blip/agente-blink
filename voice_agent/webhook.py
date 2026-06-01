@@ -3508,6 +3508,37 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception as e:  # noqa: BLE001
             log.warning("[CRON BOOT] falha: %s", e)
 
+    # ================================================================
+    # SMOKE TEST CONTÍNUO (task #124) — worker valida 5 cenarios core
+    # a cada SMOKE_INTERVALO_SEG (default 3600). Liga só se SMOKE_ENABLED=1.
+    # ================================================================
+    @app.on_event("startup")
+    def _bootstrap_smoke_continuous() -> None:
+        try:
+            from voice_agent.smoke_continuous import iniciar_smoke_worker
+            stop = iniciar_smoke_worker()
+            log.info("[SMOKE BOOT] worker_iniciado=%s", bool(stop))
+        except Exception as e:  # noqa: BLE001
+            log.warning("[SMOKE BOOT] falha: %s", e)
+
+    @app.post("/admin/smoke-tick")
+    @app.get("/admin/smoke-tick")
+    def admin_smoke_tick(request: Request) -> JSONResponse:
+        """Trigger manual dos 5 cenarios core. Devolve relatorio JSON."""
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        try:
+            from voice_agent.smoke_continuous import rodar_batch_completo
+            rel = rodar_batch_completo()
+            return JSONResponse(rel.como_dict())
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": str(e)[:400]}, status_code=500)
+
     @app.post("/admin/renovacao-varredura")
     @app.get("/admin/renovacao-varredura")
     def admin_renovacao_varredura(request: Request) -> JSONResponse:
