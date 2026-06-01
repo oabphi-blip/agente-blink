@@ -2494,6 +2494,111 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # AUDITORIA: leads em 2.LEADS FRIO com 1.DIA CONSULTA preenchido
+    # ================================================================
+    # GET /admin/audit/frios-com-agendamento?secret=...&limit=500
+    # Origem: Fábio 01/06/2026 — observou 372 leads em 2.LEADS FRIO
+    # (101508307) e quis saber quantos já têm consulta marcada (campo
+    # 1.DIA CONSULTA, field_id 1255723). Inconsistência: paciente foi
+    # agendado mas o status do funil não foi movido para 5-AGENDADO
+    # (101507507) — fica preso em FRIO recebendo reativação indevida.
+    #
+    # Devolve: total varrido, total com agendamento, total com data
+    # futura (= ainda relevante), total com data passada (= no-show
+    # antigo), e lista detalhada (id, nome, dia_consulta_iso, url).
+    @app.get("/admin/audit/frios-com-agendamento")
+    def admin_audit_frios_agendados(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        import voice_agent.kommo as _km
+        from datetime import datetime as _dt, timezone as _tz
+        try:
+            limit = int(request.query_params.get("limit", "500"))
+        except (TypeError, ValueError):
+            limit = 500
+        limit = max(min(limit, 1000), 50)
+        # Lista TODOS os leads de 101508307 (paginado, ordem updated_at asc)
+        # OBS: kommo.list_leads_by_status devolve no máximo 250 por page;
+        # paginamos até 4 vezes pra cobrir 1000 leads.
+        kommo = pipeline.kommo
+        if kommo is None:
+            return JSONResponse(
+                {"erro": "Kommo client não configurado"},
+                status_code=500,
+            )
+        coletados: list[dict] = []
+        for page in range(1, 5):  # até 1000
+            batch = kommo.list_leads_by_status(
+                pipeline_id=8601819,
+                status_ids=[101508307],
+                limit=250,
+                page=page,
+            )
+            if not batch:
+                break
+            coletados.extend(batch)
+            if len(batch) < 250:
+                break
+            if len(coletados) >= limit:
+                break
+        coletados = coletados[:limit]
+        agora_ts = int(_dt.now(_tz.utc).timestamp())
+        com_agendamento: list[dict] = []
+        sem_agendamento = 0
+        for ld in coletados:
+            try:
+                detalhe = kommo.get_lead(ld["id"])
+            except Exception:  # noqa: BLE001
+                detalhe = None
+            dia_ts: int | None = None
+            if detalhe:
+                for f in detalhe.get("custom_fields_values") or []:
+                    if f.get("field_id") == 1255723:
+                        vals = f.get("values") or []
+                        if vals and vals[0].get("value"):
+                            try:
+                                dia_ts = int(vals[0]["value"])
+                            except (TypeError, ValueError):
+                                dia_ts = None
+                        break
+            if dia_ts:
+                dt_iso = _dt.fromtimestamp(dia_ts, tz=_tz.utc).isoformat()
+                com_agendamento.append({
+                    "id": ld["id"],
+                    "name": ld.get("name") or f"Lead #{ld['id']}",
+                    "dia_consulta_ts": dia_ts,
+                    "dia_consulta_iso": dt_iso,
+                    "futuro": dia_ts > agora_ts,
+                    "url": f"https://univeja.kommo.com/leads/detail/{ld['id']}",
+                })
+            else:
+                sem_agendamento += 1
+        futuros = sum(1 for x in com_agendamento if x["futuro"])
+        passados = len(com_agendamento) - futuros
+        # ordena: futuros primeiro (mais urgentes), depois passados
+        com_agendamento.sort(
+            key=lambda x: (not x["futuro"], x["dia_consulta_ts"]),
+        )
+        return JSONResponse({
+            "varridos": len(coletados),
+            "com_agendamento": len(com_agendamento),
+            "agendamento_futuro": futuros,
+            "agendamento_passado": passados,
+            "sem_agendamento": sem_agendamento,
+            "leads": com_agendamento[:200],  # limita payload
+            "observacao": (
+                "futuros = inconsistência crítica (paciente tem consulta "
+                "marcada mas está em FRIO recebendo reativação). "
+                "passados = no-show antigo / arquivamento OK em FRIO."
+            ),
+        })
+
+    # ================================================================
     # AMBIENTE DE TESTE/VALIDAÇÃO: status do schema Kommo
     # ================================================================
     # GET /admin/schema-check
