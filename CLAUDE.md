@@ -246,6 +246,32 @@ Estão no root do repo:
 Todos têm token GitHub embedded. **Token `ghp_7NNf...3H20m8` está comprometido** —
 revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 
+### 11-B. Easypanel — Deploy automático e envs novos (01/06/2026 noite)
+
+- **Auto-Deploy GitHub→Easypanel ATIVADO** em 01/06/2026 ~21:00 BRT. Push em `main` agora dispara build automático em 2-5min. Antes estava off → commits ficavam presos no Mac.
+- **Envs novas no agent** (Ambiente):
+  - `SMOKE_ENABLED=1` + `SMOKE_INTERVALO_SEG=3600` — smoke contínuo bate 6 cenários core de 1 em 1h.
+  - `JUIZ_HAIKU_ENABLED=1` + `JUIZ_HAIKU_LIMIAR=70` — juiz adversarial Haiku 4.5 julga cada resposta da Lia (#157, módulo `voice_agent/juiz_adversarial.py`).
+  - `LIA_TOOLS_ENABLED=1` — tool calling estruturado.
+- **Validação pós-deploy** (rodar nessa ordem):
+  1. `curl /health` — espera 200 OK.
+  2. `curl /admin/healthz?secret=$WS` — espera `integrations.kommo/medware/wa_cloud/redis: true`.
+  3. `curl /admin/smoke-tick` — espera `{"total":6,"ok":6}`.
+  4. `curl /admin/audit/frios-com-agendamento?limit=500` — lista leads em 2.LEADS FRIO que têm `1.DIA CONSULTA` preenchido (inconsistência pra mover pra 5-AGENDADO).
+
+### 11-C. Juiz adversarial Haiku — segundo olhar pré-envio (01/06/2026 noite)
+
+Módulo `voice_agent/juiz_adversarial.py`. Origem: discussão Fábio "como aproveitar ML pra defesa contra bug?". Os 13 filtros regex em `responder.py` são reativos — cada bug novo escapa. Haiku 4.5 dá segundo olhar semântico:
+
+- Recebe (resposta da Lia, ctx do lead, mensagem do paciente).
+- Devolve JSON `{risco: 0-100, motivos: [...], recomendado: enviar|substituir}`.
+- Se `risco >= LIMIAR` (default 70), Lia troca pelo `FALLBACK_SUBSTITUICAO` seguro.
+- Erro/timeout não bloqueia — Lia segue.
+- Custo ~$0.001/turno (~$0.20/dia em volume Blink).
+- Veredictos com risco >= 30 ficam em Redis `blink:juiz:veredicto:{lead_id}:{ts}` por 7 dias pra análise.
+
+Plugado em `_scrub_prohibited` como filtro #4 (último, depois dos 13 regex). Pytest 23 casos: `tests/test_juiz_adversarial.py`.
+
 ### 11-A. Rotação de chaves — histórico (01/06/2026)
 
 - **OPENAI_API_KEY rotacionada** em 01/06/2026 14:33 BRT.
@@ -418,13 +444,21 @@ Toda sessão Cowork futura, antes de mexer em código:
 
 Só depois disso, começar trabalho. Sem isso = reincidência.
 
-**Handoff mais recente**: `HANDOFF_31-05_NOITE_PARA_01-06-2026.md` (sessão noite — 4 otimizadores arquiteturais).
+**Handoff mais recente**: `HANDOFF_01-06_NOITE_PARA_02-06-2026.md` (sessão noite — juiz adversarial Haiku + auto-deploy ON + smoke contínuo ON).
 
 ---
 
-Última atualização: 31/05/2026 23:30 — sessão noite com bug Juliene 24053159,
-fix 234d4c1 deployado (filtro `_viola_promete_retorno_humano` + bloco AGENDA
-INDISPONÍVEL + log ERROR), 4 otimizadores arquiteturais commits 39fc250 +
-3a5564f (checklist dados mínimos always-on + smoke contínuo opt-in + state
-machine Redis always-on + tool calling opt-in). Total 584 testes passando,
-5/5 cenários smoke manual contra prod verde.
+Última atualização: 01/06/2026 22:00 — sessão dia/noite. Bug Esther
+24060221 (re-oferta de slot pós-AGENDADO via handler de imagem)
+blindado com filtro `_viola_oferta_apos_agendado` (commit `e636a84`).
+Decisão Fábio: só Lia em notas Kommo, paciente sai do feed (commit
+`689314c`). Endpoint `/admin/audit/frios-com-agendamento` pra contar
+372 leads em 2.LEADS FRIO com `1.DIA CONSULTA` preenchido (commit
+`1840549`). **Virada arquitetural**: juiz adversarial Haiku 4.5
+pré-envio em `voice_agent/juiz_adversarial.py` — defesa semântica em
+vez de só regex, ~$0.001/turno, opt-in via `JUIZ_HAIKU_ENABLED=1`
+(commit `d8f6167`, 23 testes). Easypanel: **Auto-Deploy GitHub
+ATIVADO**, envs novos `SMOKE_ENABLED=1`, `JUIZ_HAIKU_ENABLED=1`,
+`JUIZ_HAIKU_LIMIAR=70`. Total **771 testes verdes** (+187 desde
+31/05). Smoke prod 6/6 em 19,3s. 4 commits aguardando push do Fábio
+pra entrar em prod.
