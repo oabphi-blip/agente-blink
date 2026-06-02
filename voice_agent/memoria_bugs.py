@@ -44,10 +44,13 @@ EMBEDDING_DIM = 1536
 # Chave Redis do catálogo de bugs (hash)
 REDIS_KEY_CATALOGO = "blink:memoria_bugs:catalogo"
 
-# Fallback genérico quando bate similaridade com bug antigo
+# Fallback genérico quando bate similaridade com bug antigo.
+# Origem: Fábio 02/06/2026 — frase anterior soava como atendente
+# desviando do assunto. Paciente quer slot, não "tirar dúvida".
 FALLBACK_SIMILAR_BUG = (
-    "Anotei aqui! Em instantes confirmo com a equipe e te respondo. "
-    "Se preferir, me diga sua dúvida específica que eu agilizo."
+    "Deixa eu reconsultar a agenda real aqui pra você. "
+    "Me responde 'oi' em 1 minuto que eu volto com 2 opções "
+    "concretas — dia, data e hora — pra você escolher."
 )
 
 

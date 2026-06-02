@@ -39,12 +39,17 @@ log = logging.getLogger(__name__)
 # Limiar default (env override JUIZ_HAIKU_LIMIAR)
 LIMIAR_DEFAULT = 70
 
-# Fallback padrão quando juiz vetar resposta. Genérico e seguro:
-# - não promete agenda, não promete retorno humano, não inventa.
-# - convida o paciente a esclarecer.
+# Fallback padrão quando juiz vetar resposta.
+# Origem dessa frase atual: Fábio 02/06/2026 reportou que a frase
+# anterior ("Anotei aqui! Em instantes confirmo... se preferir me
+# diga sua dúvida específica") soava como atendente desviando do
+# assunto. Paciente que veio agendar não tem "dúvida pra esclarecer",
+# quer slot. Trocada por frase orientada a próxima ação concreta
+# (reconsultar agenda + voltar em 1 min).
 FALLBACK_SUBSTITUICAO = (
-    "Anotei aqui! Em instantes confirmo os detalhes e te respondo. "
-    "Se preferir, me diga sua dúvida específica que eu agilizo."
+    "Deixa eu reconsultar a agenda real aqui pra você. "
+    "Me responde 'oi' em 1 minuto que eu volto com 2 opções "
+    "concretas — dia, data e hora — pra você escolher."
 )
 
 
