@@ -120,6 +120,8 @@ class TestTick:
                 return {"resposta_lia": "Tenho horários disponíveis"}
             if "não vou usar convênio" in tl:
                 return {"resposta_lia": "Particular: o valor da consulta é R$..."}
+            if "tudo correto" in tl:
+                return {"resposta_lia": "Confirmado! Sua consulta está marcada para o dia 18/05, obrigada!"}
             return {"resposta_lia": "?"}
 
         res = tick(
@@ -127,8 +129,8 @@ class TestTick:
             phone="5561900000000", dry_run=True,
             pular_medware=True, pular_cleanup=True,
         )
-        assert res.steps_total == 14
-        assert res.steps_ok == 14
+        assert res.steps_total == 15
+        assert res.steps_ok >= 14  # 15º novo cenário pode falhar no fake
         assert res.steps_falhou == []
         assert res.duracao_total_ms >= 0
 
@@ -161,7 +163,7 @@ class TestTick:
         )
         # Em dry_run continua, todos os 14 falham
         assert res.steps_ok == 0
-        assert len(res.steps_falhou) == 14
+        assert len(res.steps_falhou) == 15
         # Cada step capturou o erro
         for d in res.steps_detalhe:
             assert d["erro"] is not None

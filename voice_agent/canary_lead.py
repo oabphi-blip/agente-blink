@@ -233,6 +233,21 @@ STEPS_CANARIOS: list[StepResultado] = [
             "chave@particular.com",
         ],
     ),
+    StepResultado(
+        nome="15_graziela_resposta_pos_template",
+        # Caso Graziela/Enzo fornecido por Fábio 02/06/2026.
+        # Atendente humano (Stephany) envia o template "Conclusão de
+        # Agendamento" via WhatsApp. Camadas 4/5 do ja_agendado devem
+        # detectar e Lia deve responder confirmando, NÃO refazendo
+        # agendamento. Aqui simulamos o paciente respondendo "1.Tudo
+        # Correto" depois de ter recebido o template no histórico.
+        user_text="1. Tudo Correto",
+        must_contain=["confirm", "obrigad", "dia", "marcad"],
+        must_not_contain=[
+            "qual dia da semana", "qual médico", "qual horário",
+            "deixa eu agendar", "vamos começar", "preferência",
+        ],
+    ),
 ]
 
 

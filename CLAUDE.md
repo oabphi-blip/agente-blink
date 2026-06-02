@@ -246,6 +246,35 @@ Estão no root do repo:
 Todos têm token GitHub embedded. **Token `ghp_7NNf...3H20m8` está comprometido** —
 revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 
+### 11-D. ja_agendado — 5 camadas (02/06/2026 manhã)
+
+Bug recorrente: atendente humano agenda no Medware mas esquece de
+mover etapa / preencher 1.DIA CONSULTA. Lia ficava cega e oferecia
+slot novo. Clínica reportou como bug Blink. Solução em 5 camadas
+independentes, em OR (qualquer uma dispara `ja_agendado=True`):
+
+| Camada | Fonte | Cobre |
+|---|---|---|
+| 1 | `status_id ∈ ST_JA_AGENDADO` | 5-AGENDADO, 6-CONFIRMAR, 7.CONFIRMADO, 8-REALIZADO, 10-PRÓXIMA CONSULTA |
+| 2 | `1.DIA CONSULTA` futuro (field 1255723) | Bug Aurora original |
+| 3 | Nota humana com "agendei + data" (72h) | Atendente escreveu nota livre |
+| 4 | **Template "Conclusão de Agendamento"** (parser regex Blink) | Caso Graziela/Enzo do Fábio |
+| 5 | Histórico genérico (palavra-chave conclusão + data, humano) | Fallback pra mensagem improvisada |
+
+Funções principais em `voice_agent/kommo.py`:
+- `_ja_agendado_por_nota_humana(notas, janela_h=72)` → camada 3
+- `detectar_template_conclusao_agendamento(texto)` → camada 4 (extrai
+  paciente, médico, especialidade, convênio, unidade, data, hora;
+  auto-popula `known.*` sem sobrescrever)
+- `detectar_conclusao_no_historico(mensagens, janela_h=72)` → camada 5
+- `get_lead_notes(lead_id)` + `get_lead_messages(lead_id)` → varredura
+
+Cenário canary #15 "Graziela/Enzo" replica o fluxo: atendente envia
+template → paciente responde "1. Tudo Correto" → Lia confirma data
+marcada, não refaz triagem.
+
+Pytest: 36 testes (14 template + 12 nota humana + 10 histórico).
+
 ### 11-B. Easypanel — Deploy automático e envs novos (01/06/2026 noite)
 
 - **Auto-Deploy GitHub→Easypanel ATIVADO** em 01/06/2026 ~21:00 BRT. Push em `main` agora dispara build automático em 2-5min. Antes estava off → commits ficavam presos no Mac.

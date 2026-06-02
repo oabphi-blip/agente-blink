@@ -523,6 +523,65 @@ def detectar_template_conclusao_agendamento(
     return out
 
 
+# Camada 5 — detector genérico de conclusão em histórico de mensagens.
+# Complementa a camada 4 (template Blink preciso). Quando atendente
+# humano improvisa fora do template (ex.: "Stephany: confirmei pra
+# 09/06 às 18h com a Karla, paciente OK"), o template não bate mas a
+# Lia ainda precisa saber. Camada 5 procura outbound humano +
+# palavras-chave de conclusão + data nos últimos N mensagens.
+_RE_CONCLUSAO_GENERICA = re.compile(
+    r"\b(agend(?:ei|ou|ado|amento)|"
+    r"marqu(?:ei|ou|ado|ada)|"
+    r"confirm(?:ei|ou|ado|ada)|"
+    r"reserv(?:ei|ou|ado|ada)|"
+    r"finaliz(?:ei|ou|ado|ada)|"
+    r"conclu(?:i|iu|[íi]do))\b",
+    re.IGNORECASE,
+)
+
+
+def detectar_conclusao_no_historico(
+    mensagens: list[dict], janela_h: int = 72,
+) -> tuple[bool, Optional[str]]:
+    """Camada 5: varre últimas mensagens (notas + chat) procurando
+    outbound humano (created_by != 0) com palavra-chave de conclusão +
+    data nas últimas janela_h horas.
+
+    Diferente da camada 3 (nota humana strita), olha QUALQUER mensagem
+    cujo autor seja humano — inclui o chat WhatsApp registrado como
+    nota tipo message_cashed/outgoing_chat_message.
+    """
+    if not mensagens:
+        return False, None
+    agora = datetime.now(timezone.utc)
+    for m in mensagens:
+        if not isinstance(m, dict):
+            continue
+        # Humano = created_by não-zero
+        if int(m.get("created_by") or 0) == 0:
+            continue
+        # Janela temporal
+        ts_raw = m.get("created_at")
+        if ts_raw:
+            try:
+                d = datetime.fromisoformat(
+                    str(ts_raw).replace("Z", "+00:00"),
+                )
+                if (agora - d).total_seconds() > janela_h * 3600:
+                    continue
+            except (ValueError, TypeError):
+                pass
+        texto = (m.get("text") or "").strip()
+        if not texto:
+            continue
+        if (
+            _RE_CONCLUSAO_GENERICA.search(texto)
+            and _RE_DATA_FUTURA.search(texto)
+        ):
+            return True, texto[:140].replace("\n", " ")
+    return False, None
+
+
 def _ja_agendado_por_nota_humana(
     notas: list[dict], janela_h: int = 72,
 ) -> tuple[bool, Optional[str]]:
@@ -1380,12 +1439,43 @@ class KommoClient:
                     f"{template_dados.get('hora','')}"
                 ).strip()
 
-            # ja_agendado = OR das QUATRO camadas
+            # Camada 5: detector genérico de conclusão no histórico.
+            # Cobre o caso em que o atendente improvisa fora do template
+            # (ex.: "Stephany: confirmei pra 09/06 às 18h com Karla").
+            ja_agendado_by_historico = False
+            historico_preview = None
+            if not (
+                ja_agendado_by_status or ja_agendado_by_consulta
+                or ja_agendado_by_humano or ja_agendado_by_template
+            ):
+                try:
+                    msgs_chat = self.get_lead_messages(lead_id, limit=30) or []
+                except Exception:  # noqa: BLE001
+                    msgs_chat = []
+                # Junta notas humanas + mensagens de chat (humanas)
+                candidatas = []
+                for n in notas_lead:
+                    candidatas.append({
+                        "text": n.get("text"),
+                        "created_at": n.get("created_at"),
+                        "created_by": n.get("created_by"),
+                    })
+                candidatas.extend(msgs_chat)
+                ja_agendado_by_historico, historico_preview = (
+                    detectar_conclusao_no_historico(candidatas)
+                )
+                if ja_agendado_by_historico:
+                    out["known"]["agendamento_por_historico_preview"] = (
+                        historico_preview
+                    )
+
+            # ja_agendado = OR das CINCO camadas
             out["ja_agendado"] = (
                 ja_agendado_by_status
                 or ja_agendado_by_consulta
                 or ja_agendado_by_humano
                 or ja_agendado_by_template
+                or ja_agendado_by_historico
             )
             if ja_agendado_by_consulta and not ja_agendado_by_status:
                 # Caso típico do bug "Aurora": lead com 1.DIA CONSULTA preenchido
@@ -1413,6 +1503,12 @@ class KommoClient:
                     "CONCLUSAO (camada 4). status=%s, 1.DIA CONSULTA "
                     "vazio. Dados: %s",
                     lead_id, sid, template_dados,
+                )
+            if ja_agendado_by_historico:
+                log.warning(
+                    "Kommo: lead %s — ja_agendado=True por HISTÓRICO "
+                    "DE MENSAGEM (camada 5). Texto: %r",
+                    lead_id, historico_preview,
                 )
 
             # 'name' = nome do CONTATO (quem escreve no WhatsApp) — é esse
