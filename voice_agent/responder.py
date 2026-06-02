@@ -1289,6 +1289,42 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             log.warning("[FILTRO] Anti-pattern transferência detectado: %r", pat.pattern)
             break
 
+    # 4-bis. MEMORIA DE BUGS — similaridade cosine vs bugs históricos
+    # Origem: discussão Fábio 01/06/2026 noite — terceira camada de
+    # defesa, complementa juiz Haiku e regex. Cada bug histórico
+    # (Aurora, Juliene, Adelia, Diones, Esther) tem embedding em Redis.
+    # Resposta nova é comparada por cosine; se >= 0.85 = igual a bug
+    # antigo, substitui. Custo ~$0.0001/turno. Opt-in via
+    # MEMORIA_BUGS_ENABLED=1.
+    try:
+        import os as _os
+        if _os.getenv("MEMORIA_BUGS_ENABLED", "0") == "1":
+            from voice_agent.memoria_bugs import (
+                MemoriaBugs, FALLBACK_SIMILAR_BUG,
+            )
+            # Pega redis client do ctx (responder não tem direto)
+            redis_client = (ctx or {}).get("_redis_client")
+            mem = MemoriaBugs.from_env(redis_client)
+            if mem is not None:
+                # Lazy-carrega catálogo + semente (idempotente)
+                mem.carregar_semente_se_vazio()
+                match = mem.checar(text, ctx)
+                if match.deve_substituir:
+                    log.error(
+                        "[MEMORIA_BUGS] resposta similar a bug=%s "
+                        "(similaridade=%.3f) — substituida. Motivo: %s",
+                        match.bug_id, match.similaridade, match.motivo,
+                    )
+                    return FALLBACK_SIMILAR_BUG
+                elif match.similaridade >= 0.70:
+                    log.warning(
+                        "[MEMORIA_BUGS] similaridade borderline com "
+                        "bug=%s sim=%.3f (não substitui)",
+                        match.bug_id, match.similaridade,
+                    )
+    except Exception as e:  # noqa: BLE001
+        log.warning("[MEMORIA_BUGS] erro — passando direto: %s", e)
+
     # 4. JUIZ ADVERSARIAL Haiku (último olhar — defesa semântica)
     # Origem: discussão Fábio 01/06/2026 — regex não pega bug novo.
     # Haiku 4.5 lê (lia_text, ctx, user_text) e classifica risco 0-100.

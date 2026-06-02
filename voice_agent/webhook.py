@@ -2494,6 +2494,49 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # REPLAY: histórico de turnos do lead (tracing estruturado)
+    # ================================================================
+    # GET /admin/replay/{lead_id}?secret=...&limit=100
+    # Devolve todos os traces salvos pelo TraceBuilder (Redis list
+    # `blink:trace:{lead_id}`, TTL 30 dias). Cada item tem:
+    # ts, user_text, ctx_resumo, tools, juiz_veredict, output,
+    # filtros disparados, elapsed_ms. Substitui o ritual
+    # "abre Kommo + abre logs + adivinha" por 1 curl.
+    @app.get("/admin/replay/{lead_id}")
+    def admin_replay(lead_id: int, request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        try:
+            limit = int(request.query_params.get("limit", "100"))
+        except (TypeError, ValueError):
+            limit = 100
+        limit = max(min(limit, 500), 1)
+        try:
+            from voice_agent.tracing import carregar_traces
+            redis_client = pipeline._redis
+            traces = carregar_traces(redis_client, lead_id, limit=limit)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"erro": f"Erro lendo traces: {e}"}, status_code=500,
+            )
+        return JSONResponse({
+            "lead_id": lead_id,
+            "url_kommo": f"https://univeja.kommo.com/leads/detail/{lead_id}",
+            "total_turnos": len(traces),
+            "turnos": [t.to_dict() for t in traces],
+            "observacao": (
+                "Lista em ordem cronológica (mais antigo primeiro). "
+                "TTL 30 dias por turno. Para ativar coleta: "
+                "TRACING_ENABLED=1 no Easypanel."
+            ),
+        })
+
+    # ================================================================
     # AUDITORIA: leads em 2.LEADS FRIO com 1.DIA CONSULTA preenchido
     # ================================================================
     # GET /admin/audit/frios-com-agendamento?secret=...&limit=500
