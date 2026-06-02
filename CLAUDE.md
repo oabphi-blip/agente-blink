@@ -246,6 +246,46 @@ Estão no root do repo:
 Todos têm token GitHub embedded. **Token `ghp_7NNf...3H20m8` está comprometido** —
 revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 
+### 11-L. Gap central tarde 02/06 — Lia escreve "vou consultar" sem chamar tool (6 casos)
+
+**Sintoma único em 6 leads diferentes (mesma tarde):**
+
+Quando state machine entra em AGENDA, Lia escreve em texto livre:
+- "Deixa eu consultar a agenda real aqui pra você"
+- "Vou buscar os horários disponíveis"
+- "Me dá um minutinho que volto com as opções concretas"
+- "Ainda estou buscando os horários"
+
+**E nunca volta com os horários reais.** Paciente espera 2-30 minutos, depois humano (Stephany/Ariany) intervém manualmente.
+
+**Casos confirmados (todos com agenda Medware EXISTENTE):**
+
+| Lead | Paciente | Slots reais Medware |
+|---|---|---|
+| 21392947 | Sabrina | 7+ slots Karla Asa Norte |
+| 24064723 | Kamila | 09:30 quarta 10/06 + 17/06 |
+| 24065257 | Janeide | Erro de dia da semana antes de chegar a chamar tool |
+| 21344999 | Iara | 8 slots Karla Asa Norte tarde |
+| 24065595 | Ben Hur 2 | Lia nem chegou a processar (downtime) |
+| 22345722 | Keyla | 3 slots Karla Águas Claras 17h-17:30 |
+
+**Causa raiz arquitetural:** mesmo com `LIA_TOOLS_ENABLED=1` no Easypanel, o modelo Sonnet **não está chamando** as tools de `tools_lia.py` (`oferecer_slot`, `gravar_agendamento`). Está escrevendo em texto livre.
+
+Hipótese técnica: `responder.py::messages.create()` provavelmente **não está passando** o parâmetro `tools=[...]` pra API Anthropic quando state=AGENDA. Sem `tools` no request, modelo não pode chamar — só pode escrever texto livre.
+
+**Fix (task #183):**
+1. Em `responder.py`, no método que monta `messages.create()`, detectar quando `ctx.state == "AGENDA"` e adicionar:
+   ```python
+   tools = [TOOL_OFERECER_SLOT, TOOL_GRAVAR_AGENDAMENTO]
+   tool_choice = {"type": "tool", "name": "oferecer_slot"} if ctx.get("agenda") else None
+   ```
+2. Processar `response.stop_reason == "tool_use"` e executar a tool real.
+3. Resposta humana vira wrap do resultado da tool — modelo não pode inventar data/dia/hora.
+
+**Resultado esperado:** Lia NÃO escreve "vou consultar" mais. Chama tool, recebe slots, escreve resposta humanizada com os slots REAIS. Zero invenção de data.
+
+---
+
 ### 11-K. Casos práticos 02/06/2026 tarde — 4 padrões de bug + downtime do dia
 
 **Casos reportados em sequência durante operação real:**
