@@ -246,6 +246,22 @@ Estão no root do repo:
 Todos têm token GitHub embedded. **Token `ghp_7NNf...3H20m8` está comprometido** —
 revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 
+### 11-H. Escopos PAT GitHub — `repo` + `workflow` (02/06/2026 tarde)
+
+**Lição:** push falhou com `remote rejected ... refusing to allow a Personal Access Token to create or update workflow .github/workflows/test.yml without workflow scope`.
+
+Causa: token gerado só com escopo `repo`. GitHub Actions YML em `.github/workflows/` exige escopo **independente** chamado `workflow` — `repo` NÃO o inclui automaticamente.
+
+**Regra para todo PAT deste repo** (https://github.com/settings/tokens/new):
+- ☑ `repo` (caixa pai inteira)
+- ☑ `workflow` (caixa separada logo abaixo de repo)
+
+Sem `workflow`, qualquer commit que toque `.github/workflows/*.yml` é rejeitado no servidor mesmo com `repo` marcado.
+
+Também: token comprometido em chat = revogar imediatamente após uso. Token `ghp_WH3VgKbW3mc4...` foi exposto e deve ser deletado.
+
+---
+
 ### 11-E. Regra "shadow mode" — defesa nova SÓ entra em prod após validação real (02/06/2026)
 
 **Origem do princípio:** sessão 02/06 manhã. Juiz Haiku 4.5

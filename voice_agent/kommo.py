@@ -154,12 +154,16 @@ FIELD_NUMERO_TELEFONE = (1260633, {
     "96630710": 926675, "0710": 926675, "9663-0710": 926675,
 })
 
-# "ATIVADO IA?" (multiselect) — indica se a IA está conduzindo o lead.
+# "ATIVADO IA?" (select) — indica se a IA está conduzindo o lead.
 # ATIVADO: a Lia acabou de processar uma mensagem neste lead.
+# SOLICITADO: reativação solicitada (handoff humano pendente de reativar).
 # DESATIVADO: handoff humano detectado (mensagem manual / pausa de handoff).
-FIELD_ATIVADO_IA = (1260635, {
-    "ATIVADO": 926677, "ATIVA": 926677, "ATIVO": 926677, "ON": 926677,
-    "DESATIVADO": 926679, "DESATIVADA": 926679, "OFF": 926679,
+# 02/06/2026 — ID renovado: campo foi recriado no Kommo (era 1260635,
+# virou 1260817). Nome confirmado: "ATIVADO IA?" type=select, 3 enums.
+FIELD_ATIVADO_IA = (1260817, {
+    "ATIVADO": 927031, "ATIVA": 927031, "ATIVO": 927031, "ON": 927031,
+    "SOLICITADO": 927033, "SOLICITAR": 927033, "PENDENTE": 927033,
+    "DESATIVADO": 927035, "DESATIVADA": 927035, "OFF": 927035,
 })
 
 # "HORA ATIVAÇÃO" (date_time) — momento em que a IA foi REATIVADA, ou seja,
