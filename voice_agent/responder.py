@@ -1290,10 +1290,11 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     # em horário comercial". Sem o filtro, escapa dos outros 4 detectores.
     # Se já temos agenda → reformula oferecendo os 2 melhores slots.
     # Se NÃO temos agenda → pede 1min e prometendo voltar com opções reais.
-    # Mantido SEMPRE ON (independe de FILTROS_LEGACY) — bug Kamila 24064723
-    # mostrou que sem esse filtro Lia volta a "prometer e não cumprir"
-    # ("ainda estou buscando..." sem chamar Medware).
-    if _viola_promete_retorno_humano(text):
+    # Voltou pra OFF (FILTROS_LEGACY=0 default) — caso Iara 21344999 mostrou
+    # que ligar esse filtro sem ter o fallback testado em prod travou a
+    # Lia (resposta não saía). Dedup forte (acima) sobra como defesa
+    # contra duplicação; promessa-sem-cumprir aceita por enquanto.
+    if _FILTROS_LEGACY_ATIVOS and _viola_promete_retorno_humano(text):
         log.error(
             "[FILTRO] PROMESSA RETORNO HUMANO BLOQUEADA — Lia inventou "
             "encaminhamento humano. has_agenda=%s. Texto: %r",
