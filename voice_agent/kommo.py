@@ -399,6 +399,130 @@ _RE_DATA_FUTURA = re.compile(
 )
 
 
+# Camada 4 do ja_agendado — parser do template "Conclusão de Agendamento"
+# Blink (Fábio 02/06/2026). Atendente humano envia template estruturado
+# via WhatsApp. Não vira nota Kommo, então camadas 1-3 não pegam.
+# Esta camada lê histórico de mensagens WhatsApp e detecta o template
+# de forma determinística (regex sobre rótulos fixos).
+#
+# Estrutura do template:
+#   ✅ Conclusão de Agendamento.
+#   📅 Data e Hora da primeira consulta: DD/MM/AAAA HH:MM
+#   👤 Paciente(s): NOME
+#   👩‍⚕️Médica: Dra. NOME
+#   🩺 Especialidade: NOME
+#   📋 Convênio: NOME
+#   📍 Unidade: NOME
+
+_RE_TEMPLATE_CONCLUSAO = re.compile(
+    r"conclus[ãa]o\s+de\s+agendamento", re.IGNORECASE,
+)
+_RE_TEMPLATE_DATA_HORA = re.compile(
+    r"data\s+e\s+hora[^:]*:\s*"
+    r"(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})"  # DD/MM/AAAA
+    r"\s+(\d{1,2}[:hH]\d{2})",  # HH:MM
+    re.IGNORECASE,
+)
+_RE_TEMPLATE_PACIENTE = re.compile(
+    r"paciente(?:\(s\))?\s*[:：]\s*([^\n\r]+)", re.IGNORECASE,
+)
+_RE_TEMPLATE_MEDICO = re.compile(
+    r"m[ée]dic[oa]\s*[:：]\s*([^\n\r]+)", re.IGNORECASE,
+)
+_RE_TEMPLATE_ESPECIALIDADE = re.compile(
+    r"especialidade\s*[:：]\s*([^\n\r]+)", re.IGNORECASE,
+)
+_RE_TEMPLATE_CONVENIO = re.compile(
+    r"conv[êe]nio\s*[:：]\s*([^\n\r]+)", re.IGNORECASE,
+)
+_RE_TEMPLATE_UNIDADE = re.compile(
+    r"unidade\s*[:：]\s*([^\n\r]+)", re.IGNORECASE,
+)
+
+
+def _limpa_campo_template(s: str) -> str:
+    """Tira emojis + asteriscos + espaços extras de um valor do template."""
+    if not s:
+        return ""
+    # Remove emojis comuns no início/meio
+    s = re.sub(r"[☀-➿\U0001F300-\U0001F9FF\U0001FA00-\U0001FAFF]", "", s)
+    s = s.replace("*", "").strip()
+    # Remove parênteses de label tipo "(s)"
+    s = re.sub(r"\s+", " ", s)
+    return s.strip(" :*-")
+
+
+def detectar_template_conclusao_agendamento(
+    texto: str,
+) -> Optional[dict]:
+    """Camada 4: detecta template "Conclusão de Agendamento" Blink em
+    uma mensagem outbound do atendente humano.
+
+    Devolve dict com `{paciente, medico, especialidade, convenio,
+    unidade, data, hora, data_iso}` se template detectado e tem pelo
+    menos 4 campos preenchidos. None caso contrário.
+
+    Critério mínimo: marca "conclusão de agendamento" + data+hora +
+    paciente + médico — esses 4 são obrigatórios.
+    """
+    if not texto:
+        return None
+    # 1) marca obrigatória do template
+    if not _RE_TEMPLATE_CONCLUSAO.search(texto):
+        return None
+    # 2) data + hora
+    m_dh = _RE_TEMPLATE_DATA_HORA.search(texto)
+    if not m_dh:
+        return None
+    data_raw = m_dh.group(1)
+    hora_raw = m_dh.group(2).replace("h", ":").replace("H", ":")
+    # Normaliza pra ISO
+    try:
+        # DD/MM/YYYY ou DD-MM-YYYY ou DD/MM/YY
+        parts = re.split(r"[/-]", data_raw)
+        dia, mes, ano = int(parts[0]), int(parts[1]), int(parts[2])
+        if ano < 100:
+            ano += 2000
+        h_parts = hora_raw.split(":")
+        hh = int(h_parts[0])
+        mm = int(h_parts[1]) if len(h_parts) > 1 and h_parts[1] else 0
+        # Valida ranges (rejeita 99/99/9999 ou 25h)
+        if not (1 <= dia <= 31 and 1 <= mes <= 12
+                and 2024 <= ano <= 2030
+                and 0 <= hh <= 23 and 0 <= mm <= 59):
+            return None
+        # datetime parsing real (rejeita 31/02 etc)
+        datetime(ano, mes, dia, hh, mm)
+        data_iso = f"{ano:04d}-{mes:02d}-{dia:02d}T{hh:02d}:{mm:02d}:00-03:00"
+    except (ValueError, IndexError):
+        return None
+    out = {
+        "data": data_raw,
+        "hora": hora_raw,
+        "data_iso": data_iso,
+    }
+    # 3) paciente (obrigatório)
+    m_pac = _RE_TEMPLATE_PACIENTE.search(texto)
+    if not m_pac:
+        return None
+    out["paciente"] = _limpa_campo_template(m_pac.group(1))
+    # 4) médico (obrigatório)
+    m_med = _RE_TEMPLATE_MEDICO.search(texto)
+    if not m_med:
+        return None
+    out["medico"] = _limpa_campo_template(m_med.group(1))
+    # 5) campos opcionais (mas se faltam, devolve mesmo assim)
+    for chave, regex in (
+        ("especialidade", _RE_TEMPLATE_ESPECIALIDADE),
+        ("convenio", _RE_TEMPLATE_CONVENIO),
+        ("unidade", _RE_TEMPLATE_UNIDADE),
+    ):
+        m = regex.search(texto)
+        if m:
+            out[chave] = _limpa_campo_template(m.group(1))
+    return out
+
+
 def _ja_agendado_por_nota_humana(
     notas: list[dict], janela_h: int = 72,
 ) -> tuple[bool, Optional[str]]:
@@ -1002,6 +1126,45 @@ class KommoClient:
             )
             return []
 
+    def get_lead_messages(
+        self, lead_id: int | str, limit: int = 30,
+    ) -> list[dict]:
+        """Lista mensagens (notas que são message_cashed ou similar)
+        do lead. Usado pela camada 4 (template "Conclusão de
+        Agendamento") pra varrer mensagens outbound do atendente humano
+        que não viram nota comum.
+
+        Estratégia: como Kommo expõe mensagens de WhatsApp via endpoint
+        de chats que requer scope adicional, varremos notas com tipos
+        de mensagem (message_cashed, service_message, incoming_chat_message,
+        outgoing_chat_message). Em ambientes onde mensagens não ficam
+        nas notas, devolve []  — camada 4 vira no-op silencioso.
+        """
+        notas = self.get_lead_notes(lead_id, limit=limit)
+        out = []
+        tipos_msg = {
+            "message_cashed", "incoming_chat_message",
+            "outgoing_chat_message", "extended_service_message",
+        }
+        for n in notas:
+            nt = (n.get("note_type") or "").lower()
+            if nt in tipos_msg or "message" in nt:
+                # Normaliza acesso ao texto (pode estar em params.text
+                # ou direto em text)
+                texto = (
+                    n.get("text")
+                    or ((n.get("params") or {}).get("text"))
+                    or ""
+                )
+                if texto:
+                    out.append({
+                        "text": texto,
+                        "created_at": n.get("created_at"),
+                        "created_by": n.get("created_by"),
+                        "note_type": nt,
+                    })
+        return out
+
     def get_lead(self, lead_id: int | str) -> Optional[dict]:
         """Busca o lead completo (inclui custom_fields_values).
 
@@ -1156,11 +1319,73 @@ class KommoClient:
             if ja_agendado_by_humano:
                 out["known"]["agendamento_por_humano_preview"] = nota_preview
 
-            # ja_agendado = OR das TRÊS camadas
+            # Camada 4: template "Conclusão de Agendamento" Blink
+            # (Fábio 02/06/2026 manhã). Atendente humano envia template
+            # estruturado via WhatsApp depois de agendar no Medware. Vira
+            # nota service_message no Kommo. Camadas 1-3 não pegam pq
+            # não tem palavras-chave "agendei" e não é nota humana
+            # comum. Esta camada faz parsing determinístico do template
+            # e auto-popula known.*.
+            ja_agendado_by_template = False
+            template_dados: Optional[dict] = None
+            try:
+                for nota in notas_lead:
+                    if not isinstance(nota, dict):
+                        continue
+                    texto = (nota.get("text") or "")
+                    detectado = detectar_template_conclusao_agendamento(texto)
+                    if detectado:
+                        template_dados = detectado
+                        ja_agendado_by_template = True
+                        break
+                # Se também não achou em notas, tenta no histórico de
+                # mensagens WhatsApp (mensagens do chat — incluem
+                # outbound humano que não vira nota).
+                if not ja_agendado_by_template:
+                    msgs = []
+                    try:
+                        msgs = self.get_lead_messages(lead_id, limit=30) or []
+                    except Exception:  # noqa: BLE001
+                        pass
+                    for m in msgs:
+                        texto = (m.get("text") or "")
+                        detectado = detectar_template_conclusao_agendamento(
+                            texto,
+                        )
+                        if detectado:
+                            template_dados = detectado
+                            ja_agendado_by_template = True
+                            break
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "Kommo: camada 4 (template) erro lead %s: %s",
+                    lead_id, e,
+                )
+            if ja_agendado_by_template and template_dados:
+                # Auto-popula known.* (sem sobrescrever o que já existe)
+                if not out["known"].get("nome_paciente") and template_dados.get("paciente"):
+                    out["known"]["nome_paciente"] = template_dados["paciente"]
+                if not out["known"].get("medico") and template_dados.get("medico"):
+                    out["known"]["medico"] = template_dados["medico"]
+                if not out["known"].get("especialidade") and template_dados.get("especialidade"):
+                    out["known"]["especialidade"] = template_dados["especialidade"]
+                if not out["known"].get("convenio") and template_dados.get("convenio"):
+                    out["known"]["convenio"] = template_dados["convenio"]
+                if not out["known"].get("unidade") and template_dados.get("unidade"):
+                    out["known"]["unidade"] = template_dados["unidade"]
+                if not out["known"].get("dia_consulta_iso") and template_dados.get("data_iso"):
+                    out["known"]["dia_consulta_iso"] = template_dados["data_iso"]
+                out["known"]["agendamento_por_template"] = (
+                    f"{template_dados.get('data','')} "
+                    f"{template_dados.get('hora','')}"
+                ).strip()
+
+            # ja_agendado = OR das QUATRO camadas
             out["ja_agendado"] = (
                 ja_agendado_by_status
                 or ja_agendado_by_consulta
                 or ja_agendado_by_humano
+                or ja_agendado_by_template
             )
             if ja_agendado_by_consulta and not ja_agendado_by_status:
                 # Caso típico do bug "Aurora": lead com 1.DIA CONSULTA preenchido
@@ -1179,6 +1404,15 @@ class KommoClient:
                     "(camada 3). status=%s, 1.DIA CONSULTA vazio. "
                     "Nota: %r",
                     lead_id, sid, nota_preview,
+                )
+            if ja_agendado_by_template and not (
+                ja_agendado_by_status or ja_agendado_by_consulta
+            ):
+                log.warning(
+                    "Kommo: lead %s — ja_agendado=True por TEMPLATE "
+                    "CONCLUSAO (camada 4). status=%s, 1.DIA CONSULTA "
+                    "vazio. Dados: %s",
+                    lead_id, sid, template_dados,
                 )
 
             # 'name' = nome do CONTATO (quem escreve no WhatsApp) — é esse
