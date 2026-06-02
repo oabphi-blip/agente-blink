@@ -1302,15 +1302,35 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     # Python valida cada par "<dia-semana>, DD/MM" do texto contra o
     # calendário real. Se Lia escreveu "terça-feira, 03/06" e Python
     # diz que é quarta, bloqueia e força regenerar via fallback.
-    violacao_dia = _viola_dia_semana(text)
-    if violacao_dia:
-        dia_falado, data_str, dia_real = violacao_dia
-        log.error(
-            "[FILTRO] DIA DA SEMANA INVENTADO — Lia disse '%s' para %s, "
-            "mas Python calculou '%s'. Texto bloqueado: %r",
-            dia_falado, data_str, dia_real, text[:200],
-        )
-        return _DIA_SEMANA_FALLBACK
+    #
+    # EXCEÇÃO crítica (lead 21392947 Sabrina, 02/06/2026 tarde): se o
+    # paciente JÁ ESTÁ AGENDADO (ja_agendado=True), QUALQUER menção a
+    # dia/data na resposta é CONFIRMAÇÃO/REFERÊNCIA — não oferta nova.
+    # Substituir pelo fallback genérico "deixa eu reconferir o calendário"
+    # QUEBRA o contexto: paciente respondeu "1" (Tudo Correto) ao template
+    # de conclusão, e Lia abriu reconferência. Skip do filtro nesse caso.
+    if not (ctx and ctx.get("ja_agendado")):
+        violacao_dia = _viola_dia_semana(text)
+        if violacao_dia:
+            dia_falado, data_str, dia_real = violacao_dia
+            log.error(
+                "[FILTRO] DIA DA SEMANA INVENTADO — Lia disse '%s' para %s, "
+                "mas Python calculou '%s'. Texto ORIGINAL completo: %r",
+                dia_falado, data_str, dia_real, text,
+            )
+            return _DIA_SEMANA_FALLBACK
+    else:
+        # Log preventivo: paciente já agendado, NÃO aplicamos o filtro
+        # de dia-da-semana. Se Lia disse algo errado, vai aparecer aqui.
+        violacao_dia_check = _viola_dia_semana(text)
+        if violacao_dia_check:
+            dia_falado, data_str, dia_real = violacao_dia_check
+            log.warning(
+                "[FILTRO PULADO ja_agendado=True] _viola_dia_semana detectou "
+                "mismatch '%s' vs '%s' em %s, mas paciente já agendado — "
+                "considerando confirmação/referência, não oferta. Texto: %r",
+                dia_falado, dia_real, data_str, text,
+            )
 
     # 0a. Cobrança de sinal/Pix ANTES de slot concreto (regra 12.9 do master).
     # Lia não pode cobrar sinal sem antes ter oferecido um slot específico
