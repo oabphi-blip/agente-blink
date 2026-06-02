@@ -2494,6 +2494,125 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # PILAR #1: detector de leads-fantasma (cron + endpoint manual)
+    # ================================================================
+    # Cron interno roda a cada 5 min (se LEADS_FANTASMA_ENABLED=1).
+    # POST /admin/leads-fantasma-tick?secret=... — força tick manual.
+    @app.post("/admin/leads-fantasma-tick")
+    def admin_leads_fantasma_tick(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        dry = request.query_params.get("dry_run", "0") == "1"
+        try:
+            from voice_agent.leads_fantasma import tick
+            res = tick(
+                pipeline.kommo,
+                pipeline._redis,
+                dry_run=dry,
+            )
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"erro": f"tick falhou: {e}"}, status_code=500,
+            )
+        return JSONResponse({
+            "dry_run": dry,
+            "varridos": res.varridos,
+            "fantasmas_encontrados": res.fantasmas_encontrados,
+            "alertados": res.alertados,
+            "ja_alertados_dedup": res.ja_alertados_dedup,
+            "erros": res.erros,
+            "detalhes": res.detalhes[:50],
+        })
+
+    # ================================================================
+    # PILAR #4: watchdog "Lia muda" — detecta inbound sem outbound
+    # ================================================================
+    # POST /admin/watchdog-lia-tick?secret=...&dry_run=1
+    @app.post("/admin/watchdog-lia-tick")
+    def admin_watchdog_lia_tick(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        dry = request.query_params.get("dry_run", "0") == "1"
+        forc = request.query_params.get("forcar_horario", "0") == "1"
+        try:
+            from voice_agent.watchdog_lia import tick
+            res = tick(
+                pipeline.kommo, pipeline._redis,
+                dry_run=dry, forcar_horario=forc,
+            )
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"erro": f"tick falhou: {e}"}, status_code=500,
+            )
+        return JSONResponse({
+            "dry_run": dry,
+            "forcar_horario": forc,
+            "varridos": res.varridos,
+            "suspeitos": res.suspeitos,
+            "alertados": res.alertados,
+            "ja_alertados_dedup": res.ja_alertados_dedup,
+            "fora_horario": res.fora_horario,
+            "ia_pausada": res.ia_pausada,
+            "erros": res.erros,
+            "detalhes": res.detalhes[:50],
+        })
+
+    # ================================================================
+    # PILAR #5: canary lead diário — fluxo completo ponta-a-ponta
+    # ================================================================
+    # POST /admin/canary-tick?secret=...&dry_run=1&alertar_sempre=0
+    @app.post("/admin/canary-tick")
+    def admin_canary_tick(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        dry = request.query_params.get("dry_run", "0") == "1"
+        alertar = request.query_params.get("alertar_sempre", "0") == "1"
+        # Wrapper sobre o pipeline pra ser chamado pelo canary
+        def _simular(phone: str, texto: str) -> dict:
+            try:
+                ans = pipeline.responder.reply(
+                    user_text=texto,
+                    conversation_key=phone[-12:],
+                    channel="81331005",
+                )
+                return {"resposta_lia": ans or ""}
+            except Exception as e:  # noqa: BLE001
+                return {"resposta_lia": "", "erro": str(e)}
+        try:
+            from voice_agent.canary_lead import tick
+            res = tick(
+                _simular, pipeline._redis,
+                dry_run=dry, alertar_sempre=alertar,
+            )
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"erro": f"canary falhou: {e}"}, status_code=500,
+            )
+        return JSONResponse({
+            "canary_phone": res.canary_phone,
+            "steps_total": res.steps_total,
+            "steps_ok": res.steps_ok,
+            "steps_falhou": res.steps_falhou,
+            "duracao_total_ms": res.duracao_total_ms,
+            "detalhes": res.steps_detalhe,
+        })
+
+    # ================================================================
     # REPLAY: histórico de turnos do lead (tracing estruturado)
     # ================================================================
     # GET /admin/replay/{lead_id}?secret=...&limit=100
