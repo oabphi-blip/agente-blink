@@ -465,6 +465,33 @@ class VoicePipeline:
         except Exception as exc:  # noqa: BLE001
             log.warning("[AUDIO FABRICIO] detecção falhou: %s", exc)
 
+        # DEDUP FORTE pré-envio (bug Kamila 24064723, 02/06/2026 11:24 BRT):
+        # Lia enviou DUAS mensagens IDÊNTICAS em <1s. Causa: 2 webhooks
+        # próximos disparam 2 turnos, ambos geram mesma resposta. Hash
+        # SHA1(conversation_key + answer) + Redis SETEX 10s bloqueia o 2º.
+        try:
+            _redis_dedup = getattr(self, "_redis", None)
+            if _redis_dedup is not None and answer:
+                import hashlib as _h
+                _hash = _h.sha1(
+                    (str(conversation_key) + "|" + answer).encode("utf-8")
+                ).hexdigest()[:16]
+                _key = f"blink:dedup_outbound:{_hash}"
+                # set if not exists, com TTL 10s
+                _ok = _redis_dedup.set(_key, "1", nx=True, ex=10)
+                if not _ok:
+                    log.warning(
+                        "[DEDUP OUTBOUND] mensagem duplicada bloqueada "
+                        "convo=%s preview=%r", conversation_key, answer[:80],
+                    )
+                    return PipelineResult(
+                        transcript=user_text, answer=answer, sent=False,
+                        model_used=model_used, articles_used=articles_used,
+                        error="dedup: mensagem idêntica enviada recentemente",
+                    )
+        except Exception as _dedup_err:  # noqa: BLE001
+            log.warning("[DEDUP OUTBOUND] check falhou (ignora): %s", _dedup_err)
+
         try:
             self.evolution.send_text(
                 number=reply_to_number,
