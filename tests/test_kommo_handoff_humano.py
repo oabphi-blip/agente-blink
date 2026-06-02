@@ -65,19 +65,28 @@ class TestRegraEtapaHumana:
 
 class TestRegraServiceMessage:
 
-    def test_ia_desativada_via_notes_pausa(self):
-        """Cenário do bug 01/06: humano escreveu, Kommo gerou
-        service_message DESATIVADO, mas lead continua em 3-AGENDAR.
-        Lia deve PARAR de responder."""
+    def test_ia_desativada_RECENTE_pausa_temporariamente(self):
+        """Regra refinada Fábio 02/06: humano escreveu há POUCO
+        (15 min). Lia silencia TEMPORARIAMENTE. Após 30min IA
+        reativa sozinha — não fica órfã como no bug Elisa."""
         from voice_agent.kommo import KommoClient
+        from datetime import datetime, timezone, timedelta
+        agora = datetime.now(timezone.utc)
+        notas_recente = [{
+            "note_type": "service_message",
+            "created_at": (agora - timedelta(minutes=10)).strftime(
+                "%Y-%m-%dT%H:%M:%S.000Z"
+            ),
+            "text": "🛑 Agentes de IA foram desativados neste chat",
+        }]
         k = _make_kommo_stub(ia_status="DESATIVADO")
+        k.get_lead_notes = lambda lid, limit=50: notas_recente
         ctx = {
             "found": True, "lead_id": 23742328,
-            "status_id": 102560495,  # NÃO está em ST_AGENT_OFF
+            "status_id": 102560495,  # 3-AGENDAR (não em ST_AGENT_OFF)
         }
         result = KommoClient.agent_paused_for_lead(k, ctx, 30)
-        assert result == "humano-escreveu-no-chat"
-        assert k.ia_status_from_notes.called
+        assert result == "humano-escreveu-recente"
 
     def test_ia_ativada_via_notes_nao_pausa(self):
         from voice_agent.kommo import KommoClient

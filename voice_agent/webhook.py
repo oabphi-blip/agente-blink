@@ -2494,6 +2494,112 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # AUDIT: leads com IA silenciada há mais de N dias em etapa não-humana
+    # ================================================================
+    # GET /admin/audit/ia-desativada-orfa?dias=7&limit=200
+    # Origem: lead 21392947 Elisa (Fábio 02/06/2026). IA ficou em
+    # silêncio desde 13/04 porque última service_message foi "🛑" e
+    # ninguém reativou. Com a nova regra (silêncio temporário 30min
+    # + etapa = único critério permanente), leads como esse SÃO
+    # auto-curados. Este endpoint conta quantos existem pra Fábio
+    # decidir batch de reativação manual no Kommo se quiser.
+    @app.get("/admin/audit/ia-desativada-orfa")
+    def admin_audit_ia_orfa(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        import voice_agent.kommo as _km
+        try:
+            dias = int(request.query_params.get("dias", "7"))
+            limit = int(request.query_params.get("limit", "200"))
+        except (TypeError, ValueError):
+            dias = 7
+            limit = 200
+        kommo = pipeline.kommo
+        if kommo is None:
+            return JSONResponse(
+                {"erro": "Kommo não configurado"}, status_code=500,
+            )
+        # Etapas ONDE A IA DEVE estar ativa por padrão (qualquer
+        # uma que NÃO esteja em ST_AGENT_OFF)
+        from voice_agent.kommo import ST_AGENT_OFF
+        # Lista leads ativos do pipeline ATENDE em etapas IA-on
+        # (Closed-lost inclusive — está fora de ST_AGENT_OFF)
+        etapas_iaOn = [
+            96441724,   # 0-ENTRADA
+            106919911,  # 0-A CLASSIFICAR
+            101508307,  # 2-FRIO
+            102560495,  # 3-AGENDAR
+            106184631,  # 4-REAGENDAR
+            106184983,  # 7.1-NO-SHOW
+            101507507,  # 5-AGENDADO
+            91486864,   # 8-REALIZADO CONSULTA
+            143,        # Closed-lost
+        ]
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=dias)
+        orfaos = []
+        for sid in etapas_iaOn:
+            if sid in ST_AGENT_OFF:
+                continue
+            try:
+                leads = kommo.list_leads_by_status(
+                    pipeline_id=8601819, status_ids=[sid],
+                    limit=100, page=1,
+                ) or []
+            except Exception:  # noqa: BLE001
+                continue
+            for ld in leads[:50]:  # cap por etapa
+                lid = ld.get("id")
+                if not lid:
+                    continue
+                try:
+                    ts_humano = kommo._ts_ultimo_humano_escreveu(lid)
+                except Exception:  # noqa: BLE001
+                    continue
+                if not ts_humano:
+                    continue
+                if ts_humano > cutoff.timestamp():
+                    continue  # humano escreveu recente — não é órfão
+                orfaos.append({
+                    "lead_id": lid,
+                    "nome": ld.get("name") or f"Lead #{lid}",
+                    "status_id": sid,
+                    "humano_escreveu_em": datetime.fromtimestamp(
+                        ts_humano, tz=timezone.utc,
+                    ).isoformat(),
+                    "dias_em_silencio": int(
+                        (datetime.now(timezone.utc).timestamp()
+                         - ts_humano) / 86400,
+                    ),
+                    "url": (
+                        f"https://univeja.kommo.com/leads/detail/{lid}"
+                    ),
+                })
+                if len(orfaos) >= limit:
+                    break
+            if len(orfaos) >= limit:
+                break
+        orfaos.sort(key=lambda x: -x["dias_em_silencio"])
+        return JSONResponse({
+            "criterio_dias": dias,
+            "etapas_iaOn_varridas": etapas_iaOn,
+            "total_orfaos": len(orfaos),
+            "leads": orfaos,
+            "observacao": (
+                "Com a nova regra (sileêncio TEMPORÁRIO de 30min, não "
+                "permanente), TODOS os leads listados aqui voltam a "
+                "ter IA respondendo automaticamente quando paciente "
+                "escrever. Lista mantida só pra Fábio ver tamanho do "
+                "buraco anterior."
+            ),
+        })
+
+    # ================================================================
     # PILAR #1: detector de leads-fantasma (cron + endpoint manual)
     # ================================================================
     # Cron interno roda a cada 5 min (se LEADS_FANTASMA_ENABLED=1).

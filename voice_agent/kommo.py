@@ -1624,49 +1624,106 @@ class KommoClient:
     ) -> Optional[str]:
         """Decide se o agente deve ficar em SILÊNCIO para este lead.
 
-        DUAS REGRAS COMBINADAS (qualquer uma dispara silêncio):
+        REGRA GERAL ARTICULADA (Fábio 02/06/2026 — bug Elisa 21392947):
 
-        1) Lead está em etapa humana do funil (ST_AGENT_OFF). Modelo
-           ideal: atendente move lead pra etapa humana ao assumir.
+        IA fica desligada APENAS quando a etapa do funil é
+        explicitamente operacional/humana:
+        - 1-ATENDIMENTO HUMANO
+        - 7-CIRURGIAS ANDAMENTO, 8-LENTES, 9-FORNECEDORES
+        - 5-CONFIRMAR, 6-CONFIRMADO (paciente respondendo template)
 
-        2) Kommo gerou service_message "🛑 Agentes de IA foram
-           desativados neste chat" mais recente que qualquer marca de
-           reativação. Esse sinal vem AUTOMÁTICO quando o atendente
-           humano escreve manualmente no chat — independente de mover
-           o lead. Esta é a defesa que cobre quando o atendente esquece
-           de mover o lead.
+        Para QUALQUER outra etapa (entrada, frio, AGENDAR, REAGENDAR,
+        AGENDADO, NO-SHOW, Closed-lost, Closed-won...), a IA deve
+        responder mesmo se humano tiver escrito antes. Paciente pode
+        voltar a qualquer momento e Lia tem que estar pronta.
+
+        EXCEÇÃO TEMPORAL (sem permanência): se humano escreveu MENOS
+        de 30 min atrás (Kommo gerou "🛑" recente), aguarda. Isso dá
+        tempo do atendente terminar 1 conversa específica sem Lia
+        falar por cima. Após 30 min, IA volta automaticamente.
 
         Histórico:
-        - Em 29/05/2026 ficou SÓ etapa-humana (decisão de simplificação).
-        - Em 01/06/2026 Fábio identificou que Lia continuava respondendo
-          POR CIMA quando atendente escrevia sem mover o lead. Re-plugada
-          ia_status_from_notes (que sempre existiu mas não era usada
-          pelo gate principal).
+        - 01/06/2026 noite: regra 2 (service_message do Kommo)
+          re-plugada após bug Marcela. Mas ficou permanente — sem
+          decay temporal — e bloqueava em qualquer etapa.
+        - 02/06/2026: bug Elisa (21392947). Lia silenciosa há 50 dias
+          porque humano escreveu em 13/04. Auto-cura via regra de
+          etapa: closed-lost NÃO é ST_AGENT_OFF → IA responde.
+          Regra 2 vira temporária (30min), não permanente.
 
-        Trade-off: chamada extra de GET /leads/{id}/notes (~200ms).
-        Aceito porque o custo de Lia falar por cima é maior.
-
-        Retorna o motivo ('etapa-humana' | 'humano-escreveu-no-chat')
+        Retorna o motivo ('etapa-humana' | 'humano-escreveu-recente')
         ou None.
         """
         if not caller_context or not caller_context.get("found"):
             return None
 
-        # Regra 1: etapa humana do funil
+        # Regra 1: etapa do funil é explicitamente operacional/humana
+        # (ESTA É A REGRA PRIMÁRIA — Fábio 02/06/2026)
         if caller_context.get("status_id") in ST_AGENT_OFF:
             return "etapa-humana"
 
-        # Regra 2: service_message do Kommo (humano escreveu)
+        # Regra 2 (refinada): silêncio TEMPORÁRIO se humano escreveu
+        # nas últimas 30 minutos. Após esse window, IA volta sozinha
+        # mesmo sem "🟢" explícito. Auto-cura para evitar leads órfãos.
         lead_id = caller_context.get("lead_id")
         if lead_id:
             try:
-                ia_status = self.ia_status_from_notes(lead_id)
-                if ia_status == "DESATIVADO":
-                    return "humano-escreveu-no-chat"
+                ts_humano = self._ts_ultimo_humano_escreveu(lead_id)
+                if ts_humano:
+                    import time as _t
+                    idade_min = (_t.time() - ts_humano) / 60.0
+                    if idade_min < 30:
+                        return "humano-escreveu-recente"
             except Exception as e:  # noqa: BLE001
                 log.warning(
-                    "agent_paused_for_lead: ia_status_from_notes falhou "
-                    "(lead %s): %s", lead_id, e,
+                    "agent_paused_for_lead: checagem humano-recente "
+                    "falhou (lead %s): %s", lead_id, e,
                 )
 
         return None
+
+    def _ts_ultimo_humano_escreveu(
+        self, lead_id: int | str,
+    ) -> Optional[float]:
+        """Devolve epoch da última service_message "🛑 humano escreveu"
+        mais recente que qualquer "🟢 IA ativada". None se não há
+        marca de humano escrevendo, ou se a última marca é "🟢".
+
+        Usado pelo agent_paused_for_lead pra decidir silêncio
+        TEMPORÁRIO (não permanente como antes).
+        """
+        try:
+            notas = self.get_lead_notes(lead_id, limit=50) or []
+        except Exception:  # noqa: BLE001
+            return None
+        ultimo_ts: Optional[float] = None
+        ultimo_eh_humano = False
+        from datetime import datetime
+        for n in notas:
+            if not isinstance(n, dict):
+                continue
+            if (n.get("note_type") or "") != "service_message":
+                continue
+            texto = (n.get("text") or "").lower()
+            if "agentes de ia" not in texto and "ai agents" not in texto:
+                continue
+            # Parse timestamp
+            ts_raw = n.get("created_at")
+            if not ts_raw:
+                continue
+            try:
+                dt = datetime.fromisoformat(
+                    str(ts_raw).replace("Z", "+00:00"),
+                )
+                ts = dt.timestamp()
+            except (ValueError, TypeError):
+                continue
+            # Mais recente vence
+            if ultimo_ts is None or ts > ultimo_ts:
+                ultimo_ts = ts
+                # "🛑 desativados" ou "stopped" = humano escreveu
+                ultimo_eh_humano = (
+                    "desativados" in texto or "desativadas" in texto
+                    or "stopped" in texto or "🛑" in texto
+                )
+        return ultimo_ts if ultimo_eh_humano else None
