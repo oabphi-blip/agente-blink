@@ -1290,11 +1290,11 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     # em horário comercial". Sem o filtro, escapa dos outros 4 detectores.
     # Se já temos agenda → reformula oferecendo os 2 melhores slots.
     # Se NÃO temos agenda → pede 1min e prometendo voltar com opções reais.
-    # Voltou pra OFF (FILTROS_LEGACY=0 default) — caso Iara 21344999 mostrou
-    # que ligar esse filtro sem ter o fallback testado em prod travou a
-    # Lia (resposta não saía). Dedup forte (acima) sobra como defesa
-    # contra duplicação; promessa-sem-cumprir aceita por enquanto.
-    if _FILTROS_LEGACY_ATIVOS and _viola_promete_retorno_humano(text):
+    # SEMPRE ON — caso Kamila 02/06 11:50 BRT mostrou Lia inventando
+    # "retorno em horário comercial seg-sex 8h-18h" (Blink é 24h!).
+    # Rollback do rollback: filtro fica obrigatório de novo.
+    # (Iara 21344999 silêncio NÃO foi causa do filtro — outro problema.)
+    if _viola_promete_retorno_humano(text):
         log.error(
             "[FILTRO] PROMESSA RETORNO HUMANO BLOQUEADA — Lia inventou "
             "encaminhamento humano. has_agenda=%s. Texto: %r",
