@@ -86,31 +86,49 @@ class TestTick:
     def test_todos_steps_OK(self, monkeypatch):
         from voice_agent.canary_lead import tick
 
-        # Mock que retorna respostas que satisfazem todos os steps
+        # Mock que retorna respostas que satisfazem todos os 14 steps
+        # (7 happy + 7 bugs históricos).
         def fake(phone, text):
             tl = text.lower()
-            if "agendar" in tl:
-                return {"resposta_lia": "Olá! Posso te ajudar com o agendamento"}
+            # Happy path
+            if "gostaria de agendar" in tl:
+                return {"resposta_lia": "Olá! Posso te ajudar"}
             if "rotina" in tl:
                 return {"resposta_lia": "Qual seu nome e data de nascimento?"}
             if "nasci" in tl:
                 return {"resposta_lia": "Qual seu convênio?"}
-            if "stf" in tl:
-                return {"resposta_lia": "Tenho essas opções de horários:"}
-            if "manhã" in tl or "manha" in tl:
+            if "stf-med" in tl:
+                return {"resposta_lia": "Tenho opções de agenda e horários"}
+            if "prefiro manhã" in tl:
                 return {"resposta_lia": "Tenho 08:00, 09:00, 10:00, 11:00"}
-            if "primeiro" in tl:
+            if "primeiro horário" in tl:
                 return {"resposta_lia": "Confirma seu CPF, por favor?"}
-            if "cpf" in tl:
+            if "cpf é 111" in tl:
                 return {"resposta_lia": "Consulta confirmada e marcada!"}
+            # Bugs históricos (08-14)
+            if "imagem pelo whatsapp" in tl:
+                return {"resposta_lia": "Recebi, obrigado! Vou conferir."}
+            if "confirma minha consulta" in tl:
+                return {"resposta_lia": "Sua consulta está marcada para o dia 09/06"}
+            if "quanto custa" in tl:
+                return {"resposta_lia": "O valor da consulta é R$..."}
+            if "pedro silva" in tl:
+                return {"resposta_lia": "Vou marcar pro Pedro, qual a data de nasc dele?"}
+            if "dr. fabrício" in tl or "dr. fabricio" in tl:
+                return {"resposta_lia": "Vou confirmar com a Karla ou o Fabricio"}
+            if "qualquer horário" in tl:
+                return {"resposta_lia": "Tenho horários disponíveis"}
+            if "não vou usar convênio" in tl:
+                return {"resposta_lia": "Particular: o valor da consulta é R$..."}
             return {"resposta_lia": "?"}
 
         res = tick(
             fake, MagicMock(),
             phone="5561900000000", dry_run=True,
+            pular_medware=True, pular_cleanup=True,
         )
-        assert res.steps_total == 7
-        assert res.steps_ok == 7
+        assert res.steps_total == 14
+        assert res.steps_ok == 14
         assert res.steps_falhou == []
         assert res.duracao_total_ms >= 0
 
@@ -139,10 +157,11 @@ class TestTick:
         res = tick(
             fake_explode, MagicMock(),
             phone="5561900000000", dry_run=True,
+            pular_medware=True, pular_cleanup=True,
         )
-        # Em dry_run continua, todos falham
+        # Em dry_run continua, todos os 14 falham
         assert res.steps_ok == 0
-        assert len(res.steps_falhou) == 7
+        assert len(res.steps_falhou) == 14
         # Cada step capturou o erro
         for d in res.steps_detalhe:
             assert d["erro"] is not None

@@ -12,9 +12,10 @@ se algum campo for renomeado no Kommo, atualizar aqui também.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
@@ -375,6 +376,71 @@ def _format_date_iso(iso_yyyymmdd: str) -> Optional[str]:
     if not iso_yyyymmdd or len(iso_yyyymmdd) < 10:
         return None
     return f"{iso_yyyymmdd[:10]}T00:00:00-03:00"
+
+
+# Camada 3 do ja_agendado — detecta agendamento via nota humana
+# (Fábio 02/06/2026): atendentes humanos agendam via Medware + nota
+# livre, sem disciplinarmente atualizar status_id ou 1.DIA CONSULTA.
+# Lia ficava cega e oferecia slot de novo (bug recorrente).
+_RE_AGENDOU_HUMANO = re.compile(
+    r"\b(agend(?:ei|ou|ado|amento|ada)|"
+    r"marqu(?:ei|ou|ado|ada)|"
+    r"confirm(?:ei|ou|ado|ada)|"
+    r"gravado|grav(?:ei|ou)|"
+    r"salv(?:ei|ou)|"
+    r"reserv(?:ei|ou|ado|ada))\b",
+    re.IGNORECASE,
+)
+_RE_DATA_FUTURA = re.compile(
+    r"(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)"  # dd/mm/aaaa
+    r"|(\d{1,2}[hH]\d{0,2})"  # 14h ou 14h30
+    r"|(\b(?:segunda|terça|quarta|quinta|sexta|sábado|domingo))",
+    re.IGNORECASE,
+)
+
+
+def _ja_agendado_por_nota_humana(
+    notas: list[dict], janela_h: int = 72,
+) -> tuple[bool, Optional[str]]:
+    """Camada 3 do ja_agendado: parser de notas escritas por humano.
+
+    Se há nota com `created_by != 0` (= usuário Kommo real, não o bot)
+    nas últimas `janela_h` horas E o texto contém palavras-chave de
+    agendamento (`agendei/marquei/confirmou/gravou/salvei/reservou`)
+    E uma data parseável (DD/MM ou dia da semana ou hora) → True.
+
+    Devolve `(eh_agendado, motivo_texto_preview)` pra logging.
+    """
+    if not notas:
+        return False, None
+    agora = datetime.now(timezone.utc)
+    for n in notas:
+        if not isinstance(n, dict):
+            continue
+        # Bot do voice_agent grava com created_by=0; humanos têm user_id
+        if int(n.get("created_by") or 0) == 0:
+            continue
+        # Janela temporal
+        ts_raw = n.get("created_at")
+        if ts_raw:
+            try:
+                d = datetime.fromisoformat(
+                    str(ts_raw).replace("Z", "+00:00"),
+                )
+                if (agora - d).total_seconds() > janela_h * 3600:
+                    continue
+            except (ValueError, TypeError):
+                pass
+        texto = (n.get("text") or "").strip()
+        if not texto:
+            continue
+        if (
+            _RE_AGENDOU_HUMANO.search(texto)
+            and _RE_DATA_FUTURA.search(texto)
+        ):
+            preview = texto[:140].replace("\n", " ")
+            return True, preview
+    return False, None
 
 
 def ler_cf_valor(lead_json: dict, field_id: int) -> Optional[str]:
@@ -901,6 +967,41 @@ class KommoClient:
             log.warning("Kommo get_lead_main_phone erro (lead %s): %s", lead_id, e)
         return None
 
+    def get_lead_notes(
+        self, lead_id: int | str, limit: int = 50,
+    ) -> list[dict]:
+        """Lista notas do lead, ordem cronológica (mais antigas primeiro).
+
+        Usado pela camada 3 do ja_agendado (parser de notas humanas).
+        Devolve lista de dicts {id, created_at, created_by, text, ...}
+        ou [] em erro.
+        """
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.get(
+                    f"{self._base}/leads/{lead_id}/notes",
+                    params={
+                        "limit": min(int(limit), 250),
+                        "order[created_at]": "desc",
+                    },
+                    headers=self._headers,
+                )
+            if r.status_code == 204:
+                return []
+            if r.status_code != 200:
+                log.warning(
+                    "Kommo get_lead_notes %s: HTTP %d",
+                    lead_id, r.status_code,
+                )
+                return []
+            data = r.json() or {}
+            return list(((data.get("_embedded") or {}).get("notes") or []))
+        except Exception as e:  # noqa: BLE001
+            log.warning(
+                "Kommo get_lead_notes erro (lead %s): %s", lead_id, e,
+            )
+            return []
+
     def get_lead(self, lead_id: int | str) -> Optional[dict]:
         """Busca o lead completo (inclui custom_fields_values).
 
@@ -1037,8 +1138,30 @@ class KommoClient:
                     v = vals[0].get("value")
                     if v:
                         out["known"][label] = v
-            # ja_agendado = OR das duas camadas (status_id OR consulta futura)
-            out["ja_agendado"] = ja_agendado_by_status or ja_agendado_by_consulta
+            # Camada 3: nota humana recente com "agendei/marquei + data"
+            # Origem: Fábio 02/06/2026 — atendente humano agenda no
+            # Medware + escreve nota livre, sem atualizar 1.DIA CONSULTA.
+            # Sem essa camada Lia ficava cega e refazia agendamento.
+            notas_lead = []
+            try:
+                notas_lead = self.get_lead_notes(lead_id) or []
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "Kommo: erro lendo notas pra camada 3 lead %s: %s",
+                    lead_id, e,
+                )
+            ja_agendado_by_humano, nota_preview = _ja_agendado_por_nota_humana(
+                notas_lead,
+            )
+            if ja_agendado_by_humano:
+                out["known"]["agendamento_por_humano_preview"] = nota_preview
+
+            # ja_agendado = OR das TRÊS camadas
+            out["ja_agendado"] = (
+                ja_agendado_by_status
+                or ja_agendado_by_consulta
+                or ja_agendado_by_humano
+            )
             if ja_agendado_by_consulta and not ja_agendado_by_status:
                 # Caso típico do bug "Aurora": lead com 1.DIA CONSULTA preenchido
                 # mas status ainda 2-AGENDAR (não foi movido). Loga aviso.
@@ -1046,6 +1169,16 @@ class KommoClient:
                     "Kommo: lead %s tem dia_consulta_ts=%s (futuro) mas status "
                     "%s não está em ST_JA_AGENDADO. ja_agendado=True por camada 2.",
                     lead_id, dia_consulta_ts, sid,
+                )
+            if ja_agendado_by_humano and not (
+                ja_agendado_by_status or ja_agendado_by_consulta
+            ):
+                # Caso novo: humano agendou sem mexer nos campos.
+                log.warning(
+                    "Kommo: lead %s — ja_agendado=True por NOTA HUMANA "
+                    "(camada 3). status=%s, 1.DIA CONSULTA vazio. "
+                    "Nota: %r",
+                    lead_id, sid, nota_preview,
                 )
 
             # 'name' = nome do CONTATO (quem escreve no WhatsApp) — é esse
