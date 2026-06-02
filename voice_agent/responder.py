@@ -1678,7 +1678,22 @@ class Responder:
             # Loop de tool_use — máximo 4 iterações pra evitar runaway
             messages_acc = list(messages)
             answer = ""
+            # FORÇA modelo a chamar tool quando ctx tem agenda real do Medware
+            # (ctx["agenda"] preenchido pelo pipeline). Sem isso, modelo
+            # ESCOLHE entre texto livre e tool, e na prática prefere texto
+            # ("Vou consultar..." sem nunca chamar tool — bug Sabrina, Kamila,
+            # Janeide, Iara, Keyla 02/06/2026 tarde).
+            # `tool_choice={"type":"any"}` força modelo a usar ALGUMA tool
+            # (geralmente oferecer_slot, que é a única que faz sentido nesse
+            # contexto).
+            _agenda_ctx = (caller_context or {}).get("agenda") or []
+            _force_tool_kwargs: dict = {}
+            if _agenda_ctx and not (caller_context or {}).get("ja_agendado"):
+                _force_tool_kwargs["tool_choice"] = {"type": "any"}
             for _iter in range(4):
+                # Só força tool na 1ª iteração — depois deixa modelo escrever
+                # resposta humana em cima do tool_result.
+                _iter_kwargs = _force_tool_kwargs if _iter == 0 else {}
                 response = self._client.messages.create(
                     model=model,
                     max_tokens=600,
@@ -1686,6 +1701,7 @@ class Responder:
                     messages=messages_acc,
                     temperature=0.3,
                     tools=ALL_TOOLS,
+                    **_iter_kwargs,
                 )
                 # Processa blocks: text vai direto pra answer; tool_use
                 # dispara handler + injeta tool_result.
