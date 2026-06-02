@@ -1289,6 +1289,38 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             log.warning("[FILTRO] Anti-pattern transferência detectado: %r", pat.pattern)
             break
 
+    # 4. JUIZ ADVERSARIAL Haiku (último olhar — defesa semântica)
+    # Origem: discussão Fábio 01/06/2026 — regex não pega bug novo.
+    # Haiku 4.5 lê (lia_text, ctx, user_text) e classifica risco 0-100.
+    # Se risco>=limiar, substitui pelo FALLBACK_SUBSTITUICAO.
+    # Opt-in via JUIZ_HAIKU_ENABLED=1. Em erro/timeout, não bloqueia.
+    try:
+        from voice_agent.juiz_adversarial import (
+            JuizAdversarial, FALLBACK_SUBSTITUICAO,
+        )
+        juiz = JuizAdversarial.from_env()
+        if juiz is not None:
+            veredicto = juiz.julgar(
+                lia_text=text,
+                ctx=ctx,
+                user_text=(ctx or {}).get("_user_text_atual", ""),
+            )
+            if veredicto.deve_substituir:
+                log.error(
+                    "[JUIZ] resposta substituida — risco=%d motivos=%s "
+                    "elapsed_ms=%d. Texto: %r",
+                    veredicto.risco, veredicto.motivos,
+                    veredicto.elapsed_ms, text[:200],
+                )
+                return FALLBACK_SUBSTITUICAO
+            elif veredicto.risco >= 30:
+                log.warning(
+                    "[JUIZ] borderline — risco=%d motivos=%s",
+                    veredicto.risco, veredicto.motivos,
+                )
+    except Exception as e:  # noqa: BLE001
+        log.warning("[JUIZ] erro ao executar — passando direto: %s", e)
+
     return text
 
 
