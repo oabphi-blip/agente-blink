@@ -45,7 +45,11 @@ jobs:
           KOMMO_SUBDOMAIN: univeja
           KOMMO_TOKEN: fake-jwt
           REDIS_URL: redis://localhost:6379/0
-          WEBHOOK_SECRET: fake-secret
+          # WEBHOOK_SECRET vazio = endpoints /admin/* ficam ABERTOS no CI.
+          # Os testes em test_auditoria_endpoints.py fazem POST sem token,
+          # esperando 400/503/200 — não 401. Quando havia "fake-secret"
+          # aqui, todos retornavam 401 Unauthorized.
+          WEBHOOK_SECRET: ""
           # Settings.load() valida presença dessas 3 envs antes de instanciar
           # o FastAPI app. Sem elas, fixtures que usam TestClient quebram com
           # RuntimeError. Valores fake são OK porque os testes mockam HTTP.
