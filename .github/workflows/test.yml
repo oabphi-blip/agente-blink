@@ -1,0 +1,79 @@
+name: Pytest + Smoke
+
+# Origem: Fábio 02/06/2026 — "como evitar Lia regredir como aluno
+# que volta a errar 1ª série depois de chegar na 3ª". Resposta:
+# CI/CD gate. Cada push em main roda TODOS os testes. Se algum
+# cenário histórico quebrar, CHECK fica vermelho → Easypanel
+# não faz auto-deploy. Memória ativa preventiva, não reativa.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  pytest:
+    name: pytest (cobertura de regressão)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instala dependências
+        run: |
+          python -m pip install --upgrade pip
+          # Instala apenas o necessário pra rodar pytest. Não precisa
+          # do voice_agent server completo — só os módulos importados
+          # pelos testes.
+          pip install pytest pytest-cov httpx redis anthropic openai \
+            fastapi pydantic python-multipart
+
+      - name: Roda pytest (sem rede)
+        env:
+          ANTHROPIC_API_KEY: sk-ant-fake-pra-mock
+          OPENAI_API_KEY: sk-fake-pra-mock
+          KOMMO_SUBDOMAIN: univeja
+          KOMMO_TOKEN: fake-jwt
+          REDIS_URL: redis://localhost:6379/0
+          WEBHOOK_SECRET: fake-secret
+        run: |
+          python -m pytest tests/ -v --tb=short \
+            --maxfail=10 -p no:cacheprovider
+
+      - name: Resumo
+        if: always()
+        run: |
+          echo "=========================="
+          echo "Resumo de cobertura"
+          echo "=========================="
+          python -m pytest tests/ --co -q 2>&1 | tail -5 || true
+
+  lint:
+    name: lint básico (não bloqueante)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instala ruff
+        run: pip install ruff
+
+      - name: Lint
+        run: |
+          ruff check voice_agent/ tests/ --select E,F,W --quiet || \
+            echo "::warning::Ruff encontrou avisos (não bloqueante)"

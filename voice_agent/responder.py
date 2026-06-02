@@ -1008,6 +1008,83 @@ _PROMETE_RETORNO_HUMANO_FALLBACK_SEM_AGENDA = (
 
 
 # ------------------------------------------------------------------
+# Filtro PERGUNTA REDUNDANTE DE CONVÊNIO
+# Origem: lead 24063769 Adriana (02/06/2026). Paciente perguntou
+# valor, Lia perguntou 4x: "convênio ou sem?", "quem?", "convênio?",
+# "motivo?". Convênio JÁ ESTAVA preenchido no ctx ("Não se aplica" =
+# particular). Lia ignorou o ctx e fez triagem redundante.
+# ------------------------------------------------------------------
+_RE_PERGUNTA_CONVENIO = re.compile(
+    r"(com\s+conv[êe]nio\s+ou\s+sem|"
+    r"ser[áa]?\s+por\s+conv[êe]nio|"
+    r"\bsem\s+conv[êe]nio\b\s*\?|"
+    r"qual\s+(?:o\s+seu\s+)?conv[êe]nio|"
+    r"(?:vai|voc[êe])\s+usar\s+conv[êe]nio|"
+    r"(?:é|eh)\s+(?:por\s+)?conv[êe]nio)",
+    re.IGNORECASE,
+)
+
+
+def _viola_pergunta_redundante_convenio(
+    text: str, ctx: Optional[dict] = None,
+) -> bool:
+    """True se Lia perguntou sobre convênio quando ctx já tem.
+
+    Cobre o cenário Adriana 24063769: ctx.known.convenio preenchido
+    (qualquer valor, incluindo "Não se aplica") + Lia pergunta de
+    novo. Pergunta redundante.
+    """
+    if not text or not ctx:
+        return False
+    known = (ctx or {}).get("known") or {}
+    convenio_ja_conhecido = known.get("convenio")
+    if not convenio_ja_conhecido:
+        return False
+    return bool(_RE_PERGUNTA_CONVENIO.search(text))
+
+
+def _gerar_resposta_valor_sem_repergunta(ctx: Optional[dict]) -> str:
+    """Gera resposta orientada a próxima ação — sem repergunta de
+    convênio. Usa o que já está no ctx pra falar do valor certo."""
+    if not ctx:
+        ctx = {}
+    known = ctx.get("known") or {}
+    medico = known.get("medico") or ""
+    especialidade = known.get("especialidade") or ""
+    convenio = known.get("convenio") or ""
+    # Decide qual valor mencionar baseado no ctx
+    if "fabr" in medico.lower() or "catarata" in especialidade.lower():
+        valor_str = "R$ 297 (avaliação com Dr. Fabrício Freitas)"
+    elif "sdp" in especialidade.lower() or "aprend" in especialidade.lower():
+        valor_str = "R$ 800 (SDP — Aprendizagem com Dra. Karla)"
+    elif "karla" in medico.lower() or medico:
+        valor_str = "R$ 611 (consulta com Dra. Karla Delalibera)"
+    else:
+        # Sem médico definido — passa tabela inteira
+        return (
+            "Os valores são:\n"
+            "• Consulta Dra. Karla (rotina, oftalmopediatria, "
+            "estrabismo): **R$ 611**\n"
+            "• Avaliação catarata Dr. Fabrício: **R$ 297**\n"
+            "• SDP (Aprendizagem, Dra. Karla): **R$ 800**\n\n"
+            "Qual desses atendimentos interessa pra você? "
+            "Já te passo o horário."
+        )
+    # Convênio já conhecido — usa ele
+    if convenio and convenio not in ("Não se aplica", "", "Particular"):
+        return (
+            f"Pelo seu convênio ({convenio}) a consulta é coberta — "
+            "você não paga direto à clínica (pode ter co-participação "
+            "dependendo do plano). Quer seguir pro horário?"
+        )
+    # Particular
+    return (
+        f"O valor da consulta é **{valor_str}**, pagamento via Pix. "
+        "Quer já ver os horários disponíveis?"
+    )
+
+
+# ------------------------------------------------------------------
 # Filtro OFERTA DE SLOT APÓS JÁ TER AGENDADO
 # Origem: lead 24060221 Esther Dias Guimarães (01/06/2026 17:39 BRT).
 # ------------------------------------------------------------------
@@ -1134,6 +1211,16 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
         return text
 
     has_agenda = bool((ctx or {}).get("agenda"))
+
+    # 0-pre-bis. PERGUNTA REDUNDANTE DE CONVÊNIO (lead 24063769 Adriana,
+    # 02/06/2026). Convênio já no ctx mas Lia perguntou de novo.
+    if _viola_pergunta_redundante_convenio(text, ctx):
+        log.error(
+            "[FILTRO] PERGUNTA REDUNDANTE CONVÊNIO bloqueada — ctx já "
+            "tem convenio=%r. Texto: %r",
+            ((ctx or {}).get("known") or {}).get("convenio"), text[:200],
+        )
+        return _gerar_resposta_valor_sem_repergunta(ctx)
 
     # 0-pre. OFERTA APÓS JÁ AGENDADO (lead 24060221 Esther, 01/06/2026)
     # Lead em 5-AGENDADO + paciente envia carteirinha → Lia volta a
