@@ -246,6 +246,54 @@ Estão no root do repo:
 Todos têm token GitHub embedded. **Token `ghp_7NNf...3H20m8` está comprometido** —
 revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 
+### 11-K. Casos práticos 02/06/2026 tarde — 4 padrões de bug + downtime do dia
+
+**Casos reportados em sequência durante operação real:**
+
+| Lead | Paciente | Bug |
+|---|---|---|
+| 21392947 | Sabrina (mãe Elisa) | Filtro `_viola_dia_semana` substituiu confirmação ("1=Tudo Correto") por fallback genérico "reconferir agenda". Status_id 5-AGENDADO + 1.DIA CONSULTA futuro NÃO impediu filtro. |
+| 24064723 | Kamila | Mensagem duplicada (mesmo texto em <1s) + Lia inventou "retorno em horário comercial seg-sex 8-18h" (Blink é 24h, não tem esse horário). |
+| 24065257 | Janeide (mãe Allison) | Ofereceu "Terça 03/06" e "Quinta 05/06" — datas erradas (03/06 é quarta, 05/06 é sexta). Depois confirmação correta com paciente confirmando + pediu CPF, mas regrediu pra "reconsultar agenda" no turno seguinte. |
+| 21344999 | Iara (bebê 1a6m) + Rebeca (mãe) | Lia pediu CPF da contato (Rebeca) em vez do paciente (Iara). Quando Rebeca enviou CPF, Lia ignorou e perguntou de novo. Depois rajada de mensagens → Lia entrou em loop perguntando "turno e período" 4x seguidas mesmo com paciente respondendo. |
+
+**Diagnóstico arquitetural unificado:**
+
+Todos os 4 bugs apontam pra MESMA causa raiz: **pipeline.py processa mensagens em rajada SEM lock por `conversation_key`**. Quando o paciente digita rápido OU quando 2 mensagens da paciente chegam próximas:
+
+1. Turno 1 começa a processar → modelo gera resposta A
+2. Turno 2 entra ANTES da resposta A "fixar" no Redis/Kommo → modelo gera resposta B com contexto DESATUALIZADO
+3. As 2 respostas saem em sequência com perguntas redundantes
+
+**Dedup forte (commit a37ffb8) só pega texto IDÊNTICO** (hash). Quando o modelo varia "Ótimo!" / "Perfeito!" / "Entendi!" no início, todas passam.
+
+**Fix arquitetural (próxima sessão):**
+
+Adicionar lock Redis em pipeline.py:
+```python
+lock = redis.set(f"blink:lock_pipeline:{conv_key}", "1", nx=True, ex=30)
+if not lock:
+    # outra requisição já está processando essa conversa
+    # opção: enfileirar ou descartar (com log)
+    return PipelineResult(sent=False, error="conversation_locked")
+```
+
+Isso elimina concorrência por conversa. Lock TTL 30s evita travamento eterno.
+
+**Bug colateral causado por minha cadeia de deploys (lição importante):**
+
+Hoje fiz 12+ commits/deploys em sequência. Cada deploy do Easypanel reinicia o container (~2-5 min downtime). Resultado: **agent ficou OUT 11:33-12:00 BRT (27 min)** — leads que entraram nesse intervalo (Tatiana 11:56, Iara 11:59, Ben Hur 2 11:59) ficaram sem resposta ou com gravação Kommo incompleta.
+
+**Regra de processo:** rate-limit em commits/deploys. Não fazer mais de 2 deploys por hora durante operação ativa. Janela de manutenção = horário sem atendimento.
+
+**Regras de prompt detectadas pra refinar (não imediato):**
+
+1. `_MASTER_INSTRUCTION.md` E2 — frase exemplo "preciso do CPF" é AMBÍGUA quando paciente é bebê/criança. Trocar pra "preciso do CPF do paciente ({{nome_paciente}})".
+2. Adicionar regra: "Quando paciente é menor (perfis Bebê 0-2 ou Criança 3-12), CPF é DO PACIENTE — NÃO peça do responsável."
+3. Onde "horário comercial" / "seg-sex 8-18h" mora (27 arquivos têm essa string). Blink é 24h — limpar isso do prompt/KB.
+
+---
+
 ### 11-J. Caso Kamila lead 24064723 — 3 bugs simultâneos (02/06/2026 11:24 BRT)
 
 **Cenário:**
