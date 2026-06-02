@@ -1194,6 +1194,24 @@ def _gerar_oferta_pos_agendado_fallback(ctx: Optional[dict]) -> str:
     )
 
 
+_FILTROS_LEGACY_ATIVOS = os.getenv("FILTROS_LEGACY", "0") == "1"
+# Flag pra desligar os 5 filtros pós-geração reativos (cada um criado
+# pra prender 1 bug específico do passado, hoje gerando falso positivo).
+# Bug Sabrina lead 21392947 (02/06/2026) foi a gota: _viola_dia_semana
+# substituiu resposta confirmando agendamento pelo fallback genérico.
+# Filtros desligados quando FILTROS_LEGACY=0 (default):
+#   _viola_pergunta_redundante_convenio (Adriana)
+#   _viola_oferta_apos_agendado (Esther)
+#   _viola_oferta_agenda
+#   _viola_promete_retorno_humano (Juliene)
+#   _viola_dia_semana (Aurora, Sabrina)
+# Filtros MANTIDOS sempre (invariantes duros):
+#   _scrub_prohibited Pix chave inválida
+#   _viola_mentiu_gravou_medware
+#   _viola_cobranca_antes_slot
+# Reativar: setar FILTROS_LEGACY=1 no Easypanel.
+
+
 def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
 
@@ -1214,7 +1232,7 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
 
     # 0-pre-bis. PERGUNTA REDUNDANTE DE CONVÊNIO (lead 24063769 Adriana,
     # 02/06/2026). Convênio já no ctx mas Lia perguntou de novo.
-    if _viola_pergunta_redundante_convenio(text, ctx):
+    if _FILTROS_LEGACY_ATIVOS and _viola_pergunta_redundante_convenio(text, ctx):
         log.error(
             "[FILTRO] PERGUNTA REDUNDANTE CONVÊNIO bloqueada — ctx já "
             "tem convenio=%r. Texto: %r",
@@ -1227,7 +1245,7 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     # oferecer slot. Filtro pós-geração é a defesa final quando o LLM
     # ignora a TRAVA "🚨 JÁ AGENDADO" do system prompt. Dispara antes
     # de qualquer outro filtro porque, se vale aqui, vale logo.
-    if _viola_oferta_apos_agendado(text, ctx):
+    if _FILTROS_LEGACY_ATIVOS and _viola_oferta_apos_agendado(text, ctx):
         log.error(
             "[FILTRO] OFERTA POS-AGENDADO bloqueada — Lia tentou oferecer "
             "slot novo num lead já com consulta marcada. ja_agendado=True. "
@@ -1237,7 +1255,7 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
 
     # 0. Fingiu consultar agenda — quando JÁ tem horários no contexto.
     # Esse bug deixa a Lia em loop de "deixa eu consultar..." sem nunca voltar.
-    if _viola_oferta_agenda(text, has_agenda):
+    if _FILTROS_LEGACY_ATIVOS and _viola_oferta_agenda(text, has_agenda):
         log.error(
             "[FILTRO] FAKE AGENDA LOOKUP bloqueado — Lia disse que ia consultar "
             "agenda quando JÁ tinha %d slots no contexto. Texto: %r",
@@ -1272,7 +1290,7 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     # em horário comercial". Sem o filtro, escapa dos outros 4 detectores.
     # Se já temos agenda → reformula oferecendo os 2 melhores slots.
     # Se NÃO temos agenda → pede 1min e prometendo voltar com opções reais.
-    if _viola_promete_retorno_humano(text):
+    if _FILTROS_LEGACY_ATIVOS and _viola_promete_retorno_humano(text):
         log.error(
             "[FILTRO] PROMESSA RETORNO HUMANO BLOQUEADA — Lia inventou "
             "encaminhamento humano. has_agenda=%s. Texto: %r",
@@ -1309,7 +1327,7 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     # Substituir pelo fallback genérico "deixa eu reconferir o calendário"
     # QUEBRA o contexto: paciente respondeu "1" (Tudo Correto) ao template
     # de conclusão, e Lia abriu reconferência. Skip do filtro nesse caso.
-    if not (ctx and ctx.get("ja_agendado")):
+    if _FILTROS_LEGACY_ATIVOS and not (ctx and ctx.get("ja_agendado")):
         violacao_dia = _viola_dia_semana(text)
         if violacao_dia:
             dia_falado, data_str, dia_real = violacao_dia
