@@ -246,6 +246,63 @@ Estão no root do repo:
 Todos têm token GitHub embedded. **Token `ghp_7NNf...3H20m8` está comprometido** —
 revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 
+### 11-E. Regra "shadow mode" — defesa nova SÓ entra em prod após validação real (02/06/2026)
+
+**Origem do princípio:** sessão 02/06 manhã. Juiz Haiku 4.5
+adversarial (ligado 01/06 noite com `JUIZ_HAIKU_ENABLED=1`, limiar
+70) vetou em série respostas legítimas da Lia. Leads afetados:
+Larissa/Lis/Samuel (10513560) — 2 fallback genéricos seguidos.
+Adriana (24063769) — 4 turnos de enrolação antes de responder valor.
+Causa: pytest unitário passou, mas juiz não foi testado com 100+
+turnos reais. LIMIAR=70 em Haiku 4.5 deu falso positivo demais em
+casos borderline normais.
+
+**Regra a partir de 02/06:** nenhuma camada nova de defesa que
+SUBSTITUI resposta da Lia entra em prod sem:
+
+1. Rodar em **modo shadow** por pelo menos 24h: apenas LOGA o que
+   substituiria, sem substituir de fato.
+2. Métrica de aprovação: < 2% dos turnos teriam sido substituídos.
+3. Revisão dos textos substituídos pra ver se são falsos positivos.
+4. Aprovação explícita do Fábio antes de ativar `ENABLED=1`.
+
+Aplicação retroativa: `JUIZ_HAIKU_ENABLED=0` e `MEMORIA_BUGS_ENABLED=0`
+em prod desde 02/06 ~9h BRT (desligados via Easypanel manualmente).
+Defesa atual = 13 filtros regex + retry Medware + circuit breaker
++ checklist 4 dados mínimos + state machine FSM. Suficiente.
+
+### 11-F. Bug recorrente "pergunta redundante de convênio" — Adriana (02/06/2026)
+
+Lead 24063769. Paciente perguntou valor. Lia fez 4 turnos pedindo
+"com ou sem convênio?" quando `ctx.known.convenio = "Não se aplica"`
+já estava no Kommo. Triagem ignorou o ctx.
+
+**Fix:**
+- Artigo KB `voice_agent/knowledge_base/39_valores_consulta.md` com
+  tabela oficial R$ 611 Karla / R$ 297 Fabrício catarata / R$ 800 SDP.
+- Filtro `_viola_pergunta_redundante_convenio(text, ctx)` em
+  `responder.py`: regex detecta "com ou sem convênio" + ctx tem
+  convenio → substitui.
+- `_gerar_resposta_valor_sem_repergunta(ctx)`: usa ctx (médico +
+  especialidade + convênio) pra responder com R$ direto, sem
+  repergunta. Convênio aceito = "coberta pelo seu plano". Particular
+  = R$ exato + Pix.
+- 13 testes em `tests/test_pergunta_redundante_convenio.py`.
+
+### 11-G. CI/CD gate de regressão — GitHub Actions (02/06/2026)
+
+**Origem:** Fábio "como evitar Lia regredir como aluno que volta a
+errar 1ª série depois de chegar na 3ª".
+
+Hoje pytest roda só manual no Mac do Fábio. Auto-deploy Easypanel
+faz docker build sem rodar pytest. Resultado: regressão chegava em
+prod sem barrar.
+
+**Fix:** `.github/workflows/test.yml` — roda pytest completo + lint
+em cada push pra main + PR. Status check do GitHub. Easypanel pode
+ser configurado pra respeitar check (já tem auto-deploy ON desde
+01/06 → trigger só se main verde). Memória ativa preventiva.
+
 ### 11-D. ja_agendado — 5 camadas (02/06/2026 manhã)
 
 Bug recorrente: atendente humano agenda no Medware mas esquece de
@@ -473,7 +530,7 @@ Toda sessão Cowork futura, antes de mexer em código:
 
 Só depois disso, começar trabalho. Sem isso = reincidência.
 
-**Handoff mais recente**: `HANDOFF_01-06_NOITE_PARA_02-06-2026.md` (sessão noite — juiz adversarial Haiku + auto-deploy ON + smoke contínuo ON).
+**Handoff mais recente**: `HANDOFF_02-06_MANHA_PARA_TARDE_2026.md` (sessão prática — juiz Haiku desligado por falso positivo, fix Adriana, regra shadow mode, CI GitHub Actions).
 
 ---
 
