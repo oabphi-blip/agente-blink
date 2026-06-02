@@ -246,6 +246,35 @@ Estão no root do repo:
 Todos têm token GitHub embedded. **Token `ghp_7NNf...3H20m8` está comprometido** —
 revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 
+### 11-I. Campo Kommo "ATIVADO IA?" — ID renovado 1260635→1260817 (02/06/2026 tarde)
+
+**Sintoma:** "muitos casos de falta de resposta" reportado pelo Fábio. Lead 24064359 (Ana Caroline) sem resposta há 2h.
+
+**Causa raiz descoberta:** o campo `ATIVADO IA?` foi RECRIADO no Kommo em algum momento. O ID antigo (1260635, hardcoded em `kommo.py::FIELD_ATIVADO_IA`) deixou de existir na API. ID atual é **1260817**. Pipeline write turn-by-turn (webhook.py:2985+3080, pipeline.py:622, reactivation.py:428) seguia tentando gravar no ID morto — fail silently.
+
+**Resultado prático:** equipe humana perdeu visibilidade de IA on/off por lead. Bug Elisa-like se acumulando invisivelmente.
+
+**Fix (commit `3adb920`):**
+
+```python
+FIELD_ATIVADO_IA = (1260817, {
+    "ATIVADO": 927031, "ATIVA": 927031, "ATIVO": 927031, "ON": 927031,
+    "SOLICITADO": 927033, "SOLICITAR": 927033, "PENDENTE": 927033,
+    "DESATIVADO": 927035, "DESATIVADA": 927035, "OFF": 927035,
+})
+```
+
+Type confirmado: `select` (era `multiselect` no comentário antigo).
+
+**Como descobrir ID de campo Kommo deletado/renovado:**
+1. Abrir lead no Kommo via Chrome
+2. JavaScript no console: `document.querySelectorAll('[class*=linked-form__field]').forEach(e => console.log(e.getAttribute('data-id'), e.textContent.substring(0,50)))`
+3. Confirmar via `GET /api/v4/leads/custom_fields/{id}` que retorna o JSON completo do campo
+
+**Lição de processo:** quando código usa `FIELD_X = (id, enums)` hardcoded, monitorar com `/admin/healthz` se o ID ainda existe na API custom_fields. Se Kommo retornar 404 no field_id, ALERTAR no Slack — código está gravando em buraco.
+
+---
+
 ### 11-H. Escopos PAT GitHub — `repo` + `workflow` (02/06/2026 tarde)
 
 **Lição:** push falhou com `remote rejected ... refusing to allow a Personal Access Token to create or update workflow .github/workflows/test.yml without workflow scope`.
