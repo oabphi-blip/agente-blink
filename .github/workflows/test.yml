@@ -46,6 +46,14 @@ jobs:
           KOMMO_TOKEN: fake-jwt
           REDIS_URL: redis://localhost:6379/0
           WEBHOOK_SECRET: fake-secret
+          # Settings.load() valida presença dessas 3 envs antes de instanciar
+          # o FastAPI app. Sem elas, fixtures que usam TestClient quebram com
+          # RuntimeError. Valores fake são OK porque os testes mockam HTTP.
+          EVOLUTION_BASE_URL: http://fake-evolution:8080
+          EVOLUTION_API_KEY: fake-evo-key
+          EVOLUTION_INSTANCE: blink-fake
+          MEDWARE_USER: fake
+          MEDWARE_PASSWORD: fake
         run: |
           python -m pytest tests/ -v --tb=short \
             --maxfail=10 -p no:cacheprovider
