@@ -246,6 +246,35 @@ Estão no root do repo:
 Todos têm token GitHub embedded. **Token `ghp_7NNf...3H20m8` está comprometido** —
 revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 
+### 11-M. Bug Priscila lead 24055629 — "sexta-feira (06/06)" mas 06/06 é sábado (03/06/2026)
+
+**Caso (01/06/2026 12:30):**
+
+Lia escreveu: "Você prefere 9h de amanhã (terça-feira, 02/06) ou 9h de sexta-feira (06/06)?"
+Paciente Priscila percebeu na hora: "Dia 5, sexta ou 6, sábado?" — constrangimento direto.
+
+**Causa raiz (3 gaps simultâneos):**
+
+1. **Regex `_DIA_DATA_REGEX` incompleto**: classe de separadores `\s*[,\-]?\s*` entre dia-semana e data NÃO incluía `(` — então "sexta-feira (06/06)" não casava. Filtro `_viola_dia_semana` ficou cego.
+2. **Sem regra "médico × dia"**: não existia checagem programática "Karla não atende sábado".
+3. **Lia escreveu texto livre** em vez de chamar tool `oferecer_slot` (task #183).
+
+**Fix (`responder.py`):**
+
+- **Regex ampliado**: `[\s,\-()\[\]*]*` cobre parênteses, colchetes, vírgulas, travessões, asteriscos. Suporte ano 2 dígitos (`"26"` → `2026`). Detecta data inválida (31/02) também.
+- **Filtro novo `_viola_oferta_em_dia_nao_atendido(text, ctx)`** mapa `_DIAS_ATENDIMENTO_POR_MEDICO`:
+  - Karla: seg-sex (weekday 0-4)
+  - Fabrício: ter+qui (weekday 1, 3)
+  - Kátia: em pausa
+- Médico desconhecido (ctx.medico vazio/fora do mapa) → NÃO bloqueia (evita falso positivo).
+- Pytest `tests/test_priscila_06_06_sabado.py` — 13 testes verdes.
+
+**Compatibilidade**: pytest histórico `test_filtros_lia.py::TestDiaSemanaInventado` continua válido — regex novo é superset.
+
+**Lição arquitetural**: filtro regex tem cauda longa de formatos que escapam. Cada bug de paciente revela 1 formato não-coberto. Solução robusta = tool calling forçado em state=AGENDA (task #183).
+
+---
+
 ### 11-L. Gap central tarde 02/06 — Lia escreve "vou consultar" sem chamar tool (6 casos)
 
 **Sintoma único em 6 leads diferentes (mesma tarde):**

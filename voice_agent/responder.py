@@ -799,13 +799,20 @@ _DIA_NORMALIZE = {
     "domingo": "domingo",
 }
 
-# Regex captura "<dia-da-semana>[,/ -] DD/MM[/AAAA]" — formatos típicos
-# que a Lia usa ("terça-feira, 03/06", "quinta 04/06", "Terça-Feira 10/06/2026")
+# Regex captura "<dia-da-semana>[,/ -()] DD/MM[/AAAA]" — formatos típicos
+# que a Lia usa:
+#   "terça-feira, 03/06" (caso Aurora/Sabrina maio/26)
+#   "quinta 04/06"
+#   "Terça-Feira 10/06/2026"
+#   "sexta-feira (06/06)" (caso Priscila lead 24055629, 03/06/2026 — bug que escapou
+#                          do regex original porque ele NÃO aceitava parênteses
+#                          antes da data; agora a classe [\s,\-()\[\]*] cobre todos
+#                          os separadores observados em prod)
 _DIA_DATA_REGEX = re.compile(
     r"(segunda|ter(?:ç|c)a|quarta|quinta|sexta|s(?:á|a)bado|domingo)"
     r"(?:[\s-]*feira)?"
-    r"\s*[,\-]?\s*"
-    r"(\d{1,2})/(\d{1,2})(?:/(\d{4}))?",
+    r"[\s,\-()\[\]*]*"
+    r"(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?",
     re.IGNORECASE,
 )
 
@@ -838,14 +845,32 @@ def _viola_dia_semana(text: str) -> Optional[tuple[str, str, str]]:
         try:
             day = int(match.group(2))
             month = int(match.group(3))
-            year = int(match.group(4)) if match.group(4) else current_year
+            year_raw = match.group(4)
+            if year_raw:
+                year = int(year_raw)
+                if year < 100:
+                    year += 2000  # "26" → 2026
+            else:
+                year = current_year
             data = datetime(year, month, day).date()
         except (ValueError, TypeError):
-            continue
+            # Data inválida (ex: 31/02) — conta como violação, paciente
+            # vai ficar confuso. Substitui pelo fallback.
+            return ("data_invalida", f"{match.group(2)}/{match.group(3)}", "data inválida")
+
+        # Se a data inferida cair muito no passado (>30 dias atrás), Lia
+        # provavelmente quis dizer o próximo ano (oferta de janeiro do ano
+        # que vem em dezembro, p.ex.). Reavalia com year+1.
+        hoje = datetime.now(_TZ_BRT).date()
+        if not match.group(4) and (hoje - data).days > 30:
+            try:
+                data = datetime(year + 1, month, day).date()
+            except ValueError:
+                pass
 
         dia_real = _DIA_SEMANA_PT[data.weekday()]
         if dia_falado != dia_real:
-            return (dia_falado, f"{day:02d}/{month:02d}/{year}", dia_real)
+            return (dia_falado, f"{day:02d}/{month:02d}/{data.year}", dia_real)
 
     return None
 
@@ -854,6 +879,95 @@ _DIA_SEMANA_FALLBACK = (
     "Deixa eu reconferir os horários com o calendário aqui. "
     "Qual dia da semana e turno funcionam melhor pra você? "
     "Assim já volto com as opções concretas — com a data e o dia da semana certinhos."
+)
+
+
+# ------------------------------------------------------------------
+# Filtro: oferta em dia que o médico NÃO atende
+# ------------------------------------------------------------------
+# Origem: lead 24055629 Priscila (01/06/2026 12:30). Lia ofereceu
+# "9h de sexta-feira (06/06)" — 06/06 é SÁBADO, e Dra. Karla NÃO atende
+# sábado. Paciente questionou: "Dia 5, sexta ou 6, sábado?".
+# O _viola_dia_semana cobre a divergência data↔dia-semana, mas não
+# bloqueia oferta em dia que o médico simplesmente não trabalha.
+# Esta é a segunda rede.
+
+# Mapa weekday() (0=segunda ... 6=domingo) → dias atendidos por médico.
+# Fonte: política operacional Blink + Medware (Karla seg-sex; Fabrício
+# ter/qui; Kátia em pausa).
+_DIAS_ATENDIMENTO_POR_MEDICO = {
+    "karla": {0, 1, 2, 3, 4},      # seg-sex
+    "fabricio": {1, 3},             # ter, qui
+    "fabrício": {1, 3},
+    "katia": set(),                  # em pausa
+    "kátia": set(),
+}
+
+
+def _normaliza_medico(nome: Optional[str]) -> str:
+    if not nome:
+        return ""
+    return nome.lower().replace("dra.", "").replace("dr.", "").replace(
+        "delalibera", ""
+    ).replace("freitas", "").replace("pacheco", "").strip().split()[0] if nome.strip() else ""
+
+
+def _viola_oferta_em_dia_nao_atendido(
+    text: str,
+    ctx: Optional[dict] = None,
+) -> Optional[tuple[str, str, str]]:
+    """Detecta oferta em data que cai em dia que o médico não atende.
+
+    Retorna (medico_norm, "DD/MM/YYYY", dia_semana_real) ou None.
+    """
+    if not text:
+        return None
+    medico_raw = ((ctx or {}).get("medico") or "").lower()
+    # Pega só o primeiro nome — alinha com o mapa
+    medico_norm = ""
+    for m in _DIAS_ATENDIMENTO_POR_MEDICO:
+        if m in medico_raw:
+            medico_norm = m
+            break
+    if not medico_norm:
+        return None  # médico desconhecido — não bloqueia (evita falso positivo)
+
+    permitidos = _DIAS_ATENDIMENTO_POR_MEDICO[medico_norm]
+    if not permitidos:
+        # Médico em pausa — qualquer oferta é violação
+        permitidos = set()
+
+    hoje = datetime.now(_TZ_BRT).date()
+    current_year = hoje.year
+
+    for match in _DIA_DATA_REGEX.finditer(text):
+        try:
+            day = int(match.group(2))
+            month = int(match.group(3))
+            year_raw = match.group(4)
+            if year_raw:
+                year = int(year_raw)
+                if year < 100:
+                    year += 2000
+            else:
+                year = current_year
+            data = datetime(year, month, day).date()
+            if not year_raw and (hoje - data).days > 30:
+                data = datetime(year + 1, month, day).date()
+        except (ValueError, TypeError):
+            continue
+
+        if data.weekday() not in permitidos:
+            return (medico_norm, data.strftime("%d/%m/%Y"),
+                    _DIA_SEMANA_PT[data.weekday()])
+
+    return None
+
+
+_DIA_NAO_ATENDIDO_FALLBACK = (
+    "Deixa eu reconferir a agenda — preciso confirmar os dias que esse "
+    "médico atende essa semana. Qual turno funciona melhor pra você "
+    "(manhã ou tarde)? Volto em 1 minuto com horários certos."
 )
 
 
@@ -1341,6 +1455,21 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
                 dia_falado, data_str, dia_real, text,
             )
             return _DIA_SEMANA_FALLBACK
+
+        # 0b-ter. OFERTA EM DIA QUE O MÉDICO NÃO ATENDE (Priscila lead 24055629)
+        # Lia disse "9h de sexta-feira (06/06)" — 06/06 é SÁBADO e Dra. Karla
+        # não atende sábado. _viola_dia_semana validou que a sexta era da Lia
+        # vs sábado real, mas mesmo se o regex anterior tivesse falhado, este
+        # filtro pega a oferta em sábado/domingo pra Karla diretamente.
+        violacao_dia_med = _viola_oferta_em_dia_nao_atendido(text, ctx)
+        if violacao_dia_med:
+            medico_norm, data_str, dia_real = violacao_dia_med
+            log.error(
+                "[FILTRO] OFERTA EM DIA NAO ATENDIDO — médico=%r data=%s "
+                "cai em %s. Médico não trabalha nesse dia. Texto: %r",
+                medico_norm, data_str, dia_real, text[:300],
+            )
+            return _DIA_NAO_ATENDIDO_FALLBACK
     else:
         # Log preventivo: paciente já agendado, NÃO aplicamos o filtro
         # de dia-da-semana. Se Lia disse algo errado, vai aparecer aqui.
