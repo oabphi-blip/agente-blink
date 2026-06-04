@@ -3588,11 +3588,18 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         kommo_client,
         wa_cloud_client,
         dry_run: bool = False,
+        template_override: Optional[str] = None,
+        body_params_override: Optional[list] = None,
     ) -> dict:
-        """Helper: dispara template 1089 aprovado direto pra cold lead.
+        """Helper: dispara template aprovado direto pra cold lead.
 
         Bypass do dispatcher (que rejeita "paciente nunca falou").
         Pra REAGENDAR/REATIVAR leads frios, este é o caminho.
+
+        Args:
+          template_override: nome do template Meta (default = 1089...)
+          body_params_override: lista de strings pras variáveis {{1}}, {{2}}...
+                                Se None, usa [primeiro_nome] (1 variável).
 
         Sequência:
           1. Pega contato (telefone+nome+status_id) via Kommo
@@ -3616,10 +3623,16 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         primeiro = _primeiro_nome_lead(nome)
 
         template_name = (
-            settings.reactivation_template_name
+            template_override
+            or settings.reactivation_template_name
             or "1089_mens_ativar_conv_parada_qz7kbz"
         )
         template_lang = getattr(settings, "reactivation_template_lang", "pt_BR")
+        body_params = (
+            body_params_override
+            if body_params_override is not None
+            else [primeiro]
+        )
 
         if dry_run:
             return {
@@ -3636,7 +3649,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 to=telefone,
                 name=template_name,
                 language=template_lang,
-                body_params=[primeiro],
+                body_params=body_params,
             )
         except Exception as exc:  # noqa: BLE001
             return {
@@ -3654,11 +3667,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         # Grava nota Kommo automática
         try:
             ts_br = _t.strftime("%d/%m/%Y %H:%M", _t.localtime())
+            params_str = " | ".join(
+                f"{{{{{i+1}}}}}={p}" for i, p in enumerate(body_params)
+            )
             nota = (
                 f"[Lia — disparo automático {ts_br}]\n\n"
                 f"Canal: WhatsApp Cloud 8133 (template aprovado)\n"
                 f"Template: {template_name}\n"
-                f"Variável {{1}}: {primeiro}\n"
+                f"Parâmetros: {params_str}\n"
                 f"Telefone: {telefone}\n"
                 f"wamid: {wamid or 'n/a'}\n\n"
                 f"Quando paciente responder, Lia entra em conversa "
@@ -3677,6 +3693,68 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "template": template_name,
             "wamid": wamid,
         }
+
+    @app.post("/admin/disparar-template/{lead_id}")
+    async def admin_disparar_template_custom(
+        lead_id: int, request: Request,
+    ) -> JSONResponse:
+        """Dispara TEMPLATE CUSTOM com body_params dinâmicos pra 1 lead.
+
+        Body JSON:
+          {
+            "template": "captar_paciente",
+            "body_params": ["Maria", "Águas Claras", "Dra. Karla Delalibera", "09/06", "09:00"],
+            "dry_run": false
+          }
+
+        Diferença vs /admin/disparar-lead/{lead_id}:
+          - Aceita template_name custom (default = 1089...)
+          - Aceita lista de body_params custom (default = [primeiro_nome])
+          - Pensado pra templates específicos com múltiplas variáveis
+
+        Retorna {ok, lead_id, telefone, primeiro_nome, template, wamid}.
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                {"error": "JSON body inválido"}, status_code=400,
+            )
+
+        template = body.get("template")
+        body_params = body.get("body_params")
+        dry_run = bool(body.get("dry_run", False))
+
+        if not template:
+            return JSONResponse(
+                {"error": "body precisa de 'template'"}, status_code=400,
+            )
+        if body_params is not None and not isinstance(body_params, list):
+            return JSONResponse(
+                {"error": "'body_params' deve ser lista"}, status_code=400,
+            )
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        res = _disparar_template_aprovado_para_lead(
+            lead_id, kommo_client, wa_cloud, dry_run=dry_run,
+            template_override=template,
+            body_params_override=body_params,
+        )
+        res["lead_id"] = lead_id
+        return JSONResponse(res)
 
     @app.post("/admin/disparar-batch")
     async def admin_disparar_batch(request: Request) -> JSONResponse:
