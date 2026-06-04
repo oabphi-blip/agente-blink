@@ -3908,6 +3908,123 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # SETUP CAMPOS ACOMPANHAMENTO LIA (task #216 — 04/06/2026)
+    # ================================================================
+    @app.post("/admin/setup-campos-acompanhamento")
+    @app.get("/admin/setup-campos-acompanhamento")
+    def admin_setup_campos_acompanhamento(request: Request) -> JSONResponse:
+        """Cria os 3 campos de acompanhamento na entidade Leads do Kommo.
+
+        Campos criados (idempotente — se já existirem, retorna ID atual):
+          1. STATUS CONVERSA (select, 15 valores)
+          2. ULTIMA MSG OUTBOUND (textarea)
+          3. PROXIMA ACAO (select, 12 valores)
+
+        Retorna {ok, campos: {nome: {id, action: created|exists|failed}}}.
+
+        Aproveita KOMMO_TOKEN já carregado no app produção (Easypanel).
+        Fábio dispara 1 vez via curl, todos os 3 campos ficam prontos.
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        STATUS_CONVERSA_ENUMS = [
+            "aguardando_paciente_responder",
+            "aguardando_humano_intervir",
+            "coletando_dados",
+            "validando_convenio",
+            "agenda_oferecida",
+            "confirmando_horario",
+            "gravando_medware",
+            "aguardando_sinal_pix",
+            "agendado_aguarda_consulta",
+            "consulta_realizada_aguarda_pos",
+            "faltou_consulta",
+            "parado_sem_acao_7d",
+            "parado_sem_acao_30d",
+            "convenio_nao_aceito",
+            "desistiu_explicito",
+        ]
+
+        PROXIMA_ACAO_ENUMS = [
+            "aguardar_resposta_paciente",
+            "disparar_template_reativacao",
+            "oferecer_agenda",
+            "coletar_dados_minimos",
+            "validar_convenio",
+            "cobrar_sinal_pix",
+            "confirmar_horario_d-1",
+            "confirmar_chegada_d-0",
+            "escalar_humano",
+            "desativar_lead",
+            "pos_consulta_avaliacao",
+            "agendar_proxima_consulta",
+        ]
+
+        campos_definicao = [
+            {
+                "name": "STATUS CONVERSA",
+                "type": "select",
+                "enums": STATUS_CONVERSA_ENUMS,
+            },
+            {
+                "name": "ULTIMA MSG OUTBOUND",
+                "type": "textarea",
+                "enums": None,
+            },
+            {
+                "name": "PROXIMA ACAO",
+                "type": "select",
+                "enums": PROXIMA_ACAO_ENUMS,
+            },
+        ]
+
+        resultado: dict[str, Any] = {}
+        for definicao in campos_definicao:
+            try:
+                res = kommo_client.ensure_custom_field(
+                    name=definicao["name"],
+                    field_type=definicao["type"],
+                    enums=definicao.get("enums"),
+                )
+                resultado[definicao["name"]] = {
+                    "action": res.get("action"),
+                    "field_id": (res.get("field") or {}).get("id"),
+                    "tipo": (res.get("field") or {}).get("type"),
+                    "enums_count": len(
+                        (res.get("field") or {}).get("enums") or []
+                    ),
+                }
+            except Exception as exc:  # noqa: BLE001
+                resultado[definicao["name"]] = {
+                    "action": "failed", "erro": str(exc)[:200],
+                }
+
+        all_ok = all(
+            v.get("action") in ("created", "exists")
+            for v in resultado.values()
+        )
+        return JSONResponse({
+            "ok": all_ok,
+            "campos": resultado,
+            "msg": (
+                "OK — todos os campos prontos." if all_ok
+                else "Atenção: 1 ou mais campos falharam. Ver detalhes."
+            ),
+        })
+
+    # ================================================================
     # MENSAGEM DE RENOVAÇÃO DE JANELA 24h WhatsApp 8133 (task #87)
     # ================================================================
     @app.get("/admin/renovar-janela-preview")

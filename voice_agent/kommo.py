@@ -1007,6 +1007,115 @@ class KommoClient:
 
     # ----------------------- nota (registro da conversa)
 
+    def list_custom_fields(self, entity: str = "leads") -> list[dict]:
+        """Lista todos os custom_fields da entidade (leads, contacts, companies).
+
+        Retorna lista de {id, name, type, code, enums} ou [] em erro.
+        Adicionado em 04/06/2026 (task #216).
+        """
+        try:
+            results: list[dict] = []
+            page = 1
+            with httpx.Client(timeout=self.timeout) as c:
+                while True:
+                    r = c.get(
+                        f"{self._base}/{entity}/custom_fields",
+                        params={"limit": 250, "page": page},
+                        headers=self._headers,
+                    )
+                    if r.status_code == 204:
+                        break
+                    if r.status_code != 200:
+                        log.warning(
+                            "Kommo list_custom_fields %s p%d: HTTP %d",
+                            entity, page, r.status_code,
+                        )
+                        break
+                    j = r.json() or {}
+                    items = (j.get("_embedded") or {}).get("custom_fields") or []
+                    results.extend(items)
+                    if not items or len(items) < 250:
+                        break
+                    page += 1
+            return results
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo list_custom_fields exception: %s", e)
+            return []
+
+    def create_custom_field(
+        self,
+        name: str,
+        field_type: str,
+        entity: str = "leads",
+        code: Optional[str] = None,
+        enums: Optional[list[str]] = None,
+        group_id: Optional[str] = None,
+    ) -> Optional[dict]:
+        """Cria 1 custom field via API Kommo.
+
+        field_type: 'text', 'textarea', 'select', 'multiselect', 'date',
+                    'date_time', 'numeric', 'checkbox', 'url'.
+        enums: lista de strings (só pra select/multiselect).
+        Retorna {id, name, type, enums} ou None em erro.
+
+        Adicionado em 04/06/2026 (task #216).
+        """
+        payload_item: dict[str, Any] = {"name": name, "type": field_type}
+        if code:
+            payload_item["code"] = code
+        if group_id:
+            payload_item["group_id"] = group_id
+        if enums and field_type in ("select", "multiselect"):
+            payload_item["enums"] = [
+                {"value": v, "sort": i + 1} for i, v in enumerate(enums)
+            ]
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.post(
+                    f"{self._base}/{entity}/custom_fields",
+                    json=[payload_item],
+                    headers=self._headers,
+                )
+            if r.status_code // 100 != 2:
+                log.error(
+                    "Kommo create_custom_field '%s' falhou HTTP %d: %s",
+                    name, r.status_code, (r.text or "")[:400],
+                )
+                return None
+            j = r.json() or {}
+            items = (j.get("_embedded") or {}).get("custom_fields") or []
+            if items:
+                log.info("Kommo campo '%s' criado id=%s", name, items[0].get("id"))
+                return items[0]
+            return None
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo create_custom_field '%s' erro: %s", name, e)
+            return None
+
+    def ensure_custom_field(
+        self,
+        name: str,
+        field_type: str,
+        entity: str = "leads",
+        enums: Optional[list[str]] = None,
+        code: Optional[str] = None,
+    ) -> dict:
+        """Cria campo se não existir. Idempotente.
+
+        Retorna {action: "created"|"exists", field: {...}}.
+        """
+        existing = self.list_custom_fields(entity=entity)
+        for f in existing:
+            if (f.get("name") or "").strip().lower() == name.strip().lower():
+                return {"action": "exists", "field": f}
+        created = self.create_custom_field(
+            name=name, field_type=field_type,
+            entity=entity, code=code, enums=enums,
+        )
+        if created:
+            return {"action": "created", "field": created}
+        return {"action": "failed", "field": None}
+
     def add_note(self, lead_id: int, text: str) -> bool:
         """Adiciona uma nota de texto ('common') na linha do tempo do lead.
 
