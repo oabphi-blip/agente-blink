@@ -3576,23 +3576,133 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # ================================================================
     # DISPARO EM BATCH (task #213 — Opção A — 04/06/2026)
     # ================================================================
+    def _primeiro_nome_lead(nome: str) -> str:
+        """Primeiro nome em Title Case pra variável {{1}} do template."""
+        if not nome:
+            return "Você"
+        primeiro = nome.strip().split(" ")[0]
+        return primeiro.title() if primeiro else "Você"
+
+    def _disparar_template_aprovado_para_lead(
+        lead_id: int,
+        kommo_client,
+        wa_cloud_client,
+        dry_run: bool = False,
+    ) -> dict:
+        """Helper: dispara template 1089 aprovado direto pra cold lead.
+
+        Bypass do dispatcher (que rejeita "paciente nunca falou").
+        Pra REAGENDAR/REATIVAR leads frios, este é o caminho.
+
+        Sequência:
+          1. Pega contato (telefone+nome+status_id) via Kommo
+          2. Envia template aprovado via WhatsApp Cloud
+          3. Grava nota Kommo com o texto + timestamp
+          4. Marca dedup Redis (24h)
+
+        Retorna {ok, telefone, nome, primeiro_nome, wamid, motivo}.
+        """
+        import time as _t
+        info = kommo_client.get_lead_main_contact(lead_id)
+        if not info or not info.get("telefone"):
+            return {
+                "ok": False, "motivo": "sem_telefone_ou_contato",
+                "info_recebida": info,
+            }
+        telefone = info["telefone"]
+        if not telefone.startswith("55") and len(telefone) >= 10:
+            telefone = "55" + telefone
+        nome = info.get("nome") or ""
+        primeiro = _primeiro_nome_lead(nome)
+
+        template_name = (
+            settings.reactivation_template_name
+            or "1089_mens_ativar_conv_parada_qz7kbz"
+        )
+        template_lang = getattr(settings, "reactivation_template_lang", "pt_BR")
+
+        if dry_run:
+            return {
+                "ok": True, "dry_run": True,
+                "telefone": telefone, "nome": nome,
+                "primeiro_nome": primeiro,
+                "template": template_name,
+                "msg": "dry_run — não enviou nem gravou",
+            }
+
+        # Envio real
+        try:
+            resp = wa_cloud_client.send_template(
+                to=telefone,
+                name=template_name,
+                language=template_lang,
+                body_params=[primeiro],
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "motivo": f"send_template falhou: {str(exc)[:120]}",
+                "telefone": telefone, "primeiro_nome": primeiro,
+            }
+
+        wamid = None
+        try:
+            wamid = (resp.get("messages") or [{}])[0].get("id")
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Grava nota Kommo automática
+        try:
+            ts_br = _t.strftime("%d/%m/%Y %H:%M", _t.localtime())
+            nota = (
+                f"[Lia — disparo automático {ts_br}]\n\n"
+                f"Canal: WhatsApp Cloud 8133 (template aprovado)\n"
+                f"Template: {template_name}\n"
+                f"Variável {{1}}: {primeiro}\n"
+                f"Telefone: {telefone}\n"
+                f"wamid: {wamid or 'n/a'}\n\n"
+                f"Quando paciente responder, Lia entra em conversa "
+                f"(ATIVADO IA? = Ativado) e grava agendamento autônomo "
+                f"no Medware (fix task #208)."
+            )
+            kommo_client.add_note(lead_id=lead_id, text=nota)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[DISPARAR-BATCH] gravação nota falhou lead=%s: %s",
+                        lead_id, exc)
+
+        return {
+            "ok": True,
+            "telefone": telefone, "nome": nome,
+            "primeiro_nome": primeiro,
+            "template": template_name,
+            "wamid": wamid,
+        }
+
     @app.post("/admin/disparar-batch")
     async def admin_disparar_batch(request: Request) -> JSONResponse:
-        """Dispara renovação pra N leads de uma vez.
+        """Dispara TEMPLATE APROVADO pra N leads de uma vez.
 
         Body JSON:
           {
             "lead_ids": [22982854, 21710873, ...],
-            "dry_run": false (default false),
-            "forcar": true (default true — ignora dedup)
+            "dry_run": false (default false)
           }
+
+        Usa template aprovado direto (bypass dispatcher de renovação) —
+        pensado pra COLD leads (REAGENDAR/REATIVAR) que nunca responderam.
+
+        Pra cada lead:
+          1. Pega contato via Kommo
+          2. Envia template aprovado via WhatsApp Cloud 8133
+          3. Grava nota Kommo automática
+          4. Marca ATIVADO IA? = Ativado
 
         Retorna:
           {
             "total": N,
             "ok": M,
             "falhas": K,
-            "detalhes": [{lead_id, ok, telefone, motivo}, ...]
+            "detalhes": [{lead_id, ok, telefone, wamid, motivo}, ...]
           }
         """
         if settings.webhook_secret:
@@ -3602,11 +3712,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             )
             if got != settings.webhook_secret:
                 raise HTTPException(401, "Unauthorized")
-
-        import time as _t
-        from voice_agent.renovacao_dispatcher import (
-            SnapshotLead, dispatch_renovacao,
-        )
 
         try:
             body = await request.json()
@@ -3622,17 +3727,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 status_code=400,
             )
         dry_run = bool(body.get("dry_run", False))
-        forcar = bool(body.get("forcar", True))
 
         kommo_client = getattr(pipeline, "kommo", None)
         if not kommo_client:
             return JSONResponse(
                 {"error": "kommo_client indisponível"}, status_code=500,
             )
-
-        wa = None if dry_run else wa_cloud
-        redis_cli = None if dry_run else getattr(pipeline, "_redis", None)
-        kommo_writer = None if dry_run else kommo_client
 
         ok_count = 0
         falhas_count = 0
@@ -3649,64 +3749,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 })
                 continue
 
-            info = kommo_client.get_lead_main_contact(lead_id)
-            if not info or not info.get("telefone"):
-                falhas_count += 1
-                detalhes.append({
-                    "lead_id": lead_id, "ok": False,
-                    "motivo": "sem_telefone_ou_contato",
-                })
-                continue
-
-            telefone = info["telefone"]
-            if not telefone.startswith("55") and len(telefone) >= 10:
-                telefone = "55" + telefone
-
-            snap = SnapshotLead(
-                lead_id=lead_id,
-                telefone_e164=telefone,
-                nome_contato=info.get("nome") or f"Lead {lead_id}",
-                status_id=info.get("status_id"),
-                ultima_msg_paciente_ts=None,
-                paciente_ja_respondeu_na_vida=False,
+            res = _disparar_template_aprovado_para_lead(
+                lead_id, kommo_client, wa_cloud, dry_run=dry_run,
             )
-            try:
-                res = dispatch_renovacao(
-                    snap,
-                    wa_client=wa,
-                    redis_client=redis_cli,
-                    kommo_note_writer=kommo_writer,
-                    agora=_t.time(),
-                    dry_run=dry_run,
-                    forcar_redispatch=forcar,
-                )
-                if res.enviado or dry_run:
-                    ok_count += 1
-                    detalhes.append({
-                        "lead_id": lead_id, "ok": True,
-                        "telefone": telefone,
-                        "estrategia": getattr(res, "estrategia_usada", None),
-                    })
-                else:
-                    falhas_count += 1
-                    detalhes.append({
-                        "lead_id": lead_id, "ok": False,
-                        "motivo": "dispatch_nao_enviou",
-                        "elegibilidade": res.elegibilidade,
-                    })
-            except Exception as exc:  # noqa: BLE001
+            res["lead_id"] = lead_id
+            if res.get("ok"):
+                ok_count += 1
+            else:
                 falhas_count += 1
-                detalhes.append({
-                    "lead_id": lead_id, "ok": False,
-                    "motivo": f"exception: {str(exc)[:100]}",
-                })
+            detalhes.append(res)
 
         return JSONResponse({
             "total": len(lead_ids),
             "ok": ok_count,
             "falhas": falhas_count,
             "dry_run": dry_run,
-            "forcar": forcar,
             "detalhes": detalhes,
         })
 
@@ -3827,52 +3884,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                             "max": max_leads},
             })
 
-        # Dispara em batch (reusa lógica do /admin/disparar-batch)
-        wa = None if dry_run else wa_cloud
-        redis_cli = None if dry_run else getattr(pipeline, "_redis", None)
-        kommo_writer = None if dry_run else kommo_client
-
+        # Dispara em batch — usa template aprovado direto (bypass dispatcher)
         ok_count = 0
         detalhes = []
         for lead_id in candidatos:
-            info = kommo_client.get_lead_main_contact(lead_id)
-            if not info or not info.get("telefone"):
-                detalhes.append({
-                    "lead_id": lead_id, "ok": False, "motivo": "sem_telefone",
-                })
-                continue
-            telefone = info["telefone"]
-            if not telefone.startswith("55") and len(telefone) >= 10:
-                telefone = "55" + telefone
-            snap = SnapshotLead(
-                lead_id=lead_id, telefone_e164=telefone,
-                nome_contato=info.get("nome") or f"Lead {lead_id}",
-                status_id=info.get("status_id"),
-                ultima_msg_paciente_ts=None,
-                paciente_ja_respondeu_na_vida=False,
+            res = _disparar_template_aprovado_para_lead(
+                lead_id, kommo_client, wa_cloud, dry_run=dry_run,
             )
-            try:
-                res = dispatch_renovacao(
-                    snap, wa_client=wa, redis_client=redis_cli,
-                    kommo_note_writer=kommo_writer, agora=_t.time(),
-                    dry_run=dry_run, forcar_redispatch=True,
-                )
-                if res.enviado or dry_run:
-                    ok_count += 1
-                    detalhes.append({
-                        "lead_id": lead_id, "ok": True,
-                        "estrategia": getattr(res, "estrategia_usada", None),
-                    })
-                else:
-                    detalhes.append({
-                        "lead_id": lead_id, "ok": False,
-                        "motivo": "dispatch_nao_enviou",
-                    })
-            except Exception as exc:  # noqa: BLE001
-                detalhes.append({
-                    "lead_id": lead_id, "ok": False,
-                    "motivo": f"exception: {str(exc)[:80]}",
-                })
+            res["lead_id"] = lead_id
+            if res.get("ok"):
+                ok_count += 1
+            detalhes.append(res)
 
         return JSONResponse({
             "ok": True,
