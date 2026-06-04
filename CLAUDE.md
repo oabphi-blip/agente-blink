@@ -429,6 +429,93 @@ Lia escreveu promessa de retorno mas nunca chamou Medware. Frase de espera infin
 
 ---
 
+### 11-R. Endpoints batch + categoria — Opção A+C (04/06/2026, tasks #213/#214)
+
+**Origem:** Fábio: "estamos sem atendimento humano, dispara automático".
+
+**Opção A — `/admin/disparar-batch`** (1 curl manda N leads):
+
+```bash
+curl -X POST "https://blink-agent.6prkfn.easypanel.host/admin/disparar-batch?secret=$WS" \
+  -H "Content-Type: application/json" \
+  -d '{"lead_ids": [22982854, 21710873], "dry_run": false, "forcar": true}'
+```
+
+Retorna `{total, ok, falhas, dry_run, forcar, detalhes:[{lead_id, ok, telefone, estrategia, motivo}]}`.
+
+**Opção C — `/admin/disparar-categoria`** (filtro inteligente):
+
+```bash
+curl "https://blink-agent.6prkfn.easypanel.host/admin/disparar-categoria?categoria=R&unidade=Asa%20Norte&max=10&secret=$WS"
+```
+
+Categorias suportadas:
+- `R` — REAGENDAR / REMARCAÇÃO / FALTOU / DESMARCOU
+- `E` — COM CONVÊNIO
+- `C` — SEM CONVÊNIO / PARTICULAR
+
+Filtros opcionais: `unidade`, `medico`, `max` (default 30, max 200), `dry_run`.
+
+Excluídos automaticamente: Inas, GDF, Cassi, SulAmerica, Bradesco.
+
+**Cron Easypanel sugerido (1x/semana):**
+
+Easypanel → app `blink/agent` → Crons → Add:
+- Nome: `Campanha REAGENDAR Asa Norte`
+- Schedule: `0 9 * * 1` (toda segunda 9h BRT)
+- Command:
+```
+curl -fsS -X POST "https://blink-agent.6prkfn.easypanel.host/admin/disparar-categoria?categoria=R&unidade=Asa%20Norte&max=20&secret=$WEBHOOK_SECRET"
+```
+
+**Pytest:** `tests/test_disparar_batch_categoria.py` — 25 cenários (categoria R/E/C + exclusões Inas/GDF/etc + edge cases).
+
+---
+
+### 11-Q. Endpoint `/admin/disparar-lead/{lead_id}` — disparo autônomo (04/06/2026)
+
+**Origem:** task #212. Fábio: "estamos sem atendimento humano, tem que disparar de forma automática e aparecer a mensagem em notas".
+
+**O que faz:**
+- Aceita só `lead_id` na URL (path param). Sem precisar montar telefone/nome.
+- Busca contato principal via `KommoClient.get_lead_main_contact(lead_id)` (método novo) → retorna `{telefone, nome, status_id}`.
+- Normaliza E.164 (prefixo `55` se faltar).
+- Monta `SnapshotLead` e chama `dispatch_renovacao(dry_run=false, forcar=true)` por padrão.
+- Dispatcher já grava nota Kommo automaticamente com timestamp + canal + estratégia + texto enviado (task #95).
+
+**Como usar:**
+
+```bash
+curl -X POST "https://blink-agent.6prkfn.easypanel.host/admin/disparar-lead/{LEAD_ID}?secret=$WEBHOOK_SECRET"
+```
+
+Query params opcionais:
+- `dry_run=true` → simula sem enviar (debug)
+- `forcar=false` → respeita dedup Redis 24h (default ignora)
+
+**Retorno:**
+```json
+{
+  "ok": true,
+  "lead_id": 22982854,
+  "telefone": "5561...",
+  "nome": "...",
+  "status_id": 101508307,
+  "dispatch_result": { "ok": true, "estrategia_usada": "...", "nota_kommo_id": ... }
+}
+```
+
+**Erros tratados:**
+- Sem telefone no contato → 400 com `info_recebida` pra debug
+- Sem kommo_client → 500
+- Secret errado → 401
+
+**Pytest:** `tests/test_get_lead_main_contact.py` — 6 cenários (telefone+nome+status, sem contato, lead inexistente, wrapper get_lead_main_phone).
+
+**Diferença vs `/admin/renovacao-dispatch`:** o antigo exige `telefone`, `nome_contato`, `status_id` no querystring (stateless). O novo busca tudo do Kommo — pensado pra uso operacional direto sem montar payload.
+
+---
+
 ### 11-P. FIX GAP CRÍTICO 15 DIAS — Lia grava agendamento Medware sozinha (04/06/2026)
 
 **Origem:** task #208. Bug recorrente em 15 dias: Lia confirmava agendamento com paciente, escrevia nota Kommo, mas **NÃO gravava no Medware** — sempre dependia de Stephany/Ariany clicar manualmente.

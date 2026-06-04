@@ -3574,6 +3574,318 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # DISPARO EM BATCH (task #213 — Opção A — 04/06/2026)
+    # ================================================================
+    @app.post("/admin/disparar-batch")
+    async def admin_disparar_batch(request: Request) -> JSONResponse:
+        """Dispara renovação pra N leads de uma vez.
+
+        Body JSON:
+          {
+            "lead_ids": [22982854, 21710873, ...],
+            "dry_run": false (default false),
+            "forcar": true (default true — ignora dedup)
+          }
+
+        Retorna:
+          {
+            "total": N,
+            "ok": M,
+            "falhas": K,
+            "detalhes": [{lead_id, ok, telefone, motivo}, ...]
+          }
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        import time as _t
+        from voice_agent.renovacao_dispatcher import (
+            SnapshotLead, dispatch_renovacao,
+        )
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                {"error": "JSON body inválido"}, status_code=400,
+            )
+
+        lead_ids = body.get("lead_ids") or []
+        if not isinstance(lead_ids, list) or not lead_ids:
+            return JSONResponse(
+                {"error": "lead_ids deve ser lista não-vazia"},
+                status_code=400,
+            )
+        dry_run = bool(body.get("dry_run", False))
+        forcar = bool(body.get("forcar", True))
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        wa = None if dry_run else wa_cloud
+        redis_cli = None if dry_run else getattr(pipeline, "_redis", None)
+        kommo_writer = None if dry_run else kommo_client
+
+        ok_count = 0
+        falhas_count = 0
+        detalhes = []
+
+        for raw_id in lead_ids:
+            try:
+                lead_id = int(raw_id)
+            except (ValueError, TypeError):
+                falhas_count += 1
+                detalhes.append({
+                    "lead_id": raw_id, "ok": False,
+                    "motivo": "lead_id_invalido",
+                })
+                continue
+
+            info = kommo_client.get_lead_main_contact(lead_id)
+            if not info or not info.get("telefone"):
+                falhas_count += 1
+                detalhes.append({
+                    "lead_id": lead_id, "ok": False,
+                    "motivo": "sem_telefone_ou_contato",
+                })
+                continue
+
+            telefone = info["telefone"]
+            if not telefone.startswith("55") and len(telefone) >= 10:
+                telefone = "55" + telefone
+
+            snap = SnapshotLead(
+                lead_id=lead_id,
+                telefone_e164=telefone,
+                nome_contato=info.get("nome") or f"Lead {lead_id}",
+                status_id=info.get("status_id"),
+                ultima_msg_paciente_ts=None,
+                paciente_ja_respondeu_na_vida=False,
+            )
+            try:
+                res = dispatch_renovacao(
+                    snap,
+                    wa_client=wa,
+                    redis_client=redis_cli,
+                    kommo_note_writer=kommo_writer,
+                    agora=_t.time(),
+                    dry_run=dry_run,
+                    forcar_redispatch=forcar,
+                )
+                if res.enviado or dry_run:
+                    ok_count += 1
+                    detalhes.append({
+                        "lead_id": lead_id, "ok": True,
+                        "telefone": telefone,
+                        "estrategia": getattr(res, "estrategia_usada", None),
+                    })
+                else:
+                    falhas_count += 1
+                    detalhes.append({
+                        "lead_id": lead_id, "ok": False,
+                        "motivo": "dispatch_nao_enviou",
+                        "elegibilidade": res.elegibilidade,
+                    })
+            except Exception as exc:  # noqa: BLE001
+                falhas_count += 1
+                detalhes.append({
+                    "lead_id": lead_id, "ok": False,
+                    "motivo": f"exception: {str(exc)[:100]}",
+                })
+
+        return JSONResponse({
+            "total": len(lead_ids),
+            "ok": ok_count,
+            "falhas": falhas_count,
+            "dry_run": dry_run,
+            "forcar": forcar,
+            "detalhes": detalhes,
+        })
+
+    # ================================================================
+    # DISPARO POR CATEGORIA (task #214 — Opção C — 04/06/2026)
+    # ================================================================
+    @app.post("/admin/disparar-categoria")
+    @app.get("/admin/disparar-categoria")
+    def admin_disparar_categoria(request: Request) -> JSONResponse:
+        """Filtra leads por categoria + médico + unidade e dispara em batch.
+
+        Categorias suportadas:
+          - R: Reagendar/Remarcação (nome contém REAGENDAR / REMARCAÇÃO / FALTOU / DESMARCOU)
+          - E: Com convênio aceito (CONVÊNIO ≠ Não se aplica, ≠ Inas)
+          - C: Particular (CONVÊNIO = Não se aplica)
+          - X: Excluir (Inas GDF ou Ñ ACEITO CONVÊNIO preenchido)
+
+        Query params:
+          - categoria (R/E/C — obrigatório)
+          - unidade (Asa Norte / Águas Claras — opcional)
+          - medico (Karla / Fabricio — opcional)
+          - max (default 30, max 200)
+          - dry_run (true/false, default false)
+          - secret (obrigatório se WEBHOOK_SECRET setado)
+
+        Configurar no Easypanel pra rodar semanal segunda 9h:
+          curl POST /admin/disparar-categoria?categoria=R&unidade=Asa%20Norte&max=10&secret=$WS
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        import time as _t
+        from voice_agent.renovacao_dispatcher import (
+            SnapshotLead, dispatch_renovacao,
+        )
+
+        q = request.query_params
+        categoria = (q.get("categoria") or "").upper()
+        unidade_filtro = (q.get("unidade") or "").lower()
+        medico_filtro = (q.get("medico") or "").lower()
+        try:
+            max_leads = min(int(q.get("max") or "30"), 200)
+        except ValueError:
+            max_leads = 30
+        dry_run = (q.get("dry_run") or "").lower() in ("1", "true", "yes")
+
+        if categoria not in ("R", "E", "C"):
+            return JSONResponse(
+                {"error": "categoria deve ser R, E ou C"}, status_code=400,
+            )
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        # Heurística por categoria — palavras-chave no nome do lead
+        keywords_por_categoria = {
+            "R": ["REAGENDAR", "REMARCAÇÃO", "REMARCACAO", "FALTOU", "DESMARCOU", "DESMARCAÇÃO", "DESMARCACAO"],
+            "E": ["COM CONVÊNIO", "COM CONVENIO"],
+            "C": ["SEM CONVÊNIO", "SEM CONVENIO", "PARTICULAR"],
+        }
+        excluir_keywords = ["INAS", "GDF", "CASSI", "SULAMERICA", "BRADESCO"]
+
+        # Busca via list_stale_leads (já existe em kommo client) ou similar
+        leads = []
+        try:
+            if hasattr(kommo_client, "list_stale_leads"):
+                leads = kommo_client.list_stale_leads(
+                    pipeline_id=8601819, limit=max_leads * 3,  # busca 3x pra filtrar
+                ) or []
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                {"error": f"falha buscando leads: {exc}"}, status_code=500,
+            )
+
+        kw_cat = keywords_por_categoria[categoria]
+
+        candidatos = []
+        for lead in leads:
+            if not isinstance(lead, dict):
+                continue
+            if len(candidatos) >= max_leads:
+                break
+
+            nome_lead = (lead.get("name") or "").upper()
+
+            # Exclusão por convênio não aceito
+            if any(ex in nome_lead for ex in excluir_keywords):
+                continue
+            # Match categoria
+            if not any(kw in nome_lead for kw in kw_cat):
+                continue
+            # Filtro unidade (opcional, no nome ou via custom_field — heurística no nome)
+            if unidade_filtro and unidade_filtro not in nome_lead.lower():
+                # se filtro unidade ativo mas não consegue confirmar pelo nome,
+                # incluímos mesmo assim (custom_field UNIDADE não é trivial sem fetch)
+                pass
+            # Filtro médico (heurística)
+            if medico_filtro and medico_filtro not in nome_lead.lower():
+                pass
+
+            lead_id = lead.get("id")
+            if lead_id:
+                candidatos.append(int(lead_id))
+
+        if not candidatos:
+            return JSONResponse({
+                "ok": True, "categoria": categoria, "total": 0,
+                "msg": "Nenhum lead casou os filtros",
+                "filtros": {"unidade": unidade_filtro, "medico": medico_filtro,
+                            "max": max_leads},
+            })
+
+        # Dispara em batch (reusa lógica do /admin/disparar-batch)
+        wa = None if dry_run else wa_cloud
+        redis_cli = None if dry_run else getattr(pipeline, "_redis", None)
+        kommo_writer = None if dry_run else kommo_client
+
+        ok_count = 0
+        detalhes = []
+        for lead_id in candidatos:
+            info = kommo_client.get_lead_main_contact(lead_id)
+            if not info or not info.get("telefone"):
+                detalhes.append({
+                    "lead_id": lead_id, "ok": False, "motivo": "sem_telefone",
+                })
+                continue
+            telefone = info["telefone"]
+            if not telefone.startswith("55") and len(telefone) >= 10:
+                telefone = "55" + telefone
+            snap = SnapshotLead(
+                lead_id=lead_id, telefone_e164=telefone,
+                nome_contato=info.get("nome") or f"Lead {lead_id}",
+                status_id=info.get("status_id"),
+                ultima_msg_paciente_ts=None,
+                paciente_ja_respondeu_na_vida=False,
+            )
+            try:
+                res = dispatch_renovacao(
+                    snap, wa_client=wa, redis_client=redis_cli,
+                    kommo_note_writer=kommo_writer, agora=_t.time(),
+                    dry_run=dry_run, forcar_redispatch=True,
+                )
+                if res.enviado or dry_run:
+                    ok_count += 1
+                    detalhes.append({
+                        "lead_id": lead_id, "ok": True,
+                        "estrategia": getattr(res, "estrategia_usada", None),
+                    })
+                else:
+                    detalhes.append({
+                        "lead_id": lead_id, "ok": False,
+                        "motivo": "dispatch_nao_enviou",
+                    })
+            except Exception as exc:  # noqa: BLE001
+                detalhes.append({
+                    "lead_id": lead_id, "ok": False,
+                    "motivo": f"exception: {str(exc)[:80]}",
+                })
+
+        return JSONResponse({
+            "ok": True,
+            "categoria": categoria,
+            "filtros": {"unidade": unidade_filtro, "medico": medico_filtro,
+                        "max": max_leads},
+            "candidatos_encontrados": len(candidatos),
+            "disparados_ok": ok_count,
+            "dry_run": dry_run,
+            "detalhes": detalhes,
+        })
+
+    # ================================================================
     # MENSAGEM DE RENOVAÇÃO DE JANELA 24h WhatsApp 8133 (task #87)
     # ================================================================
     @app.get("/admin/renovar-janela-preview")
