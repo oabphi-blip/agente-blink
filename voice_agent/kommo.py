@@ -1120,6 +1120,15 @@ class KommoClient:
 
     def get_lead_main_phone(self, lead_id: int | str) -> Optional[str]:
         """Retorna o telefone (só dígitos) do contato principal do lead."""
+        info = self.get_lead_main_contact(lead_id) or {}
+        return info.get("telefone") or None
+
+    def get_lead_main_contact(self, lead_id: int | str) -> Optional[dict]:
+        """Retorna {telefone, nome, status_id} do contato principal do lead.
+
+        Usado por /admin/disparar-lead pra dispensar inputs manuais.
+        Adicionado em 04/06/2026 (task #212).
+        """
         try:
             with httpx.Client(timeout=self.timeout) as c:
                 r = c.get(
@@ -1128,8 +1137,10 @@ class KommoClient:
                 )
                 if r.status_code != 200:
                     return None
+                lead_data = r.json() or {}
+                status_id = lead_data.get("status_id")
                 contacts = (
-                    ((r.json() or {}).get("_embedded") or {}).get("contacts") or []
+                    (lead_data.get("_embedded") or {}).get("contacts") or []
                 )
                 if not contacts:
                     return None
@@ -1142,16 +1153,24 @@ class KommoClient:
                 r2 = c.get(f"{self._base}/contacts/{cid}", headers=self._headers)
                 if r2.status_code != 200:
                     return None
-                for cf in ((r2.json() or {}).get("custom_fields_values") or []):
+                contact_data = r2.json() or {}
+                nome = (contact_data.get("name") or "").strip()
+                telefone = None
+                for cf in (contact_data.get("custom_fields_values") or []):
                     if cf.get("field_code") == "PHONE":
                         vals = cf.get("values") or []
                         if vals and vals[0].get("value"):
-                            digits = "".join(
+                            telefone = "".join(
                                 ch for ch in str(vals[0]["value"]) if ch.isdigit()
-                            )
-                            return digits or None
+                            ) or None
+                            break
+                return {
+                    "telefone": telefone,
+                    "nome": nome,
+                    "status_id": status_id,
+                }
         except Exception as e:  # noqa: BLE001
-            log.warning("Kommo get_lead_main_phone erro (lead %s): %s", lead_id, e)
+            log.warning("Kommo get_lead_main_contact erro (lead %s): %s", lead_id, e)
         return None
 
     def get_lead_notes(

@@ -3470,6 +3470,110 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return JSONResponse(res.to_dict())
 
     # ================================================================
+    # DISPARO AUTOMÁTICO POR LEAD (task #212 — 04/06/2026)
+    # ================================================================
+    @app.post("/admin/disparar-lead/{lead_id}")
+    @app.get("/admin/disparar-lead/{lead_id}")
+    def admin_disparar_lead(lead_id: int, request: Request) -> JSONResponse:
+        """Dispara renovação pra UM lead específico.
+
+        Diferença vs /admin/renovacao-dispatch: NÃO exige telefone/nome
+        na request — busca tudo via Kommo automaticamente. Pensado pra
+        uso operacional direto (Cowork / Stephany) sem montar payload.
+
+        Query params:
+          - dry_run (true/false, default false — dispara real)
+          - forcar (true/false, default true — ignora dedup Redis)
+
+        Retorna:
+          - {ok, lead_id, telefone, nome, status_id, dispatch_result}
+          - ou {error, lead_id, ...} em falhas
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        import time as _t
+        from voice_agent.renovacao_dispatcher import (
+            SnapshotLead, dispatch_renovacao,
+        )
+
+        q = request.query_params
+
+        def _bool(name, default=False):
+            v = (q.get(name) or "").lower()
+            if v in ("1", "true", "yes", "on"):
+                return True
+            if v in ("0", "false", "no", "off"):
+                return False
+            return default
+
+        dry_run = _bool("dry_run", default=False)
+        forcar = _bool("forcar", default=True)
+
+        # Busca tudo via Kommo
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível", "lead_id": lead_id},
+                status_code=500,
+            )
+
+        info = kommo_client.get_lead_main_contact(lead_id)
+        if not info or not info.get("telefone"):
+            return JSONResponse({
+                "error": "lead sem telefone OU contato não encontrado",
+                "lead_id": lead_id,
+                "info_recebida": info,
+            }, status_code=400)
+
+        telefone = info["telefone"]
+        nome = info.get("nome") or f"Lead {lead_id}"
+        status_id = info.get("status_id")
+
+        # E.164: WhatsApp Cloud espera DDI 55 prefixo
+        if not telefone.startswith("55") and len(telefone) >= 10:
+            telefone = "55" + telefone
+
+        snap = SnapshotLead(
+            lead_id=lead_id,
+            telefone_e164=telefone,
+            nome_contato=nome,
+            status_id=status_id,
+            ultima_msg_paciente_ts=None,  # lead frio
+            paciente_ja_respondeu_na_vida=False,
+        )
+
+        # Em dry_run, NÃO passa wa/redis/kommo (zero side-effect)
+        wa = None if dry_run else wa_cloud
+        redis_cli = None if dry_run else getattr(pipeline, "_redis", None)
+        kommo_writer = None if dry_run else kommo_client
+
+        res = dispatch_renovacao(
+            snap,
+            wa_client=wa,
+            redis_client=redis_cli,
+            kommo_note_writer=kommo_writer,
+            agora=_t.time(),
+            dry_run=dry_run,
+            forcar_redispatch=forcar,
+        )
+        return JSONResponse({
+            "ok": True,
+            "lead_id": lead_id,
+            "telefone": telefone,
+            "nome": nome,
+            "status_id": status_id,
+            "dry_run": dry_run,
+            "forcar": forcar,
+            "dispatch_result": res.to_dict(),
+        })
+
+    # ================================================================
     # MENSAGEM DE RENOVAÇÃO DE JANELA 24h WhatsApp 8133 (task #87)
     # ================================================================
     @app.get("/admin/renovar-janela-preview")
