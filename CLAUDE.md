@@ -246,6 +246,46 @@ Estão no root do repo:
 Todos têm token GitHub embedded. **Token `ghp_7NNf...3H20m8` está comprometido** —
 revogar e gerar novo. Salvar no Keychain do Mac, não no script.
 
+### 11-N. Fluxo E6 reinvertido — ofertar 2 slots antes de perguntar turno (caso Alice lead 21256807, 03/06/2026)
+
+**Caso (03/06/2026 22:09):**
+
+Lia já tinha tudo no ctx: nome (Alice 5a), médica (Karla), unidade (Asa Norte), convênio (Saúde Caixa), motivo (retorno pós-op). Mãe (Carol) já gastou 10 min respondendo. Lia perguntou:
+
+> "Qual sua preferência de turno e período?
+> – Turno: Manhã ou Tarde?
+> – Período: Início, Meio ou Fim?"
+
+Fricção desnecessária — Carol precisaria de mais 2 decisões antes de ver UM slot real. A causa raiz estava NO PRÓPRIO PROMPT: linhas 360-362 do `_agenda_block` instruíam literalmente "Se ele ainda não deu preferência, pergunte o melhor dia/turno ANTES de oferecer".
+
+**Decisão (Fábio aprovou):** **inverter o fluxo**.
+
+| Antes | Depois |
+|---|---|
+| 1. Lia pergunta turno + período + dia | 1. Lia oferece 2 slots (1 manhã + 1 tarde) imediatamente |
+| 2. Paciente decide 3 variáveis | 2. Paciente aceita uma OU pede outro dia/hora |
+| 3. Lia oferece slot | 3. (se recusou OU pediu específico) — Lia pergunta dia/turno → nova rodada |
+| Resultado: ~6 turnos pra fechar | Resultado esperado: ~3 turnos |
+
+**Fix (`voice_agent/responder.py`):**
+
+- **Prompt `_agenda_block`** reescrito: regra "OFERTA IMEDIATA DE 2 SLOTS" com formato 1️⃣/2️⃣ canônico. Proíbe explicitamente perguntar "manhã ou tarde", "início/meio/fim" antes de oferecer.
+- **Helper `_selecionar_2_slots_inteligente(agenda)`**: pega 1 slot manhã (hora<12) + 1 slot tarde (hora≥12) mais próximos; se só houver de um turno, 2 desse turno.
+- **Helper `_gerar_oferta_2_slots(ctx)`**: monta a mensagem humana com 2 slots no formato canônico.
+- **Filtro novo `_viola_pergunta_turno_periodo_com_agenda(text, ctx)`** em `_scrub_prohibited`: detecta padrões "manhã ou tarde", "qual turno", "início/meio/fim", "preferência de turno" QUANDO `ctx.agenda` tem slots → substitui resposta inteira por `_gerar_oferta_2_slots(ctx)`.
+- Pytest `tests/test_alice_2_slots_imediatos.py` — 18 cenários (caso Alice + variantes de pergunta + seleção 1m+1t + ctx sem agenda não-bloqueia + mensagem gerada não-repete pergunta).
+
+**Fluxo completo aprovado:**
+
+1. Após `unidade` definida e `ctx.agenda` populado → Lia oferece 2 slots imediatamente.
+2. Paciente aceita → confirma → agendamento.
+3. Paciente pede dia/hora específico → Lia procura na agenda. Se tem → agenda. Se não → diz isso + oferece o mais próximo da preferência.
+4. Paciente recusa SEM especificar → AÍ SIM Lia pergunta "Qual dia da semana e turno fica melhor?" → nova rodada com 2 slots.
+
+**Lição arquitetural**: o anti-padrão estava NO PROMPT, não no modelo. Modelo cumpria a instrução. Defesa reativa (filtro pós-geração) só vale enquanto o prompt corrigido não chega na sessão (cache).
+
+---
+
 ### 11-M. Bug Priscila lead 24055629 — "sexta-feira (06/06)" mas 06/06 é sábado (03/06/2026)
 
 **Caso (01/06/2026 12:30):**
@@ -386,6 +426,56 @@ Lia escreveu promessa de retorno mas nunca chamou Medware. Frase de espera infin
 1. Detectar template emoji 1️⃣ 2️⃣ humano antes de gerar resposta (camada 6 ja_handoff)
 2. Dedup forte por hash da resposta+conversation_key+5s
 3. Confirmar tool calling efetivamente ativo em prod (`LIA_TOOLS_ENABLED=1`)
+
+---
+
+### 11-P. FIX GAP CRÍTICO 15 DIAS — Lia grava agendamento Medware sozinha (04/06/2026)
+
+**Origem:** task #208. Bug recorrente em 15 dias: Lia confirmava agendamento com paciente, escrevia nota Kommo, mas **NÃO gravava no Medware** — sempre dependia de Stephany/Ariany clicar manualmente.
+
+**Causa raiz:** `voice_agent/tools_lia.py::handle_gravar_agendamento_medware` (linhas 362-381) era um STUB que só escrevia flag Redis `blink:tool_gravacao_solicitada:{convo}` e DELEGAVA pra `executor_agendamento.py` — arquivo que **NUNCA EXISTIU NO REPO**.
+
+**Fix:**
+- Adicionados `COD_MEDICO_POR_NOME` (Karla=12080, Fabrício=12081) e `COD_UNIDADE_POR_NOME` (Asa Norte=5, Águas Claras=3) com helpers `cod_medico_por_nome()` / `cod_unidade_por_nome()` aceitando variantes (case, abreviação, com/sem "Dra.").
+- `handle_gravar_agendamento_medware` agora chama `medware_client.criar_agendamento()` direto, com args extraídos do `caller_context.known` (nome, CPF, data_nasc, celular, convênio, médico, unidade).
+- Dedup Redis 24h via `blink:agendamento_gravado:{convo_key}` — segunda tool call não regrava.
+- Sucesso → log `[GRAVAR-MEDWARE] OK convo=X cod_ag=Y med=Z uni=W` + setex Redis.
+- Falha Medware → retorna `ResultadoTool(erro="medware_falhou: <motivo>")`, escala humano via circuit breaker existente.
+- Exception → `ResultadoTool(erro="medware_exception: ...")` — não quebra conversa.
+- Fallback: sem `medware_client` (modo teste), volta a escrever flag Redis legado.
+
+**Validação:**
+- Pytest novo `tests/test_gravar_agendamento_medware_real.py` — 15 cenários (maps, sucesso, falha, exception, dedup, fallback).
+- Pytest antigo `tests/test_tools_lia.py::TestGravarAgendamento::test_tudo_ok_chama_medware_e_marca_dedup` reescrito.
+- **41/41 verde em 0.04s.**
+
+**Riscos pós-deploy (mitigados):**
+- Primeiro agendamento real pode dar 400 do Medware → log estruturado + circuit breaker já existente (3 falhas → escala humano).
+- CPF duplicado → `criar_agendamento` já trata via `buscar_paciente_por_cpf` (linha 543 de medware.py).
+- Convênio fora do PLANO_CODES → retorno `motivo:"convenio_desconhecido"` (Lia sabe escalar).
+
+**Próximas ações pós-merge:**
+1. Confirmar `LIA_TOOLS_ENABLED=1` em prod (Easypanel → Ambiente).
+2. Smoke E2E com canary lead (1 agendamento + cancel imediato).
+3. Monitorar `[GRAVAR-MEDWARE]` em logs primeiras 24h.
+
+---
+
+### 11-O. Enums Kommo são case-sensitive — value exato (04/06/2026)
+
+**Sintoma:** `kommo_update_lead` com `{"ATIVADO IA?": "DESATIVADO"}` ou `{"1260817": 927035}` retornou HTTP 400 `NotSupportedChoice`. Só funcionou com `{"ATIVADO IA?": "Desativado"}` (texto exato como aparece na config do field).
+
+**Regra:** ao passar enum select pelo MCP Kommo:
+1. Use o **nome do campo** como chave (case-sensitive: `"ATIVADO IA?"` com `?`).
+2. Use o **value text exato** do enum (Title Case como aparece em `kommo_list_custom_fields`).
+3. Enum_ids numéricos (927031/927033/927035) **não funcionam** via essa interface — só os textos.
+
+Confirmados em 04/06:
+- `"Ativado"` → 927031
+- `"Solicitado"` → 927033
+- `"Desativado"` → 927035
+
+Aplicado: leads 22703954 + 23235182 (Inas GDF) marcados como `Desativado` pra excluir do motor de reativação.
 
 ---
 

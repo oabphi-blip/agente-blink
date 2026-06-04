@@ -230,11 +230,25 @@ class TestGravarAgendamento:
         assert r.erro is not None
         assert "AGENDA REAL" in r.erro
 
-    def test_tudo_ok_grava_redis_solicitacao(self):
+    def test_tudo_ok_chama_medware_e_marca_dedup(self):
+        """Pós task #208 (04/06/2026): handler chama medware.criar_agendamento
+        direto E marca chave dedup 24h 'blink:agendamento_gravado:'.
+
+        Antes era stub que só escrevia 'blink:tool_gravacao_solicitada:' e
+        delegava pra um executor_agendamento.py que NUNCA EXISTIU.
+        """
         ctx = {
             "checklist_dados_minimos": {"pronto_para_oferecer_slot": True},
             "agenda": [{"data_iso": "2026-06-02", "hora": "09:00"}],
             "conversation_key": "convo1",
+            "known": {
+                "nome_paciente": "Teste",
+                "cpf": "00000000191",
+                "data_nasc": "01/01/1990",
+                "convenio": "Saúde Caixa",
+                "medico": "Dra. Karla Delalibera",
+                "unidade": "Asa Norte",
+            },
         }
         inputs = {
             "cod_agenda": 5, "data_iso": "2026-06-02",
@@ -242,16 +256,22 @@ class TestGravarAgendamento:
             "mensagem_humana": "Combinado, terça 02/06 09h.",
         }
         fake_redis = MagicMock()
+        fake_redis.get.return_value = None  # sem dedup anterior
         fake_medware = MagicMock()
+        fake_medware.criar_agendamento.return_value = {
+            "ok": True, "cod_agendamento": 12345,
+        }
         r = handle_gravar_agendamento_medware(
             inputs, ctx,
             medware_client=fake_medware, redis_client=fake_redis,
         )
         assert r.erro is None
-        # Redis recebeu a solicitação
+        # Medware FOI chamado
+        fake_medware.criar_agendamento.assert_called_once()
+        # Redis marca dedup pós-sucesso
         assert fake_redis.setex.called
-        key = fake_redis.setex.call_args[0][0]
-        assert "tool_gravacao_solicitada" in key
+        chaves = [c.args[0] for c in fake_redis.setex.call_args_list]
+        assert any("agendamento_gravado" in k for k in chaves)
 
 
 # ----------------------------------------------------------------------

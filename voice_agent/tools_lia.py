@@ -28,10 +28,59 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
 log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Mapas Medware — codMedico/codUnidade por nome humano
+# Fonte: mcp__medware__listar_medicos / listar_unidades em 04/06/2026.
+# Chaves normalizadas (lowercase, sem acentos via simples replace).
+# ---------------------------------------------------------------------------
+
+COD_MEDICO_POR_NOME: dict[str, int] = {
+    "karla": 12080,
+    "karla delalibera": 12080,
+    "dra. karla": 12080,
+    "dra karla": 12080,
+    "dra. karla delalibera": 12080,
+    "fabricio": 12081,
+    "fabrício": 12081,
+    "fabricio freitas": 12081,
+    "fabrício freitas": 12081,
+    "dr. fabricio": 12081,
+    "dr. fabrício": 12081,
+    "dr. fabricio freitas": 12081,
+    "dr. fabrício freitas": 12081,
+}
+
+COD_UNIDADE_POR_NOME: dict[str, int] = {
+    "asa norte": 5,
+    "asanorte": 5,
+    "an": 5,
+    "aguas claras": 3,
+    "águas claras": 3,
+    "aguasclaras": 3,
+    "ac": 3,
+}
+
+
+def _normalize(s: str) -> str:
+    """lowercase + strip + colapsa espaços. NÃO remove acentos."""
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+def cod_medico_por_nome(nome: str) -> int:
+    """Resolve codMedico a partir do nome humano. Default Karla=12080."""
+    return COD_MEDICO_POR_NOME.get(_normalize(nome), 12080)
+
+
+def cod_unidade_por_nome(nome: str) -> int:
+    """Resolve codUnidade a partir do nome humano. Default Asa Norte=5."""
+    return COD_UNIDADE_POR_NOME.get(_normalize(nome), 5)
 
 
 # ---------------------------------------------------------------------------
@@ -95,8 +144,10 @@ TOOL_CONFIRMAR_DADOS_PACIENTE = {
     "name": "confirmar_dados_paciente",
     "description": (
         "Registra os dados do paciente quando ele(a) acabou de informar. "
-        "Use quando paciente passou nome completo + data nasc + CPF. "
-        "Pipeline valida formato e grava no Kommo."
+        "Use quando paciente passou nome completo + data nasc (+ CPF, "
+        "que só é obrigatório quando atendimento é PARTICULAR). Para "
+        "qualquer convênio aceito o CPF é OPCIONAL. Pipeline valida "
+        "formato e grava no Kommo."
     ),
     "input_schema": {
         "type": "object",
@@ -136,7 +187,9 @@ TOOL_GRAVAR_AGENDAMENTO_MEDWARE = {
     "description": (
         "Dispara gravação do agendamento no sistema Medware. Use SOMENTE "
         "quando paciente confirmou EXPLICITAMENTE 1 slot oferecido e "
-        "todos os dados (nome, data nasc, CPF, convênio) estão presentes."
+        "os dados obrigatórios (nome, data nasc, convênio) estão "
+        "presentes. CPF é obrigatório APENAS para Particular — para "
+        "convênio aceito, CPF é opcional."
     ),
     "input_schema": {
         "type": "object",
@@ -354,27 +407,111 @@ def handle_gravar_agendamento_medware(
                 )
 
     efeitos = []
-    # Dispara em thread pra não bloquear resposta WhatsApp
-    if medware_client is not None and caller_context:
+    convo_key = (caller_context or {}).get("conversation_key", "")
+
+    # DEDUP: se já gravamos pra essa conversa nas últimas 24h, retorna OK
+    # sem chamar Medware de novo (evita duplicação por re-tool-call).
+    if redis_client is not None and convo_key:
         try:
-            # NÃO chama direto aqui — delega pro fluxo existente que já
-            # tem retry/redis/status (executor_agendamento.py via Haiku).
-            # Marca em Redis que estamos prontos pra gravar.
-            if redis_client is not None:
-                convo_key = caller_context.get("conversation_key", "")
-                if convo_key:
-                    redis_client.setex(
-                        f"blink:tool_gravacao_solicitada:{convo_key}",
-                        600,
-                        json.dumps({
-                            "cod_agenda": cod_agenda,
-                            "data_iso": data_iso,
-                            "hora": hora,
-                        }),
-                    )
-                    efeitos.append("solicitação gravada em Redis (10min TTL)")
+            ja = redis_client.get(f"blink:agendamento_gravado:{convo_key}")
+            if ja:
+                payload = ja.decode() if isinstance(ja, bytes) else ja
+                efeitos.append(f"dedup: já gravado antes ({payload[:80]})")
+                return ResultadoTool(
+                    texto_para_paciente=msg,
+                    efeitos_colaterais=efeitos,
+                    tool_name="gravar_agendamento_medware",
+                )
         except Exception as e:  # noqa: BLE001
-            efeitos.append(f"redis falhou: {e}")
+            log.warning("dedup redis falhou: %s", e)
+
+    # CHAMADA REAL ao Medware (era stub Redis até 04/06/2026 — task #208).
+    if medware_client is not None and caller_context:
+        known = (caller_context.get("known") or {})
+        try:
+            medico_nome = known.get("medico") or caller_context.get("medico") or ""
+            unidade_nome = known.get("unidade") or ""
+            cod_med = cod_medico_por_nome(medico_nome)
+            cod_uni = cod_unidade_por_nome(unidade_nome)
+
+            # data_hora "YYYY-MM-DDTHH:MM" — medware.criar_agendamento já aceita esse formato
+            data_hora = f"{data_iso}T{hora}" if "T" not in data_iso else data_iso
+
+            resultado = medware_client.criar_agendamento(
+                cod_medico=cod_med,
+                cod_unidade=cod_uni,
+                cod_agenda=int(cod_agenda) if cod_agenda else 0,
+                data_hora=data_hora,
+                nome=known.get("nome_paciente", ""),
+                cpf=known.get("cpf", ""),
+                data_nascimento=known.get("data_nasc", "") or known.get("data_nascimento", ""),
+                celular=known.get("celular", "") or known.get("telefone", ""),
+                convenio=known.get("convenio"),
+                obs=f"Agendado via Lia (Cowork) — conv {convo_key}",
+            )
+
+            if resultado.get("ok"):
+                cod_ag = resultado.get("cod_agendamento") or resultado.get("codAgendamento") or 0
+                efeitos.append(
+                    f"MEDWARE OK: codAgendamento={cod_ag} med={cod_med} uni={cod_uni}"
+                )
+                log.info(
+                    "[GRAVAR-MEDWARE] OK convo=%s cod_ag=%s med=%s uni=%s slot=%s %s",
+                    convo_key, cod_ag, cod_med, cod_uni, data_iso, hora,
+                )
+                # Marca Redis pra dedup de 24h (futuras tool calls não re-gravam)
+                if redis_client is not None and convo_key:
+                    try:
+                        redis_client.setex(
+                            f"blink:agendamento_gravado:{convo_key}",
+                            86400,
+                            json.dumps({
+                                "cod_agendamento": cod_ag,
+                                "cod_agenda": cod_agenda,
+                                "data_iso": data_iso,
+                                "hora": hora,
+                                "cod_medico": cod_med,
+                                "cod_unidade": cod_uni,
+                            }),
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        efeitos.append(f"redis dedup falhou: {e}")
+            else:
+                # Erro Medware (convênio desconhecido, conflito, etc.) — escalar
+                motivo = resultado.get("motivo") or "desconhecido"
+                detalhe = resultado.get("detalhe", "")[:120]
+                efeitos.append(f"MEDWARE ERRO motivo={motivo} {detalhe}")
+                log.error(
+                    "[GRAVAR-MEDWARE] FAIL convo=%s motivo=%s detalhe=%s",
+                    convo_key, motivo, detalhe,
+                )
+                return ResultadoTool(
+                    texto_para_paciente="",
+                    erro=f"medware_falhou: {motivo}",
+                    efeitos_colaterais=efeitos,
+                    tool_name="gravar_agendamento_medware",
+                )
+        except Exception as e:  # noqa: BLE001
+            log.exception("[GRAVAR-MEDWARE] EXCEPTION convo=%s", convo_key)
+            efeitos.append(f"exception: {e}")
+            return ResultadoTool(
+                texto_para_paciente="",
+                erro=f"medware_exception: {e}",
+                efeitos_colaterais=efeitos,
+                tool_name="gravar_agendamento_medware",
+            )
+    else:
+        # Sem medware_client (modo teste/unit) — registra flag Redis legado
+        if redis_client is not None and convo_key:
+            try:
+                redis_client.setex(
+                    f"blink:tool_gravacao_solicitada:{convo_key}",
+                    600,
+                    json.dumps({"cod_agenda": cod_agenda, "data_iso": data_iso, "hora": hora}),
+                )
+                efeitos.append("solicitação gravada em Redis (sem medware_client)")
+            except Exception as e:  # noqa: BLE001
+                efeitos.append(f"redis falhou: {e}")
 
     return ResultadoTool(
         texto_para_paciente=msg,
