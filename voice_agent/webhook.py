@@ -3986,6 +3986,96 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # WEBHOOK KOMMO TRIGGER (task #219 — 04/06/2026)
+    # ================================================================
+    @app.post("/admin/kommo-trigger-disparar")
+    async def admin_kommo_trigger_disparar(request: Request) -> JSONResponse:
+        """Recebe webhook do Kommo Automation e dispara template aprovado.
+
+        Pra usar: criar Automation no Kommo que dispara webhook HTTP quando
+        um lead muda pra status / quando campo 'Disparar Template' = Sim.
+
+        Payload Kommo Automation (formato padrão):
+          leads[update][0][id]=22982854
+          leads[update][0][custom_fields][NOME_CAMPO]=valor
+
+        OU JSON body:
+          {
+            "lead_id": 22982854,
+            "template": "1089_mens_ativar_conv_parada_qz7kbz",
+            "body_params": ["Noah"]
+          }
+
+        Aceita ambos formatos.
+
+        Auth: secret via query (?secret=...) OU header X-Webhook-Secret.
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        # Tenta JSON primeiro, depois form-urlencoded (formato Kommo padrão)
+        lead_id = None
+        template = None
+        body_params = None
+        try:
+            body = await request.json()
+            lead_id = body.get("lead_id") or body.get("leadId")
+            template = body.get("template")
+            body_params = body.get("body_params")
+        except Exception:
+            try:
+                form = await request.form()
+                # Formato Kommo: leads[update][0][id]
+                for key, val in form.items():
+                    if "[id]" in key and not lead_id:
+                        try:
+                            lead_id = int(val)
+                        except (ValueError, TypeError):
+                            pass
+            except Exception:
+                pass
+
+        if not lead_id:
+            return JSONResponse(
+                {"error": "lead_id não encontrado no payload"},
+                status_code=400,
+            )
+
+        try:
+            lead_id = int(lead_id)
+        except (ValueError, TypeError):
+            return JSONResponse(
+                {"error": f"lead_id inválido: {lead_id}"},
+                status_code=400,
+            )
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        log.info(
+            "[KOMMO-TRIGGER] disparando lead=%s template=%s params=%s",
+            lead_id, template, body_params,
+        )
+
+        res = _disparar_template_aprovado_para_lead(
+            lead_id, kommo_client, wa_cloud,
+            dry_run=False,
+            template_override=template,
+            body_params_override=body_params,
+        )
+        res["lead_id"] = lead_id
+        res["origem"] = "kommo_automation_webhook"
+        return JSONResponse(res)
+
+    # ================================================================
     # SETUP CAMPOS ACOMPANHAMENTO LIA (task #216 — 04/06/2026)
     # ================================================================
     @app.post("/admin/setup-campos-acompanhamento")

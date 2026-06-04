@@ -292,6 +292,207 @@ def _worker_renovacao_loop(*, pipeline, stop_event: threading.Event) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Worker: campanha semanal por categoria (task #218 — 04/06/2026)
+# Toggle: CAMPANHA_SEMANAL_ENABLED=1
+# Quando: segunda-feira (BRT) 9h, 1x por semana
+# O que: roda a mesma lógica do /admin/disparar-categoria internamente
+# ---------------------------------------------------------------------------
+
+def _campanha_semanal_enabled() -> bool:
+    return (os.environ.get("CAMPANHA_SEMANAL_ENABLED") or "").strip() == "1"
+
+
+def _campanha_semanal_categoria() -> str:
+    return (os.environ.get("CAMPANHA_SEMANAL_CATEGORIA") or "R").upper()
+
+
+def _campanha_semanal_max_leads() -> int:
+    raw = (os.environ.get("CAMPANHA_SEMANAL_MAX") or "20").strip()
+    try:
+        return min(int(raw), 200)
+    except ValueError:
+        return 20
+
+
+def _campanha_semanal_unidade() -> str:
+    return (os.environ.get("CAMPANHA_SEMANAL_UNIDADE") or "").lower()
+
+
+def _campanha_semanal_medico() -> str:
+    return (os.environ.get("CAMPANHA_SEMANAL_MEDICO") or "").lower()
+
+
+def _executar_campanha_semanal(*, pipeline, dry_run: bool) -> dict:
+    """Filtra leads por categoria + dispara template aprovado em batch.
+
+    Reusa lógica de filtro do endpoint /admin/disparar-categoria mas roda
+    INTERNAMENTE sem precisar de curl externo. Token de acesso vem do
+    próprio app (env nativo do container Easypanel).
+    """
+    from voice_agent.kommo import KommoClient  # noqa: F401
+
+    kommo = getattr(pipeline, "kommo", None)
+    wa_cloud = getattr(pipeline, "wa_cloud", None)
+    if not kommo or not wa_cloud:
+        return {"ok": False, "razao": "kommo_ou_wa_indisponivel"}
+
+    categoria = _campanha_semanal_categoria()
+    if categoria not in ("R", "E", "C"):
+        return {"ok": False, "razao": f"categoria_invalida={categoria}"}
+
+    max_leads = _campanha_semanal_max_leads()
+    unidade_filtro = _campanha_semanal_unidade()
+    medico_filtro = _campanha_semanal_medico()
+
+    KEYWORDS = {
+        "R": ["REAGENDAR", "REMARCAÇÃO", "REMARCACAO", "FALTOU",
+              "DESMARCOU", "DESMARCAÇÃO", "DESMARCACAO"],
+        "E": ["COM CONVÊNIO", "COM CONVENIO"],
+        "C": ["SEM CONVÊNIO", "SEM CONVENIO", "PARTICULAR"],
+    }
+    EXCLUIR = ["INAS", "GDF", "CASSI", "SULAMERICA", "BRADESCO"]
+
+    try:
+        leads = []
+        if hasattr(kommo, "list_stale_leads"):
+            leads = kommo.list_stale_leads(
+                pipeline_id=8601819, limit=max_leads * 3,
+            ) or []
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "razao": f"kommo_falha={exc}"}
+
+    kw_cat = KEYWORDS[categoria]
+    candidatos = []
+    for lead in leads:
+        if len(candidatos) >= max_leads:
+            break
+        nome_lead = (lead.get("name") or "").upper()
+        if any(ex in nome_lead for ex in EXCLUIR):
+            continue
+        if not any(k in nome_lead for k in kw_cat):
+            continue
+        if unidade_filtro and unidade_filtro not in nome_lead.lower():
+            pass  # heurística branda — fetch detalhado seria caro
+        if medico_filtro and medico_filtro not in nome_lead.lower():
+            pass
+        if lead.get("id"):
+            candidatos.append(int(lead["id"]))
+
+    if not candidatos:
+        return {
+            "ok": True, "candidatos": 0, "disparados": 0,
+            "razao": "nenhum_lead_casou",
+        }
+
+    # Importa a função helper do webhook só na hora (evita import circular)
+    try:
+        from voice_agent.webhook import (
+            _disparar_template_aprovado_para_lead,
+        )
+    except ImportError:
+        return {"ok": False, "razao": "helper_indisponivel"}
+
+    disparados = 0
+    falhas = 0
+    detalhes = []
+    for lead_id in candidatos:
+        try:
+            res = _disparar_template_aprovado_para_lead(
+                lead_id, kommo, wa_cloud, dry_run=dry_run,
+            )
+            if res.get("ok"):
+                disparados += 1
+                detalhes.append({"lead_id": lead_id, "ok": True})
+            else:
+                falhas += 1
+                detalhes.append({
+                    "lead_id": lead_id, "ok": False,
+                    "motivo": res.get("motivo", "?"),
+                })
+        except Exception as exc:  # noqa: BLE001
+            falhas += 1
+            detalhes.append({
+                "lead_id": lead_id, "ok": False,
+                "motivo": f"exception={exc}",
+            })
+
+    return {
+        "ok": True, "categoria": categoria,
+        "candidatos": len(candidatos),
+        "disparados": disparados, "falhas": falhas,
+        "dry_run": dry_run, "detalhes": detalhes,
+    }
+
+
+def _eh_segunda_feira_9h_brt() -> bool:
+    """True se agora é segunda-feira entre 9h e 10h BRT."""
+    from datetime import datetime, timedelta, timezone
+    agora_brt = datetime.now(timezone(timedelta(hours=-3)))
+    return agora_brt.weekday() == 0 and agora_brt.hour == 9
+
+
+def _worker_campanha_semanal_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Loop que verifica a cada 30min se é hora da campanha semanal.
+
+    Dispara apenas se for segunda-feira 9h-10h BRT E
+    CAMPANHA_SEMANAL_ENABLED=1. Usa Redis pra dedup (não dispara 2x
+    no mesmo dia mesmo se o worker reiniciar).
+    """
+    log.info(
+        "[CRON campanha semanal] worker iniciado — checa a cada 30min "
+        "se é seg 9h-10h BRT (CAMPANHA_SEMANAL_ENABLED=%s, categoria=%s)",
+        _campanha_semanal_enabled(), _campanha_semanal_categoria(),
+    )
+    if stop_event.wait(120):
+        return
+    while not stop_event.is_set():
+        if not _campanha_semanal_enabled():
+            log.debug("[CRON campanha semanal] desligado — pulando")
+        elif not _eh_segunda_feira_9h_brt():
+            log.debug("[CRON campanha semanal] fora janela — pulando")
+        else:
+            # Dedup: já disparou hoje?
+            redis_cli = getattr(pipeline, "_redis", None)
+            from datetime import datetime, timedelta, timezone
+            hoje_brt = datetime.now(
+                timezone(timedelta(hours=-3))
+            ).strftime("%Y-%m-%d")
+            dedup_key = f"blink:campanha_semanal:{hoje_brt}"
+            ja_disparou = False
+            if redis_cli is not None:
+                try:
+                    ja_disparou = bool(redis_cli.get(dedup_key))
+                except Exception:  # noqa: BLE001
+                    pass
+
+            if ja_disparou:
+                log.debug(
+                    "[CRON campanha semanal] já disparou hoje (%s) — pulando",
+                    hoje_brt,
+                )
+            else:
+                try:
+                    res = _executar_campanha_semanal(
+                        pipeline=pipeline, dry_run=_dry_run_default(),
+                    )
+                    log.info("[CRON campanha semanal] %s", res)
+                    if redis_cli is not None:
+                        try:
+                            redis_cli.setex(dedup_key, 86400 * 2, "1")
+                        except Exception:  # noqa: BLE001
+                            pass
+                except Exception as exc:  # noqa: BLE001
+                    log.exception(
+                        "[CRON campanha semanal] falhou: %s", exc,
+                    )
+        # checa de 30 em 30 min
+        if stop_event.wait(1800):
+            return
+
+
+# ---------------------------------------------------------------------------
 # Bootstrap a partir do create_app
 # ---------------------------------------------------------------------------
 
@@ -324,12 +525,24 @@ def iniciar_cron(pipeline) -> dict:
     t2.start()
     _threads_iniciadas.append(t2)
 
+    # task #218: worker semanal de campanha
+    t3 = threading.Thread(
+        target=_worker_campanha_semanal_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-campanha-semanal",
+    )
+    t3.start()
+    _threads_iniciadas.append(t3)
+
     return {
         "started": True,
-        "workers": ["classificar", "renovacao"],
+        "workers": ["classificar", "renovacao", "campanha_semanal"],
         "dry_run": _dry_run_default(),
         "intervalo_classificar_seg": _intervalo_classificar_seg(),
         "intervalo_renovacao_seg": _intervalo_renovacao_seg(),
+        "campanha_semanal_enabled": _campanha_semanal_enabled(),
+        "campanha_semanal_categoria": _campanha_semanal_categoria(),
+        "campanha_semanal_max": _campanha_semanal_max_leads(),
     }
 
 

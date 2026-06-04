@@ -429,6 +429,53 @@ Lia escreveu promessa de retorno mas nunca chamou Medware. Frase de espera infin
 
 ---
 
+### 11-T. Autonomia total — Cron semanal + Kommo webhook trigger (04/06/2026, tasks #218/#219)
+
+**Origem:** Fábio: "chega de babá. autonomia total".
+
+**PARTE 1 — Cron interno semanal (`voice_agent/cron_interno.py`):**
+
+Worker `_worker_campanha_semanal_loop` adicionado. Checa a cada 30min se é segunda 9h-10h BRT. Se sim + dedup Redis OK + `CAMPANHA_SEMANAL_ENABLED=1` → executa `_executar_campanha_semanal()` que filtra leads por categoria + dispara template aprovado em batch.
+
+**Envs novas (Easypanel → Ambiente):**
+- `CAMPANHA_SEMANAL_ENABLED=1` (toggle, default off)
+- `CAMPANHA_SEMANAL_CATEGORIA=R` (default R; aceita E, C)
+- `CAMPANHA_SEMANAL_MAX=20` (max 200)
+- `CAMPANHA_SEMANAL_UNIDADE=Asa Norte` (opcional)
+- `CAMPANHA_SEMANAL_MEDICO=Karla` (opcional)
+
+Zero config Easypanel UI cron. Bastam as envs acima + redeploy.
+
+**PARTE 3 — Endpoint `/admin/kommo-trigger-disparar`:**
+
+Recebe webhook do Kommo Automation. Aceita 2 formatos:
+
+1. **JSON body** (preferido):
+```json
+{ "lead_id": 22982854, "template": "captar_paciente",
+  "body_params": ["Déborah", "Maria Teresa", "Águas Claras", "Karla", "09/06 09:00"] }
+```
+
+2. **Form-urlencoded** (formato nativo Kommo Automation):
+```
+leads[update][0][id]=22982854
+```
+
+Quando recebe → chama `_disparar_template_aprovado_para_lead()` → dispara template + grava nota Kommo automática.
+
+**Como configurar no Kommo Automation:**
+1. Kommo → Configurações → Automações → Add
+2. Quando: campo "Disparar Template" = "Sim" (ou status muda pra X)
+3. Ação: Webhook HTTP POST
+4. URL: `https://blink-agent.6prkfn.easypanel.host/admin/kommo-trigger-disparar?secret=$WEBHOOK_SECRET`
+5. Salvar
+
+**PARTE 2 — Allowlist sandbox Anthropic:** depende da Anthropic adicionar `*.easypanel.host` no proxy allowlist do Cowork. Fora do controle do Blink. Workaround: usar Chrome MCP do Fábio pra fetch direto.
+
+**Pytest:** `tests/test_campanha_semanal_e_kommo_trigger.py` — 8 cenários (toggles, categoria default/custom, max cap, sanity check). **58/58 total verde.**
+
+---
+
 ### 11-R. Endpoints batch + categoria — Opção A+C (04/06/2026, tasks #213/#214)
 
 **Origem:** Fábio: "estamos sem atendimento humano, dispara automático".
