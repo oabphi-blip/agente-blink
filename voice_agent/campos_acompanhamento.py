@@ -43,18 +43,28 @@ FIELD_STATUS_CONVERSA = (1260854, {
 
 FIELD_ULTIMA_MSG_OUTBOUND = 1260856  # textarea
 
-# ÚLTIMA MENSAGEM — datetime, criado por Fábio 05/06/2026 pra resolver o
-# problema do ÚLTIMA MODIFICAÇÃO (que pega qualquer mudança de campo).
-# Atualizado APENAS em outbound (Lia ou humano via webhook). Equipe humana
-# vê referência REAL de quando saiu a última mensagem do CRM.
-# Override via env BLINK_FIELD_TS_ULTIMA_MSG quando precisar testar.
+# ÚLTIMA MENS LIA + ULTIMA MENS HUMANO — datetime, criados por Fábio
+# 05/06/2026. Separados pra equipe enxergar QUEM enviou por último:
+# - LIA preenche FIELD_TS_ULTIMA_MSG_LIA em cada turno do agente
+# - Webhook Kommo Automation preenche FIELD_TS_ULTIMA_MSG_HUMANO quando
+#   atendente humano envia mensagem manual
+# Override via env BLINK_FIELD_TS_LIA / BLINK_FIELD_TS_HUMANO pra teste.
 import os as _os
 try:
-    FIELD_TS_ULTIMA_MSG_ENVIADA = int(
-        _os.getenv("BLINK_FIELD_TS_ULTIMA_MSG") or "1260860"
+    FIELD_TS_ULTIMA_MSG_LIA = int(
+        _os.getenv("BLINK_FIELD_TS_LIA") or "1260860"
     )
 except ValueError:
-    FIELD_TS_ULTIMA_MSG_ENVIADA = 1260860
+    FIELD_TS_ULTIMA_MSG_LIA = 1260860
+try:
+    FIELD_TS_ULTIMA_MSG_HUMANO = int(
+        _os.getenv("BLINK_FIELD_TS_HUMANO") or "1260862"
+    )
+except ValueError:
+    FIELD_TS_ULTIMA_MSG_HUMANO = 1260862
+
+# Alias mantido pra compat com código antigo
+FIELD_TS_ULTIMA_MSG_ENVIADA = FIELD_TS_ULTIMA_MSG_LIA
 
 FIELD_PROXIMA_ACAO = (1260858, {
     "aguardar_resposta_paciente": 927078,

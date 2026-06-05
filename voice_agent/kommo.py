@@ -878,16 +878,23 @@ class KommoClient:
             FIELD_STATUS_CONVERSA as _FIELD_STATUS_CONVERSA,
             FIELD_ULTIMA_MSG_OUTBOUND as _FIELD_ULTIMA_MSG_OUTBOUND,
             FIELD_PROXIMA_ACAO as _FIELD_PROXIMA_ACAO,
-            FIELD_TS_ULTIMA_MSG_ENVIADA as _FIELD_TS_ULTIMA_MSG,
+            FIELD_TS_ULTIMA_MSG_LIA as _FIELD_TS_LIA,
+            FIELD_TS_ULTIMA_MSG_HUMANO as _FIELD_TS_HUMANO,
         )
         add_select(_FIELD_STATUS_CONVERSA, fields.get("status_conversa"))
         add_select(_FIELD_PROXIMA_ACAO, fields.get("proxima_acao"))
         add_text(_FIELD_ULTIMA_MSG_OUTBOUND, fields.get("ultima_msg_outbound"))
-        # date_time só grava se o env BLINK_FIELD_TS_ULTIMA_MSG estiver
-        # configurado com o field_id real (criado via API uma vez).
-        if _FIELD_TS_ULTIMA_MSG:
+        # 2 timestamps separados — LIA vs HUMANO. Pipeline carimba LIA.
+        # Webhook Kommo Automation carimba HUMANO.
+        if _FIELD_TS_LIA:
+            add_datetime(_FIELD_TS_LIA, fields.get("ts_ultima_msg_lia"))
+            # compat com chave antiga "ts_ultima_msg_enviada"
             add_datetime(
-                _FIELD_TS_ULTIMA_MSG, fields.get("ts_ultima_msg_enviada"),
+                _FIELD_TS_LIA, fields.get("ts_ultima_msg_enviada"),
+            )
+        if _FIELD_TS_HUMANO:
+            add_datetime(
+                _FIELD_TS_HUMANO, fields.get("ts_ultima_msg_humano"),
             )
         # COD-AGENDAMENTO — preenchido apos gravar consulta no Medware via API.
         cod_ag = fields.get("cod_agendamento")

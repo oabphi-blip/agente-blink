@@ -86,6 +86,16 @@ Antes de **qualquer** uma destas ações:
 **Erro:** 368 × 2 calls = 736+ turnos. Custo de contexto inviável.
 **Regra:** operações de massa (>20 itens) SEMPRE via endpoint server-side. Implementei `voice_agent/renomear_leads.py` + `/admin/renomear-leads-frio`. Padrão pra próximas.
 
+### Bug C-09 (05/06/2026) — Kommo valida URL de webhook antes de salvar
+**Caso:** tentei criar webhook Kommo apontando pra `https://blink-agent.6prkfn.easypanel.host/admin/kommo-trigger-msg-humano`. Kommo respondeu "Por favor, utilize um endereço publicamente acessível" e rejeitou o save.
+**Causa real:** o endpoint NÃO existia em prod ainda (push do código novo estava pendente). Kommo faz GET de validação no momento do save → recebe 404 → trata como URL inválida.
+**Regra:** sempre que criar webhook Kommo, o endpoint correspondente DEVE estar live em prod antes. Sequência correta:
+1. Implementa endpoint
+2. Push + commit + deploy Easypanel (espera ~3min)
+3. Confirma endpoint responde (curl)
+4. Configura webhook Kommo
+**Prevenção:** documentar essa dependência em qualquer task que envolva webhook Kommo. Não tentar configurar webhook antes do deploy do endpoint.
+
 ### Bug C-08 (05/06/2026) — Subagent custom não funciona no Cowork
 **Caso:** criei `.claude/agents/qa-blink.md` achando que ia ser invocável via `Agent(subagent_type="qa-blink")`. Falhou: `Agent type 'qa-blink' not found`.
 **Erro arquitetural:** Cowork só carrega subagents pré-definidos (claude, claude-code-guide, Explore, general-purpose, Plan, statusline-setup). Arquivos `.claude/agents/*.md` no projeto NÃO são carregados como subagents nem mesmo se pushados.

@@ -1455,6 +1455,45 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
         )
         return _gerar_resposta_valor_sem_repergunta(ctx)
 
+    # 0-Pedro-A. PERGUNTA CONCEITUAL IGNORADA (lead 24102510 Pedro, 04/06/2026)
+    # Paciente perguntou "o que é convênio?" e Lia respondeu "qual é o nome
+    # do seu convênio?" — ignorou a dúvida. Filtro detecta padrão "o que é X"
+    # na ÚLTIMA inbound + falta de explicação na resposta → substitui.
+    try:
+        from voice_agent.filtros_pedro_miguel import (
+            _viola_ignorar_pergunta_conceitual as _viola_concept,
+            _gerar_explicacao_e_retoma as _gerar_explic,
+        )
+        _viola_pc, _conceito = _viola_concept(text, ctx)
+        if _viola_pc and _conceito:
+            log.error(
+                "[FILTRO] PERGUNTA CONCEITUAL IGNORADA (%s) — Lia não "
+                "explicou. user_text=%r, lia_resp=%r",
+                _conceito,
+                (ctx or {}).get("user_text", "")[:100],
+                text[:200],
+            )
+            return _gerar_explic(_conceito, ctx)
+    except Exception as _e_pc:  # noqa: BLE001
+        log.warning("[FILTRO] pergunta-conceitual fail: %s", _e_pc)
+
+    # 0-Pedro-B. DATA DISTANTE TENDO PRÓXIMA (lead 24102510 Pedro, 04/06/2026)
+    # Lia ofereceu D+30 (30/06) e D+02/07 ignorando quinta 11/06 (D+7)
+    # que tinha 7 vacâncias na agenda. Filtro detecta gap cronológico.
+    try:
+        from voice_agent.filtros_pedro_miguel import (
+            _viola_data_distante as _viola_dd,
+            _gerar_oferta_mais_proxima as _gerar_oferta_proxima,
+        )
+        if _viola_dd(text, ctx, limite_dias_aceitavel=10):
+            log.error(
+                "[FILTRO] DATA DISTANTE — Lia ofereceu data >10d depois "
+                "da mais próxima da agenda. Texto: %r", text[:200],
+            )
+            return _gerar_oferta_proxima(ctx)
+    except Exception as _e_dd:  # noqa: BLE001
+        log.warning("[FILTRO] data-distante fail: %s", _e_dd)
+
     # 0-pre. OFERTA APÓS JÁ AGENDADO (lead 24060221 Esther, 01/06/2026)
     # Lead em 5-AGENDADO + paciente envia carteirinha → Lia volta a
     # oferecer slot. Filtro pós-geração é a defesa final quando o LLM
@@ -2029,7 +2068,10 @@ class Responder:
 
         # 5.1. Filtro pós-geração: vocabulário vetado + alucinação de pagamento
         # + detector "fake agenda lookup" (passa ctx pra saber se há agenda real)
+        # Injeta user_text no ctx pra filtros que precisam (pergunta conceitual).
         _before_scrub = answer
+        if caller_context is not None and user_text:
+            caller_context["user_text"] = user_text
         answer = _scrub_prohibited(answer, ctx=caller_context)
         if not answer or len(answer) < 5:
             log.error(

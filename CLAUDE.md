@@ -960,6 +960,99 @@ Sessão 28/05/2026 acumulou 5+ erros do mesmo tipo. Padrão:
 
 ---
 
+### 11-X. Reativação automática IA por mudança de etapa (05/06/2026, task #233)
+
+**Origem:** Fábio 05/06 — sugestão arquitetural depois de inspecionar lead
+10513560 (Larissa/Lis/Samuel) que estava em 6-CONFIRMAR com
+`ATIVADO IA = Desativado` há semanas porque humano tinha enviado msg
+manual lá em 09/04/2026 e ninguém reativou.
+
+**Fluxo completo (3 partes):**
+
+**Parte 1 — Handoff humano move pra 1-ATENDIMENTO HUMANO** (`pipeline.py`):
+quando `agent_paused_for_lead` retorna motivo (humano detectado), além de
+desativar IA, MOVE o lead pra status_id 106563343 (1-ATENDIMENTO HUMANO).
+Equipe vê concentrado nessa etapa o que precisa terminar. Exceções: lead
+já está lá ou em etapa final (142/143/91486864).
+
+**Parte 2 — Webhook reativa ao sair de ATENDIMENTO HUMANO** (`webhook.py`):
+endpoint `POST/GET /admin/kommo-trigger-status-change` recebe webhook do
+Kommo "Status do lead alterado". Se nova etapa ∈ STATUS_ATIVOS_IA
+(0-ENTRADA, 0-a classificar, 2.LEADS FRIO, 3-AGENDAR, 4.REAGENDAR,
+5-AGENDADO, 6-CONFIRMAR, 7.CONFIRMADO, 7.1-NO-SHOW) → seta
+`ATIVADO IA = Ativado`. Etapa "1-ATENDIMENTO HUMANO" NÃO está na lista
+(humano ainda atuando lá).
+
+**Parte 3 — Batch one-shot pra limpar acumulado** (`webhook.py`):
+endpoint `/admin/reativar-ia-batch` varre TODOS leads atuais em etapas
+ativas com `ATIVADO IA = Desativado` e ativa em massa. Dry-run default.
+
+**Webhook Kommo a configurar (após push + deploy):**
+- URL: `https://blink-agent.6prkfn.easypanel.host/admin/kommo-trigger-status-change`
+- Evento: **Status do lead alterado**
+
+**Pytest:** `tests/test_reativacao_ia_automatica.py` — 12 cenários
+(etapas ativas, etapa humana ignorada, fechadas ignoradas, caso real
+lead Larissa 10513560).
+
+---
+
+### 11-W. 4 campos Kommo visíveis na lista + webhook humano (05/06/2026, tasks #231/#232)
+
+**Origem:** Fábio adicionou 3 colunas customs na lista do funil ATENDE
+(STATUS CONVERSA + ULTIMA MSG OUTBOUND + PROXIMA ACAO) e mais 2 campos
+date_time (ÚLTIMA MENS LIA + ULTIMA MENS HUMANO) pra equipe humana
+enxergar estado de cada lead sem abrir o card.
+
+**Field IDs:**
+| Campo | ID | Tipo | Preenchido por |
+|---|---|---|---|
+| STATUS CONVERSA | 1260854 | select 15 enums | Lia a cada turn |
+| ULTIMA MSG OUTBOUND | 1260856 | textarea | Lia a cada turn |
+| PROXIMA ACAO | 1260858 | select 12 enums | Lia a cada turn |
+| ÚLTIMA MENS LIA | 1260860 | date_time | Lia a cada turn |
+| ULTIMA MENS HUMANO | 1260862 | date_time | webhook Kommo |
+
+Enums confirmados via API em `voice_agent/campos_acompanhamento.py`.
+
+**Mapeamento estado FSM → enums** (em `mapear_status_e_proxima`):
+| FSM | STATUS CONVERSA | PROXIMA ACAO |
+|---|---|---|
+| TRIAGEM | coletando_dados | coletar_dados_minimos |
+| DADOS | coletando_dados | coletar_dados_minimos |
+| CONVENIO | validando_convenio | validar_convenio |
+| AGENDA | agenda_oferecida | aguardar_resposta_paciente |
+| CONFIRMACAO | confirmando_horario | aguardar_resposta_paciente |
+| GRAVACAO | gravando_medware | aguardar_resposta_paciente |
+| POS_GRAVACAO | agendado_aguarda_consulta | confirmar_horario_d-1 |
+
+Overrides: `ja_agendado=True`, `convenio_nao_aceito=True`,
+`cobrar_sinal=True`, `paciente_desistiu=True` vencem o caminho FSM.
+
+**Onde código pluga:**
+- `voice_agent/pipeline.py::_sync_kommo_safely` resolve FSM atual via
+  `FSMManager.get(convo_key)`, chama `campos_acompanhamento.montar_dict_campos()`
+  e injeta no `update_lead_fields()`.
+- `voice_agent/kommo.py::update_lead_fields` processa 5 chaves novas:
+  `status_conversa`, `proxima_acao`, `ultima_msg_outbound`, `ts_ultima_msg_lia`,
+  `ts_ultima_msg_humano`.
+
+**Webhook humano** (task #232):
+- Endpoint: `POST /admin/kommo-trigger-msg-humano`
+- Auth: secret OPCIONAL (operação não-destrutiva, só carimba timestamp)
+- Aceita JSON `{lead_id: N}` OU form `leads[update][0][id]=N`
+- Atualiza `ULTIMA MENS HUMANO` com `int(time.time())`
+- Configurado em Kommo → Webhooks → URL acima + evento "Mensagem de saída enviada"
+
+**IMPORTANTE — Bug C-09:** Kommo VALIDA URL antes de salvar webhook
+(faz GET no endpoint). Endpoint precisa estar LIVE em prod antes de
+configurar o webhook. Sequência: push → deploy → confirma 200 → cria webhook.
+
+**Pytest:** `tests/test_campos_acompanhamento.py` — 25 cenários (enums
+corretos, mapeamento FSM completo, formatador timestamp, overrides).
+
+---
+
 ### 11-V. Dedup leads frio por telefone — endpoint server-side (05/06/2026, task #228)
 
 **Origem:** Fábio 05/06 — lead Lene 22398836 (96121-411) tem 7+ leads

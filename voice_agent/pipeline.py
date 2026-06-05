@@ -168,7 +168,11 @@ class VoicePipeline:
             if motivo:
                 log.info("Agente em silêncio (%s) para %s", motivo, reply_to_number)
                 # Handoff humano detectado → carimba a IA como DESATIVADA
-                # no lead, para a equipe enxergar pelo campo "ATIVADO IA?".
+                # E move pra etapa 1-ATENDIMENTO HUMANO (106563343) pra
+                # equipe enxergar pelo card a fila de leads a finalizar.
+                # Quando humano mover pra outra etapa ativa, webhook
+                # /admin/kommo-trigger-status-change reativa IA automático.
+                # (task #233 — sugestão Fábio 05/06/2026)
                 lid = caller_context.get("lead_id")
                 if lid:
                     try:
@@ -177,6 +181,28 @@ class VoicePipeline:
                         )
                     except Exception as e:  # noqa: BLE001
                         log.warning("Carimbo ATIVADO IA? (off) falhou: %s", e)
+                    # Move pra 1-ATENDIMENTO HUMANO (apenas se não estiver lá
+                    # ou em etapa final). Status 106563343 = 1-ATENDIMENTO HUMANO.
+                    try:
+                        status_atual = caller_context.get("status_id")
+                        # Etapas finais não devem ser mexidas
+                        _ETAPAS_FINAIS_HANDOFF = {142, 143, 91486864}
+                        if (
+                            status_atual
+                            and status_atual != 106563343
+                            and status_atual not in _ETAPAS_FINAIS_HANDOFF
+                        ):
+                            self.kommo.update_lead_status(lid, 106563343)
+                            log.info(
+                                "[HANDOFF] lead %s movido pra 1-ATENDIMENTO "
+                                "HUMANO (origem etapa %s)",
+                                lid, status_atual,
+                            )
+                    except Exception as e:  # noqa: BLE001
+                        log.warning(
+                            "[HANDOFF] mover pra ATENDIMENTO HUMANO falhou "
+                            "lead=%s: %s", lid, e,
+                        )
                 return PipelineResult(
                     transcript=user_text, answer="", sent=False,
                     model_used="", articles_used=[],
@@ -713,7 +739,7 @@ class VoicePipeline:
                     convenio_nao_aceito=_conv_negado,
                 )
                 # Timestamp da última msg enviada — sempre Lia neste fluxo.
-                campos_acomp["ts_ultima_msg_enviada"] = int(time.time())
+                campos_acomp["ts_ultima_msg_lia"] = int(time.time())
                 fields.update(campos_acomp)
             except Exception as e:  # noqa: BLE001
                 log.warning(

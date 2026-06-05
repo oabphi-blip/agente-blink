@@ -4323,6 +4323,293 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # ================================================================
     # WEBHOOK KOMMO TRIGGER (task #219 — 04/06/2026)
     # ================================================================
+    # ================================================================
+    # WEBHOOK Kommo Automation — carimba ULTIMA MENS HUMANO (task #232)
+    # Dispara quando usuário humano envia mensagem ao lead. Atualiza o
+    # campo date_time 1260862 (ULTIMA MENS HUMANO) com o timestamp atual.
+    # ================================================================
+    @app.post("/admin/kommo-trigger-msg-humano")
+    @app.get("/admin/kommo-trigger-msg-humano")
+    async def admin_kommo_trigger_msg_humano(request: Request) -> JSONResponse:
+        """Webhook Kommo Automation pra carimbar 'ULTIMA MENS HUMANO'.
+
+        Aceita JSON {lead_id: N} ou form-urlencoded
+        leads[update][0][id]=N (formato nativo Kommo Automation).
+
+        Auth: SECRET OPCIONAL — esse endpoint só atualiza 1 timestamp,
+        operação não-destrutiva. Se WEBHOOK_SECRET configurado, aceita
+        secret. Sem secret também aceita (pra simplificar config do
+        webhook Kommo Automation que não suporta headers customizados).
+        Filtro de segurança: lead_id deve ser inteiro positivo válido.
+        """
+        # Secret é opcional aqui
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            # Aceita se secret correto OU se ausente (Kommo Automation)
+            if got and got != settings.webhook_secret:
+                raise HTTPException(401, "Secret inválido")
+
+        # Extrai lead_id (JSON OU form)
+        lead_id = None
+        try:
+            ct = (request.headers.get("content-type") or "").lower()
+            if "json" in ct:
+                body = await request.json()
+                lead_id = body.get("lead_id") or body.get("id")
+            else:
+                form = await request.form()
+                lead_id = (
+                    form.get("leads[update][0][id]")
+                    or form.get("lead_id") or form.get("id")
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        if not lead_id:
+            lead_id = request.query_params.get("lead_id")
+        try:
+            lead_id_int = int(lead_id) if lead_id else 0
+        except (ValueError, TypeError):
+            lead_id_int = 0
+        if lead_id_int <= 0:
+            return JSONResponse(
+                {"error": "lead_id obrigatório"}, status_code=400,
+            )
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+        ts_now = int(time.time())
+        try:
+            ok = kommo_client.update_lead_fields(
+                lead_id_int, {"ts_ultima_msg_humano": ts_now},
+            )
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"error": f"update falhou: {e}"}, status_code=500,
+            )
+        return JSONResponse({
+            "ok": bool(ok), "lead_id": lead_id_int,
+            "ts_ultima_msg_humano": ts_now,
+        })
+
+    # ================================================================
+    # WEBHOOK Kommo — reativa IA quando humano move lead pra etapa ativa
+    # (task #233, 05/06/2026). Sugestão Fábio: humano move pra
+    # AGENDAR/FRIO/AGENDADO → IA volta automaticamente.
+    # ================================================================
+    # Etapas onde IA deve estar SEMPRE ativa
+    _STATUS_ATIVOS_IA = {
+        96441724,   # 0-ETAPA ENTRADA
+        106919911,  # 0-a classificar
+        101508307,  # 2.LEADS FRIO
+        102560495,  # 3-AGENDAR
+        106184631,  # 4.REAGENDAR
+        101507507,  # 5-AGENDADO
+        101109455,  # 6-CONFIRMAR
+        106653499,  # 7.CONFIRMADO
+        106184983,  # 7.1-NO-SHOW
+    }
+
+    @app.post("/admin/kommo-trigger-status-change")
+    @app.get("/admin/kommo-trigger-status-change")
+    async def admin_kommo_trigger_status_change(request: Request) -> JSONResponse:
+        """Webhook Kommo 'Status do lead alterado'. Se nova etapa é uma
+        das etapas ativas, reativa IA (ATIVADO IA? = Ativado).
+
+        Aceita JSON {lead_id, status_id} OU form-urlencoded
+        leads[status][0][id]=N&leads[status][0][status_id]=NN
+        (formato nativo Kommo).
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got and got != settings.webhook_secret:
+                raise HTTPException(401, "Secret inválido")
+
+        lead_id = None
+        new_status = None
+        try:
+            ct = (request.headers.get("content-type") or "").lower()
+            if "json" in ct:
+                body = await request.json()
+                lead_id = body.get("lead_id") or body.get("id")
+                new_status = body.get("status_id") or body.get("status")
+            else:
+                form = await request.form()
+                lead_id = (
+                    form.get("leads[status][0][id]")
+                    or form.get("leads[update][0][id]")
+                    or form.get("lead_id") or form.get("id")
+                )
+                new_status = (
+                    form.get("leads[status][0][status_id]")
+                    or form.get("leads[update][0][status_id]")
+                    or form.get("status_id")
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        if not lead_id:
+            lead_id = request.query_params.get("lead_id")
+        if not new_status:
+            new_status = request.query_params.get("status_id")
+        try:
+            lead_id_int = int(lead_id) if lead_id else 0
+            status_int = int(new_status) if new_status else 0
+        except (ValueError, TypeError):
+            lead_id_int, status_int = 0, 0
+        if lead_id_int <= 0:
+            return JSONResponse(
+                {"error": "lead_id obrigatório"}, status_code=400,
+            )
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        # Se nova etapa não é uma das ativas, ignora silenciosamente.
+        if status_int and status_int not in _STATUS_ATIVOS_IA:
+            return JSONResponse({
+                "ok": True, "lead_id": lead_id_int, "status_id": status_int,
+                "acao": "ignorado", "motivo": "etapa não está na lista ativa",
+            })
+
+        try:
+            ok = kommo_client.update_lead_fields(
+                lead_id_int, {"ativado_ia": "Ativado"},
+            )
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"error": f"update falhou: {e}"}, status_code=500,
+            )
+        return JSONResponse({
+            "ok": bool(ok), "lead_id": lead_id_int,
+            "status_id": status_int, "acao": "ia_reativada",
+        })
+
+    @app.post("/admin/reativar-ia-batch")
+    @app.get("/admin/reativar-ia-batch")
+    def admin_reativar_ia_batch(request: Request) -> JSONResponse:
+        """Varre leads em etapas ativas que estão com ATIVADO IA = Desativado
+        e reativa em batch. Operação one-shot pra limpar acumulado histórico.
+
+        Query params:
+          - dry_run (default true)
+          - max_leads (default 500, max 2000)
+          - status_ids (CSV; default = todas etapas ativas)
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        q = request.query_params
+
+        def _bool(name, default):
+            v = (q.get(name) or "").lower()
+            if v in ("1", "true", "yes", "on"):
+                return True
+            if v in ("0", "false", "no", "off"):
+                return False
+            return default
+
+        try:
+            max_leads = min(int(q.get("max_leads") or "500"), 2000)
+        except ValueError:
+            max_leads = 500
+        dry_run = _bool("dry_run", True)
+
+        sids_raw = (q.get("status_ids") or "").strip()
+        if sids_raw:
+            try:
+                sids = [int(x) for x in sids_raw.split(",") if x.strip().isdigit()]
+            except ValueError:
+                sids = list(_STATUS_ATIVOS_IA)
+        else:
+            sids = list(_STATUS_ATIVOS_IA)
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        total_lidos = 0
+        desativados = 0
+        reativados = 0
+        falhas = 0
+        amostra: list[dict] = []
+        LIMITE = 250
+        for sid in sids:
+            if total_lidos >= max_leads:
+                break
+            page = 1
+            while total_lidos < max_leads:
+                try:
+                    leads = kommo_client.list_leads_by_status(
+                        pipeline_id=8601819, status_ids=[sid],
+                        limit=LIMITE, page=page,
+                    )
+                except Exception:  # noqa: BLE001
+                    break
+                if not leads:
+                    break
+                for ld in leads:
+                    if total_lidos >= max_leads:
+                        break
+                    total_lidos += 1
+                    lid = ld.get("id")
+                    if not lid:
+                        continue
+                    # Lê estado atual de ATIVADO IA via get_caller_context
+                    try:
+                        ctx = kommo_client.get_caller_context_by_lead(lid)
+                        estado = str(
+                            (ctx.get("known") or {}).get("ativado_ia") or ""
+                        ).upper()
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if estado != "DESATIVADO":
+                        continue
+                    desativados += 1
+                    if len(amostra) < 30:
+                        amostra.append({
+                            "id": lid, "nome": ld.get("name"),
+                            "status_id": sid,
+                        })
+                    if not dry_run:
+                        try:
+                            if kommo_client.update_lead_fields(
+                                lid, {"ativado_ia": "Ativado"},
+                            ):
+                                reativados += 1
+                            else:
+                                falhas += 1
+                        except Exception:  # noqa: BLE001
+                            falhas += 1
+                if len(leads) < LIMITE:
+                    break
+                page += 1
+
+        return JSONResponse({
+            "ok": True, "total_lidos": total_lidos,
+            "encontrados_desativados": desativados,
+            "reativados": reativados, "falhas": falhas,
+            "dry_run": dry_run, "status_ids_varridos": sids,
+            "amostra": amostra,
+        })
+
     @app.post("/admin/kommo-trigger-disparar")
     async def admin_kommo_trigger_disparar(request: Request) -> JSONResponse:
         """Recebe webhook do Kommo Automation e dispara template aprovado.
