@@ -37,7 +37,7 @@
 
 ### Águas Claras
 - **Dias da semana:** Terça e Quinta-feira
-- **Turno:** Manhã, Tarde e Início da Noite
+- **Turno:** Manhã ou Tarde (NÃO atende à noite — regra Fábio 04/06/2026)
 - **Período do turno:** Início, Meio ou Fim
 
 ---

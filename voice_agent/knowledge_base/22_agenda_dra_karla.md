@@ -31,7 +31,9 @@ Qual prefere?
 ```
 
 **Se ainda faltar preferência de turno/período, pergunte UMA vez:**
-> "Para essa unidade, qual sua preferência de turno (manhã, tarde ou início da noite) e período (início, meio ou fim)?"
+> "Para essa unidade, qual sua preferência de turno (manhã ou tarde) e período (início, meio ou fim)?"
+
+> ⚠️ **Águas Claras NÃO atende à noite** — Karla só Manhã/Tarde aqui (regra Fábio 04/06/2026).
 
 ---
 

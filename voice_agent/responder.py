@@ -717,7 +717,7 @@ _FAKE_AGENDA_LOOKUP = [
 
 _FAKE_AGENDA_LOOKUP_FALLBACK = (
     "Para eu te oferecer o melhor horário, me confirma só: você prefere "
-    "manhã, tarde ou início da noite? E algum dia específico da semana?"
+    "manhã ou tarde? E algum dia específico da semana?"
 )
 
 
