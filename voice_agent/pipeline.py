@@ -682,6 +682,45 @@ class VoicePipeline:
                     )
                     fields.pop(campo_critico)
 
+            # ── Campos de acompanhamento (task #231, 05/06/2026) ──────
+            # Carimba a cada turn 4 campos visíveis na lista do funil:
+            # STATUS CONVERSA, ULTIMA MSG OUTBOUND, PROXIMA ACAO,
+            # TS ULTIMA MSG ENVIADA. Equipe humana enxerga o estado
+            # de cada lead sem abrir o card.
+            try:
+                from voice_agent import campos_acompanhamento as _ca
+                # Resolve estado FSM atual (best-effort).
+                estado_fsm = None
+                try:
+                    from voice_agent.fsm_conversa import FSMManager as _FM
+                    _r = getattr(self, "_redis", None)
+                    if _r is not None:
+                        _mgr_fsm = _FM(_r)
+                        _snap_fsm = _mgr_fsm.get(conversation_key)
+                        if _snap_fsm is not None:
+                            estado_fsm = _snap_fsm.estado.value
+                except Exception:  # noqa: BLE001
+                    pass
+                _ja_agendado = bool(ctx.get("ja_agendado"))
+                _conv_negado = bool(
+                    (ctx.get("known") or {}).get("nao_aceito_convenio")
+                ) or (fields.get("motivo_perda") == "Somente Convênio")
+                campos_acomp = _ca.montar_dict_campos(
+                    answer=answer or "",
+                    estado_fsm=estado_fsm,
+                    autor="LIA",
+                    ja_agendado=_ja_agendado,
+                    convenio_nao_aceito=_conv_negado,
+                )
+                # Timestamp da última msg enviada — sempre Lia neste fluxo.
+                campos_acomp["ts_ultima_msg_enviada"] = int(time.time())
+                fields.update(campos_acomp)
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "[ACOMPANHAMENTO] fail (%s): %s — segue sem 4 campos",
+                    phone, e,
+                )
+
             if fields:
                 self.kommo.update_lead_fields(lead_id, fields)
                 # Lead perdido por convênio não credenciado → fecha o card

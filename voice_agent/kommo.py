@@ -871,6 +871,24 @@ class KommoClient:
         # ATENDENTE — carimba "Lia" quando a IA conduz o atendimento.
         # Se o enum estiver inválido, auto-skip blacklista em runtime.
         add_select(FIELD_ATENDENTE, fields.get("atendente"))
+        # ── Campos de acompanhamento (task #231, 05/06/2026) ─────────────
+        # Visíveis na lista do funil ATENDE pra equipe humana enxergar
+        # o estado de cada lead sem abrir cada card.
+        from voice_agent.campos_acompanhamento import (
+            FIELD_STATUS_CONVERSA as _FIELD_STATUS_CONVERSA,
+            FIELD_ULTIMA_MSG_OUTBOUND as _FIELD_ULTIMA_MSG_OUTBOUND,
+            FIELD_PROXIMA_ACAO as _FIELD_PROXIMA_ACAO,
+            FIELD_TS_ULTIMA_MSG_ENVIADA as _FIELD_TS_ULTIMA_MSG,
+        )
+        add_select(_FIELD_STATUS_CONVERSA, fields.get("status_conversa"))
+        add_select(_FIELD_PROXIMA_ACAO, fields.get("proxima_acao"))
+        add_text(_FIELD_ULTIMA_MSG_OUTBOUND, fields.get("ultima_msg_outbound"))
+        # date_time só grava se o env BLINK_FIELD_TS_ULTIMA_MSG estiver
+        # configurado com o field_id real (criado via API uma vez).
+        if _FIELD_TS_ULTIMA_MSG:
+            add_datetime(
+                _FIELD_TS_ULTIMA_MSG, fields.get("ts_ultima_msg_enviada"),
+            )
         # COD-AGENDAMENTO — preenchido apos gravar consulta no Medware via API.
         cod_ag = fields.get("cod_agendamento")
         if cod_ag:
