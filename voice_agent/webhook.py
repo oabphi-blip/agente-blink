@@ -3986,6 +3986,72 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # RENOMEAR LEADS FRIO (task #227 — 04/06/2026)
+    # ================================================================
+    @app.post("/admin/renomear-leads-frio")
+    @app.get("/admin/renomear-leads-frio")
+    def admin_renomear_leads_frio(request: Request) -> JSONResponse:
+        """Renomeia leads em 2.LEADS FRIO pra padrão [CAT] <nome_limpo>.
+
+        Query params:
+          - dry_run (true/false, default true)
+          - max_leads (default 500, max 800)
+          - status_id (default 101508307 = 2.LEADS FRIO)
+          - skip_padronizado (true/false, default true)
+
+        Categorias: R/E/V/C/A/X — heurística pelo nome atual.
+
+        Retorna sumário com contadores por categoria + amostra de 20 leads
+        do preview (sempre, mesmo em dry_run).
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        from voice_agent.renomear_leads import renomear_batch
+
+        q = request.query_params
+
+        def _bool(name, default):
+            v = (q.get(name) or "").lower()
+            if v in ("1", "true", "yes", "on"):
+                return True
+            if v in ("0", "false", "no", "off"):
+                return False
+            return default
+
+        try:
+            max_leads = min(int(q.get("max_leads") or "500"), 800)
+        except ValueError:
+            max_leads = 500
+        try:
+            status_id = int(q.get("status_id") or "101508307")
+        except ValueError:
+            status_id = 101508307
+        dry_run = _bool("dry_run", True)
+        skip_padronizado = _bool("skip_padronizado", True)
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        resultado = renomear_batch(
+            kommo_client,
+            pipeline_id=8601819,
+            status_id=status_id,
+            max_leads=max_leads,
+            dry_run=dry_run,
+            skip_ja_padronizado=skip_padronizado,
+        )
+        return JSONResponse(resultado)
+
+    # ================================================================
     # LISTAR TEMPLATES META (task #221 — 04/06/2026)
     # Pra debugar nome exato + status dos templates aprovados
     # ================================================================
