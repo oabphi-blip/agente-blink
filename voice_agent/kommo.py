@@ -1206,19 +1206,41 @@ class KommoClient:
         try:
             with httpx.Client(timeout=self.timeout) as c:
                 r = c.get(f"{self._base}/leads", params=params, headers=self._headers)
+            # Bug C-10 (05/06/2026): endpoints admin estavam retornando 0
+            # leads em prod silenciosamente. Logging detalhado pra diagnose.
             if r.status_code == 204:
+                log.info(
+                    "[KOMMO list_leads_by_status] HTTP 204 (vazio) — "
+                    "pipeline=%s status_ids=%s page=%s — etapa REALMENTE vazia",
+                    pipeline_id, status_ids, page,
+                )
                 return []
             if r.status_code != 200:
-                log.warning("Kommo list_leads_by_status: HTTP %d", r.status_code)
+                log.warning(
+                    "[KOMMO list_leads_by_status] HTTP %d — pipeline=%s "
+                    "status_ids=%s body=%r",
+                    r.status_code, pipeline_id, status_ids,
+                    (r.text or "")[:500],
+                )
                 return []
             data = r.json() or {}
+            leads_raw = ((data.get("_embedded") or {}).get("leads") or [])
+            log.info(
+                "[KOMMO list_leads_by_status] OK — pipeline=%s status_ids=%s "
+                "page=%s leads_count=%d",
+                pipeline_id, status_ids, page, len(leads_raw),
+            )
             return [
                 {"id": ld["id"], "name": ld.get("name"),
                  "status_id": ld.get("status_id")}
-                for ld in ((data.get("_embedded") or {}).get("leads") or [])
+                for ld in leads_raw
             ]
         except Exception as e:  # noqa: BLE001
-            log.warning("Kommo list_leads_by_status erro: %s", e)
+            log.exception(
+                "[KOMMO list_leads_by_status] EXCEPTION pipeline=%s "
+                "status_ids=%s erro=%s",
+                pipeline_id, status_ids, e,
+            )
             return []
 
     def list_leads_recent(self, limit: int = 250, page: int = 1) -> list[dict]:

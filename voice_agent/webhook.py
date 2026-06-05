@@ -2452,6 +2452,72 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     #     extract Haiku, reactivation tick)
     #   - blacklist de campos órfãos detectados em runtime
     #   - estado de cada integração (kommo/medware/anthropic/whatsapp)
+    # ================================================================
+    # HEALTHCHECK KOMMO DEDICADO (Bug C-10 — 05/06/2026)
+    # Faz UMA chamada real list_leads_by_status pra detectar token
+    # expirado / cache stale / rate limit. Expõe resultado detalhado.
+    # ================================================================
+    @app.get("/admin/healthz-kommo")
+    def admin_healthz_kommo(request: Request) -> JSONResponse:
+        """Diagnóstico Kommo: chama list_leads_by_status pra cada etapa
+        ativa do funil ATENDE e expõe contagem real.
+
+        Sem auth — operação read-only.
+        """
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse({"error": "kommo_client indisponível"}, status_code=500)
+
+        STATUS_PROVA = {
+            96441724: "0-ETAPA ENTRADA",
+            106919911: "0-a classificar",
+            101508307: "2.LEADS FRIO",
+            102560495: "3-AGENDAR",
+            106184631: "4.REAGENDAR",
+            101507507: "5-AGENDADO",
+            101109455: "6-CONFIRMAR",
+            106653499: "7.CONFIRMADO",
+            106184983: "7.1-NO-SHOW",
+        }
+        out: dict = {"ok": True, "etapas": {}, "total_sum": 0}
+        import time as _time
+        for sid, nome in STATUS_PROVA.items():
+            t0 = _time.time()
+            try:
+                leads = kommo_client.list_leads_by_status(
+                    pipeline_id=8601819, status_ids=[sid], limit=5, page=1,
+                )
+                dt = round(_time.time() - t0, 2)
+                count = len(leads or [])
+                out["etapas"][str(sid)] = {
+                    "nome": nome, "count": count, "elapsed_s": dt,
+                    "sample_ids": [l.get("id") for l in (leads or [])[:3]],
+                }
+                out["total_sum"] += count
+            except Exception as e:  # noqa: BLE001
+                dt = round(_time.time() - t0, 2)
+                out["etapas"][str(sid)] = {
+                    "nome": nome, "erro": str(e)[:200], "elapsed_s": dt,
+                }
+        # Plus testa search direto (paginação básica)
+        try:
+            t0 = _time.time()
+            with __import__("httpx").Client(timeout=10) as c:
+                r = c.get(
+                    f"{kommo_client._base}/leads",
+                    params={"limit": 1, "page": 1},
+                    headers=kommo_client._headers,
+                )
+            out["leads_basic"] = {
+                "status": r.status_code,
+                "elapsed_s": round(_time.time() - t0, 2),
+                "body_len": len(r.text or ""),
+                "body_preview": (r.text or "")[:200],
+            }
+        except Exception as e:  # noqa: BLE001
+            out["leads_basic"] = {"erro": str(e)[:200]}
+        return JSONResponse(out)
+
     @app.get("/admin/healthz")
     def admin_healthz(request: Request) -> JSONResponse:
         if settings.webhook_secret:

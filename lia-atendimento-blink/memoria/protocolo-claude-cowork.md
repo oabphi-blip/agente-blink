@@ -86,6 +86,28 @@ Antes de **qualquer** uma destas ações:
 **Erro:** 368 × 2 calls = 736+ turnos. Custo de contexto inviável.
 **Regra:** operações de massa (>20 itens) SEMPRE via endpoint server-side. Implementei `voice_agent/renomear_leads.py` + `/admin/renomear-leads-frio`. Padrão pra próximas.
 
+### Bug C-10 RESOLVIDO (05/06/2026) — NÃO era bug, etapas estavam vazias mesmo
+**Resolução confirmada via MCP cross-check:** os endpoints `/admin/reativar-ia-batch`, `/admin/deduplicar-leads-frio`, `/admin/renomear-leads-frio` reportaram `total_lidos: 0` corretamente. As etapas ativas do funil ATENDE (0-ENTRADA, 2.LEADS FRIO, 3-AGENDAR, 4.REAGENDAR, 5-AGENDADO, 6-CONFIRMAR, etc) **realmente estavam vazias** — todos os leads foram movidos em massa pra Closed-lost (status_id 143) em 24/05/2026 21:29 por operação anterior (provavelmente dedup ou fim de campanha).
+
+**Logs detalhados de diagnose adicionados** em `list_leads_by_status` (commits pendentes de push). Plus endpoint `/admin/healthz-kommo` que faz UMA chamada por etapa e expõe contagem real — útil pra qualquer sessão futura que veja "zero leads" e precise distinguir bug real vs etapa vazia.
+
+**Lição operacional:** quando endpoint admin retornar 0 leads, validar PRIMEIRO via MCP Kommo se as etapas têm mesmo dados antes de assumir bug.
+
+---
+
+### Bug C-10 ORIGINAL (05/06/2026 fim do dia) — `list_leads_by_status` retorna 0 em prod
+**Caso:** após sessão grande mexendo em webhooks + 5+ deploys auto, os endpoints `/admin/reativar-ia-batch`, `/admin/deduplicar-leads-frio`, `/admin/renomear-leads-frio` começaram retornando `total_lidos: 0` pra TODAS as etapas, mesmo as conhecidas com leads (2.LEADS FRIO, 6-CONFIRMAR).
+**Confirmação cruzada:** MCP `kommo_search_leads` direto (token independente) retornou leads existentes. Então NÃO é Kommo down.
+**Hipóteses (a investigar próxima sessão):**
+1. Token Kommo do agent expirou silenciosamente (try/except cai em break)
+2. Cache de container Easypanel stale após 5+ deploys
+3. Bug na paginação Kommo do `list_leads_by_status` quando o status tem muitos leads
+**Workaround imediato:** atualizar lead específico via `mcp__kommo__kommo_update_lead` (foi como reativei Lead Larissa 10513560).
+**Fix preventivo (próxima sessão):**
+1. Adicionar log no `list_leads_by_status` — atualmente exception cai em `break` silencioso
+2. Endpoint `/admin/healthz` deveria fazer 1 chamada de teste `list_leads_by_status(8601819, [101508307], limit=1)` e expor o resultado
+3. Webhook de status-change implementado hoje resolve o problema naturalmente — humano move lead → IA reativa. Batch one-shot é só atalho histórico.
+
 ### Bug C-09 (05/06/2026) — Kommo valida URL de webhook antes de salvar
 **Caso:** tentei criar webhook Kommo apontando pra `https://blink-agent.6prkfn.easypanel.host/admin/kommo-trigger-msg-humano`. Kommo respondeu "Por favor, utilize um endereço publicamente acessível" e rejeitou o save.
 **Causa real:** o endpoint NÃO existia em prod ainda (push do código novo estava pendente). Kommo faz GET de validação no momento do save → recebe 404 → trata como URL inválida.
