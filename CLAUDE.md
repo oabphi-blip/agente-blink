@@ -960,6 +960,35 @@ Sessão 28/05/2026 acumulou 5+ erros do mesmo tipo. Padrão:
 
 ---
 
+### 11-V. Dedup leads frio por telefone — endpoint server-side (05/06/2026, task #228)
+
+**Origem:** Fábio 05/06 — lead Lene 22398836 (96121-411) tem 7+ leads
+duplicados no funil 2.LEADS FRIO. Cada família = 1 número → 1 lead.
+
+**Endpoint:** `POST/GET /admin/deduplicar-leads-frio`
+
+Params: `dry_run` (default true), `max_leads` (default 500, max 800),
+`status_id` (default 101508307), `status_destino` (default 143).
+
+**Lógica:** enriquece cada lead com telefone+notas_count+campos_preenchidos+updated_at,
+agrupa por telefone normalizado, escolhe MASTER via score `notas×10 + campos×5 +
+updated_at/86400×0.5` (desempate por id maior). Duplicados ganham rename
+`[DUP→{master_id}] {nome}` + nota explicativa + move pra Closed-lost (143).
+**Reversível** — não deleta.
+
+**Comandos:**
+```bash
+# Dry-run (preview):
+curl "https://blink-agent.6prkfn.easypanel.host/admin/deduplicar-leads-frio?dry_run=true&max_leads=500&secret=$WEBHOOK_SECRET" | jq
+
+# Aplicar:
+curl -X POST "https://blink-agent.6prkfn.easypanel.host/admin/deduplicar-leads-frio?dry_run=false&max_leads=500&secret=$WEBHOOK_SECRET" | jq
+```
+
+**Pytest:** `tests/test_deduplicar_leads.py` — 19 cenários.
+
+---
+
 ## 16-A. PROTOCOLO ANTI-OMISSÃO E ANTI-REPETIÇÃO (04/06/2026)
 
 **OBRIGATÓRIO**: ler `lia-atendimento-blink/memoria/protocolo-claude-cowork.md` no início de toda sessão Cowork. Esse arquivo contém:

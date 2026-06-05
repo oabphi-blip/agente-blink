@@ -86,6 +86,12 @@ Antes de **qualquer** uma destas ações:
 **Erro:** 368 × 2 calls = 736+ turnos. Custo de contexto inviável.
 **Regra:** operações de massa (>20 itens) SEMPRE via endpoint server-side. Implementei `voice_agent/renomear_leads.py` + `/admin/renomear-leads-frio`. Padrão pra próximas.
 
+### Bug C-08 (05/06/2026) — Subagent custom não funciona no Cowork
+**Caso:** criei `.claude/agents/qa-blink.md` achando que ia ser invocável via `Agent(subagent_type="qa-blink")`. Falhou: `Agent type 'qa-blink' not found`.
+**Erro arquitetural:** Cowork só carrega subagents pré-definidos (claude, claude-code-guide, Explore, general-purpose, Plan, statusline-setup). Arquivos `.claude/agents/*.md` no projeto NÃO são carregados como subagents nem mesmo se pushados.
+**Workaround:** usar `Agent(subagent_type="general-purpose")` e injetar o prompt do qa-blink.md como `prompt`. Mesmo efeito, 1 nível de indireção.
+**Regra:** ao criar "agente especializado" pra Cowork, é template de prompt, não subagent registrável. Documentar como tal.
+
 ### Bug C-07 (recorrente) — Pedir push pro Fábio em vez de usar MCP local
 **Caso:** sandbox bloqueia `*.easypanel.host`. Toda sessão peço Fábio rodar curl.
 **Solução:** MCP local `blink-bridge` (task #220) — bloqueado por Python 3.9 no Mac do Fábio.

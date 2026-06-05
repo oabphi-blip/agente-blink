@@ -4052,6 +4052,76 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return JSONResponse(resultado)
 
     # ================================================================
+    # DEDUPLICAR LEADS FRIO POR TELEFONE (task #228 — 05/06/2026)
+    # Origem: Fábio — lead Lene 22398836 (96121-411) tem 7+ duplicados.
+    # Master = mais notas + mais campos + mais recente.
+    # Duplicados: rename [DUP→X] + nota + move pra Closed-lost (143).
+    # Reversível. NÃO deleta.
+    # ================================================================
+    @app.post("/admin/deduplicar-leads-frio")
+    @app.get("/admin/deduplicar-leads-frio")
+    def admin_deduplicar_leads_frio(request: Request) -> JSONResponse:
+        """Agrupa leads de 2.LEADS FRIO por telefone e marca duplicados.
+
+        Query params:
+          - dry_run (true/false, default true)
+          - max_leads (default 500, max 800)
+          - status_id (default 101508307 = 2.LEADS FRIO)
+          - status_destino (default 143 = Closed-lost)
+
+        Retorno: contadores + amostra de até 30 grupos detectados.
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        from voice_agent.deduplicar_leads import deduplicar_batch
+
+        q = request.query_params
+
+        def _bool(name, default):
+            v = (q.get(name) or "").lower()
+            if v in ("1", "true", "yes", "on"):
+                return True
+            if v in ("0", "false", "no", "off"):
+                return False
+            return default
+
+        try:
+            max_leads = min(int(q.get("max_leads") or "500"), 800)
+        except ValueError:
+            max_leads = 500
+        try:
+            status_id = int(q.get("status_id") or "101508307")
+        except ValueError:
+            status_id = 101508307
+        try:
+            status_destino = int(q.get("status_destino") or "143")
+        except ValueError:
+            status_destino = 143
+        dry_run = _bool("dry_run", True)
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        resultado = deduplicar_batch(
+            kommo_client,
+            pipeline_id=8601819,
+            status_id=status_id,
+            status_destino_duplicado=status_destino,
+            max_leads=max_leads,
+            dry_run=dry_run,
+        )
+        return JSONResponse(resultado)
+
+    # ================================================================
     # LISTAR TEMPLATES META (task #221 — 04/06/2026)
     # Pra debugar nome exato + status dos templates aprovados
     # ================================================================
