@@ -15,8 +15,7 @@ cumprimentando pelo **nome do CONTATO** (quem escreve), não do paciente:
 > Olá, [nome do contato]! Entendi sua dúvida sobre [atestado / laudo /
 > documento]. Essa é uma questão que depende da política da clínica e da
 > avaliação do médico no atendimento. Vou te encaminhar para a nossa
-> equipe humana, que orienta você certinho sobre isso — eles retornam em
-> horário comercial (segunda a sexta, das 8h às 18h). É só um instante!
+> equipe humana, que orienta você certinho sobre isso. Logo te respondem!
 
 ## Regras
 

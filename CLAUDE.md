@@ -429,6 +429,31 @@ Lia escreveu promessa de retorno mas nunca chamou Medware. Frase de espera infin
 
 ---
 
+### 11-U. KB limpa de "horário comercial" + Watchdog 24h (04/06/2026, tasks #184/#178)
+
+**Problema histórico (bug Juliene 24053159, 02/06):**
+Lia inventava "retorno em horário comercial seg-sex 8h-18h" — frase causava experiência ruim. Blink ATENDE 24h via Lia (e equipe humana em rodízio paralelo).
+
+**Limpeza KB (#184):**
+6 arquivos com menção a "horário comercial 8-18h" ajustados:
+- `22_agenda_dra_karla.md` linha 69 → "Deixa eu reconsultar a agenda aqui, volto em 1 minuto."
+- `34_agenda_dr_fabricio.md` linha 73 → mesma frase
+- `38_atestados_e_documentos_medicos.md` linha 19 → "Logo te respondem!"
+- `37_escalonamento_humano.md` linha 33 → removido "em horário comercial"
+- `08_audio_e_escalonamento.md` linha 56 → removido "em horário comercial"
+- `_MASTER_INSTRUCTION.md` linhas 336 e 436 → mantidas (são regras PROIBINDO uso)
+
+**Watchdog 24h (#178):**
+`voice_agent/watchdog_lia.py` atualizado:
+- Removida restrição seg-sáb 8h-18h — `_eh_horario_comercial()` sempre `True` por default
+- Toggle reversa: `WATCHDOG_RESTRINGIR_HORARIO=1` reativa janela antiga
+- Novo nível CRÍTICO: `SILENCIO_CRITICO_SEG = 30 * 60` (30 min)
+- Configurável via env `WATCHDOG_SILENCIO_CRITICO_SEG`
+
+**Pytest:** `tests/test_watchdog_24h.py` — 6 cenários. **64/64 total verde.**
+
+---
+
 ### 11-T. Autonomia total — Cron semanal + Kommo webhook trigger (04/06/2026, tasks #218/#219)
 
 **Origem:** Fábio: "chega de babá. autonomia total".

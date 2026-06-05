@@ -352,26 +352,39 @@ def _agenda_block(ctx: Optional[dict]) -> str:
         "\n  • \"Nossa equipe vai te retornar com os horários\""
         "\nQualquer uma dessas frases = bug grave. A agenda ESTÁ na sua frente."
         "\n"
-        "\n⚠️ REGRA DE OURO — PRINCÍPIO DA ESCASSEZ:"
-        "\n• Ofereça ao paciente NO MÁXIMO 2 horários por vez."
-        "\n• NUNCA liste vários horários nem 'a agenda toda'. Despejar muitas"
-        "\n  vagas passa a impressão de clínica vazia, destrói o senso de"
-        "\n  oportunidade e derruba a conversão — é um erro grave."
-        "\n• Escolha os 2 horários que MAIS combinam com a preferência de"
-        "\n  dia/turno que o paciente já deu. Se ele ainda não deu preferência,"
-        "\n  pergunte o melhor dia/turno ANTES de oferecer."
-        "\n• Se a preferência exata do paciente NÃO tiver vaga na lista,"
-        "\n  ofereça MESMO ASSIM duas alternativas concretas: (a) o dia LIVRE"
-        "\n  mais próximo da preferência dele (mesmo dia da semana ou +1),"
-        "\n  e (b) outro dia com várias vagas — isso ajuda a preencher a"
-        "\n  agenda. NUNCA simplesmente diga 'não tenho disponibilidade';"
-        "\n  a Lia sempre oferece o próximo caminho a partir desta lista."
-        "\n• Só se o paciente recusar os 2, aí ofereça outros 2."
+        "\n⚠️ REGRA DE OURO — OFERTA IMEDIATA DE 2 SLOTS (revisão 03/06/2026):"
+        "\n• Assim que houver agenda + médico + unidade definidos no ctx,"
+        "\n  OFEREÇA imediatamente 2 horários concretos."
+        "\n• **PROIBIDO perguntar 'qual turno', 'qual período do turno',"
+        "\n  'qual dia da semana' ANTES de oferecer.** Erro grave de UX —"
+        "\n  paciente quer ver opções, não responder formulário."
+        "\n• Escolha os 2 slots assim:"
+        "\n   (a) Se houver vaga em MANHÃ (hora < 12:00) e TARDE (≥ 12:00)"
+        "\n       dentro dos próximos dias úteis, escolha 1 de cada turno"
+        "\n       — o mais próximo possível. (Caso ideal para Alice/Carol,"
+        "\n       Sabrina, etc. — atende qualquer agenda do paciente.)"
+        "\n   (b) Se só houver de um turno, escolha os 2 mais próximos"
+        "\n       desse turno."
+        "\n   (c) Se já há `dia_turno` na preferência do paciente vinda do"
+        "\n       Kommo, use isso como filtro extra."
+        "\n• Formato humano da oferta (mantenha esse padrão):"
+        "\n     'Tenho 2 horários abertos com a {{MÉDICO}}, {{UNIDADE}}:'"
+        "\n     '1️⃣ {{dia}} ({{data}}) às {{hora1}}'"
+        "\n     '2️⃣ {{dia}} ({{data}}) às {{hora2}}'"
+        "\n     'Algum desses cabe pra você? Se preferir outro dia/horário,"
+        "\n     me diz que ajusto.'"
+        "\n• NUNCA liste a agenda toda. NUNCA mais de 2 horários por mensagem."
+        "\n• Só se o paciente recusar os 2 OU pedir dia/turno específico,"
+        "\n  AÍ SIM pergunte: 'Qual dia da semana e turno fica melhor?' —"
+        "\n  e use a resposta pra escolher 2 novos slots na próxima rodada."
+        "\n• Se paciente pedir DIA/HORA específicos (ex: 'sexta às 9h'):"
+        "\n  procure na lista abaixo. Se tiver, oferece esse. Se NÃO tiver,"
+        "\n  diga isso E ofereça o mais próximo da preferência dele."
         "\n• Nunca invente nem prometa horário fora desta lista."
         "\nEsta seção TEM PRECEDÊNCIA: havendo horário, o agente OFERECE"
-        "\n(no máximo 2), não apenas coleta a preferência. Depois que o"
-        "\npaciente escolher, confirme os dados e informe que a recepção"
-        "\nfinaliza o agendamento."
+        "\n(2 slots em formato 1️⃣/2️⃣), não pergunta turno/período. Depois"
+        "\nque o paciente escolher, confirme os dados e informe que a"
+        "\nrecepção finaliza o agendamento."
         f"\n{chr(10).join(linhas)}"
         "\n----------------------------------------------------------------"
     )
@@ -715,6 +728,94 @@ def _viola_oferta_agenda(text: str, has_agenda: bool) -> bool:
     if not has_agenda or not text:
         return False
     return any(p.search(text) for p in _FAKE_AGENDA_LOOKUP)
+
+
+# ------------------------------------------------------------------
+# Filtro: perguntou turno/período quando tinha agenda real (Alice 21256807)
+# ------------------------------------------------------------------
+# Origem: lead 21256807 Alice (03/06/2026 22:09). Tudo já preenchido
+# (nome, idade, médico, unidade, convênio, motivo) — Lia perguntou
+# "Manhã ou Tarde? Início, Meio ou Fim do turno?" em vez de oferecer
+# 2 slots reais. Fluxo aprovado por Fábio: ofertar primeiro, perguntar
+# preferência só se paciente recusar os 2 ou pedir dia/hora específicos.
+
+_PERGUNTA_TURNO_PERIODO_PATTERNS = [
+    re.compile(r"manh[ãa]\s+ou\s+tarde", re.IGNORECASE),
+    # "qual seu turno", "qual é o turno", "qual o turno", etc.
+    re.compile(r"qual\b.{0,20}\b(turno|per[ií]odo)\b", re.IGNORECASE | re.DOTALL),
+    re.compile(r"prefer[êe]ncia\s+de\s+(turno|per[ií]odo|dia)", re.IGNORECASE),
+    re.compile(r"in[ií]cio[,\s].{0,12}meio.{0,12}fim", re.IGNORECASE | re.DOTALL),
+    re.compile(r"per[ií]odo:\s*(in[ií]cio|meio|fim)", re.IGNORECASE),
+    re.compile(r"\bturno:\s*(manh[ãa]|tarde)", re.IGNORECASE),
+]
+
+
+def _viola_pergunta_turno_periodo_com_agenda(
+    text: str,
+    ctx: Optional[dict],
+) -> bool:
+    """True se Lia perguntou turno/período TENDO agenda real no ctx.
+
+    Política Blink (03/06/2026): com agenda em mãos, OFERECER 2 slots
+    (1 manhã + 1 tarde quando possível) ANTES de perguntar preferência.
+    """
+    if not text:
+        return False
+    has_agenda = bool((ctx or {}).get("agenda"))
+    if not has_agenda:
+        return False
+    return any(p.search(text) for p in _PERGUNTA_TURNO_PERIODO_PATTERNS)
+
+
+def _selecionar_2_slots_inteligente(agenda: list) -> list:
+    """Pega 2 slots ótimos: 1 manhã + 1 tarde se possível; senão 2 do mesmo turno.
+
+    Manhã = hora < 12:00. Tarde = hora >= 12:00.
+    Prioriza datas mais próximas (assume agenda já ordenada cronologicamente).
+    """
+    if not agenda:
+        return []
+
+    def _hora_int(s: dict) -> int:
+        try:
+            return int(str(s.get("hora", "00:00"))[:2])
+        except (ValueError, TypeError):
+            return 0
+
+    manha = [s for s in agenda if _hora_int(s) < 12]
+    tarde = [s for s in agenda if _hora_int(s) >= 12]
+    if manha and tarde:
+        return [manha[0], tarde[0]]
+    return list(agenda[:2])
+
+
+def _gerar_oferta_2_slots(ctx: Optional[dict]) -> str:
+    """Constrói a mensagem humana com 2 slots (substituindo pergunta de turno)."""
+    agenda = (ctx or {}).get("agenda") or []
+    dois = _selecionar_2_slots_inteligente(agenda)
+    if not dois:
+        # Sem agenda — recai num fallback honesto.
+        return (
+            "Deixa eu reconferir a agenda real aqui e já volto com 2 horários "
+            "concretos pra você escolher. Me dá só 1 minuto."
+        )
+    known = ((ctx or {}).get("known") or {})
+    medico = (ctx or {}).get("medico") or known.get("medico") or "a médica"
+    unidade = known.get("unidade") or "a unidade combinada"
+    linhas = []
+    for i, s in enumerate(dois, start=1):
+        dia = s.get("dia_semana", "").capitalize() if s.get("dia_semana") else ""
+        dbr = s.get("data_br", "")
+        hora = s.get("hora", "")
+        emoji = "1️⃣" if i == 1 else "2️⃣"
+        prefixo = f"{dia} ({dbr})" if dia and dbr else dbr
+        linhas.append(f"{emoji} {prefixo} às {hora}")
+    return (
+        f"Tenho 2 horários abertos com a {medico}, {unidade}:\n\n"
+        + "\n".join(linhas)
+        + "\n\nAlgum desses cabe pra você? Se preferir outro dia/horário, "
+        "me diz que ajusto."
+    )
 
 
 # Padrões de cobrança de sinal/Pix — só são legítimos APÓS o paciente ter
@@ -1376,6 +1477,19 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             len(ctx.get("agenda", [])), text[:200],
         )
         return _FAKE_AGENDA_LOOKUP_FALLBACK
+
+    # 0-bis. PERGUNTA TURNO/PERÍODO COM AGENDA (lead 21256807 Alice, 03/06/2026)
+    # Tudo já preenchido + agenda real disponível → Lia perguntou
+    # "manhã ou tarde? início, meio ou fim?" em vez de oferecer 2 slots.
+    # Fluxo aprovado por Fábio: ofertar primeiro, perguntar só se recusar.
+    if _viola_pergunta_turno_periodo_com_agenda(text, ctx):
+        log.error(
+            "[FILTRO] PERGUNTA TURNO/PERIODO COM AGENDA — Lia perguntou "
+            "preferência quando tinha %d slots no ctx. Substituindo por "
+            "oferta direta de 2 slots. Texto: %r",
+            len(ctx.get("agenda", [])), text[:200],
+        )
+        return _gerar_oferta_2_slots(ctx)
 
     # 0c. ANTI-MENTIRA: Lia afirmou gravação no Medware (lead 24038029)
     # Blink Oftalmologia = Cosmoética. Lia NÃO pode mentir ao paciente.

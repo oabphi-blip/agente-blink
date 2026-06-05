@@ -53,7 +53,7 @@ NÃO chute o que o paciente quis dizer. NÃO responda de forma genérica.
 2. Pular para a etapa correspondente no funil Kommo (se houver).
 3. Anotar em N.STATUS o motivo do escalonamento ("convenio fora lista", "reclamação", "urgência").
 4. **Parar de enviar mensagens automáticas** até humano assumir.
-5. Se humano não responder em 10 min em horário comercial:
+5. Se humano não responder em 10 min:
    > "Nossa equipe está finalizando outros atendimentos e já te chama. Obrigado pela paciência."
 
 ### O que NUNCA fazer

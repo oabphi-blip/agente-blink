@@ -8,7 +8,11 @@ leads onde:
   "Paciente (WhatsApp):" / "💬" / contém número)
 - Faz mais de SILENCIO_MAX_SEG (default 5 min) sem outbound da Lia
 - IA está ATIVA (campo ATIVADO IA? != "Não ativado" / "Pausado")
-- É horário comercial BRT (seg-sáb 8-18h)
+
+Atualização 04/06/2026 (task #178):
+- Removida restrição horário comercial — Blink atende 24h
+- Adicionado nível CRÍTICO: >30min de silêncio = alerta com flag crítica
+- Worker varre ATIVAMENTE leads parados pós-silêncio extendido
 
 Dispara alerta Slack com link Kommo. Não move o lead automaticamente
 (princípio: tocar campo do lead = ação humana). Apenas alerta.
@@ -39,12 +43,9 @@ STATUS_LIA_DEVE_RESPONDER = [
     106563343,   # 1-ATENDIMENTO HUMANO (caso IA volte a assumir)
 ]
 
-SILENCIO_MAX_SEG = 5 * 60  # 5 min
+SILENCIO_MAX_SEG = 5 * 60  # 5 min — primeiro alerta
 SILENCIO_MAX_SEG_DEFAULT = SILENCIO_MAX_SEG
-
-# Janela comercial BRT
-HORA_INICIO = 8
-HORA_FIM = 18  # exclusive
+SILENCIO_CRITICO_SEG = 30 * 60  # 30 min — alerta CRÍTICO (task #178)
 
 REDIS_DEDUP_PREFIX = "blink:watchdog:alertado:"
 DEDUP_TTL = 30 * 60  # 30 min — pra alertar de novo se persistir
@@ -83,14 +84,30 @@ def _silencio_max() -> int:
 
 
 def _eh_horario_comercial(now: Optional[datetime] = None) -> bool:
-    """Seg-Sáb, 8h-18h BRT (UTC-3)."""
-    if now is None:
-        brt = timezone(timedelta(hours=-3))
-        now = datetime.now(brt)
-    # Domingo = 6
-    if now.weekday() == 6:
-        return False
-    return HORA_INICIO <= now.hour < HORA_FIM
+    """Blink atende 24h — sempre retorna True (task #178, 04/06/2026).
+
+    Mantida por compatibilidade com chamadores antigos. Toggle reversa
+    via env `WATCHDOG_RESTRINGIR_HORARIO=1` se quiser voltar à janela
+    seg-sáb 8h-18h por algum motivo.
+    """
+    if os.getenv("WATCHDOG_RESTRINGIR_HORARIO", "0") == "1":
+        if now is None:
+            brt = timezone(timedelta(hours=-3))
+            now = datetime.now(brt)
+        if now.weekday() == 6:
+            return False
+        return 8 <= now.hour < 18
+    return True
+
+
+def _silencio_critico_seg() -> int:
+    """Configurável via env `WATCHDOG_SILENCIO_CRITICO_SEG`."""
+    try:
+        return int(os.getenv(
+            "WATCHDOG_SILENCIO_CRITICO_SEG", str(SILENCIO_CRITICO_SEG),
+        ))
+    except (TypeError, ValueError):
+        return SILENCIO_CRITICO_SEG
 
 
 def _ia_ativa(notas: list[dict]) -> bool:

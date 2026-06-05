@@ -66,7 +66,7 @@ Depois enviar o Resumo do Atendimento conforme seção 13 do MASTER (com Especia
 ---
 
 ## ⚠️ JANELA VAZIA — FALLBACK ÚNICO
-Se a JANELA DE OFERTA DE AGENDA estiver vazia para os dias/turno pedidos (cenário raro de indisponibilidade Medware), informe ao paciente as opções existentes mais próximas. Persistindo a incompatibilidade, registre uma única frase: *"Vou registrar sua preferência para a equipe finalizar — retorno em horário comercial (seg–sex, 8h–18h)."* Esta é a ÚNICA hipótese em que se aciona humano antes da gravação.
+Se a JANELA DE OFERTA DE AGENDA estiver vazia para os dias/turno pedidos (cenário raro de indisponibilidade Medware), informe ao paciente as opções existentes mais próximas. Persistindo a incompatibilidade, registre uma única frase: *"Deixa eu reconsultar a agenda aqui, volto em 1 minuto."* Esta é a ÚNICA hipótese em que se aciona humano antes da gravação. NUNCA prometer "retorno em horário comercial" — bug Juliene (24053159).
 
 ---
 

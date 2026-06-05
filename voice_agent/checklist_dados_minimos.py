@@ -10,11 +10,18 @@ Defesa preventiva: ANTES de oferecer slot, validar checklist. Se
 faltar dado, injetar bloco PRÉ-AGENDA no prompt forçando coleta do
 campo específico que falta.
 
-Os 4 dados mínimos pra `salvar_agendamento` no Medware:
-  1. nome_completo_paciente (≥ 3 tokens fortes)
-  2. data_nascimento (formato date)
-  3. cpf_paciente OU cpf_responsavel (11 dígitos válidos)
-  4. convenio_definido ("Não se aplica" OU operadora mapeada)
+Dados mínimos pra `salvar_agendamento` no Medware:
+  1. nome_completo_paciente (≥ 3 tokens fortes) — SEMPRE
+  2. data_nascimento (formato date) — SEMPRE
+  3. convenio_definido ("Não se aplica" OU operadora mapeada) — SEMPRE
+  4. cpf_paciente OU cpf_responsavel — APENAS se convenio == "Particular"
+     (i.e. "Não se aplica" no Kommo). Para convênio aceito o CPF NÃO é
+     mais exigido — paciente é identificado pela carteirinha do plano.
+
+Mudança 02/06/2026 (Fábio): "para não burocratizar vamos retirar a
+necessidade de exigência de cpf para paciente com convênios aceitos.
+Vamos deixar somente para pacientes sem convênio." — bug Eva Massimo
+Agrelis lead 22527166: Lia pediu CPF mesmo com Plan Assiste MPF.
 
 `telefone` está implícito (já temos do canal WhatsApp).
 """
@@ -90,29 +97,59 @@ def convenio_definido_ok(convenio: Optional[str]) -> bool:
 # Checklist agregado
 # ---------------------------------------------------------------------------
 
+_CONVENIOS_PARTICULAR = frozenset({
+    "particular",
+    "nao se aplica",
+    "não se aplica",
+    "sem convenio",
+    "sem convênio",
+})
+
+
+def _eh_particular(convenio: Optional[str]) -> bool:
+    """True quando o paciente NÃO tem plano de saúde (Particular).
+
+    A clínica precisa do CPF do paciente nesse caso pra emitir nota
+    fiscal direto. Quando há plano, a operadora identifica o paciente
+    pela carteirinha — CPF deixa de ser pré-requisito de agendamento.
+    """
+    if not convenio:
+        return False  # convênio indefinido NÃO conta como particular
+    return str(convenio).strip().lower() in _CONVENIOS_PARTICULAR
+
+
 @dataclass(frozen=True)
 class ChecklistResultado:
-    """Resultado da verificação dos 4 dados mínimos.
+    """Resultado da verificação dos dados mínimos.
 
-    `pronto_para_oferecer_slot` = True só quando os 4 estão OK.
-    `campos_pendentes` = lista de strings legíveis ('nome completo',
-    'data de nascimento', etc.) — usada no prompt pra Lia coletar
-    EXATAMENTE o que falta, sem repergunta de dado já presente.
+    Regra (revisão 02/06/2026):
+      - CPF é obrigatório APENAS quando `convenio == Particular`
+        ("Não se aplica" no Kommo).
+      - Pra qualquer convênio aceito (Plan Assiste, TJDFT, STM, …)
+        o CPF não bloqueia oferta de slot. `cpf_exigido = False`
+        e `cpf_ok` é informativo (não entra em
+        `pronto_para_oferecer_slot`).
+
+    `pronto_para_oferecer_slot` = True quando nome + data_nasc +
+    convênio definidos, MAIS o CPF SE for particular.
+
+    `campos_pendentes` = lista de strings legíveis usadas no prompt
+    pra Lia coletar EXATAMENTE o que falta.
     """
     nome_completo_ok: bool
     data_nascimento_ok: bool
     cpf_ok: bool
     convenio_definido_ok: bool
+    cpf_exigido: bool = True  # default True pra retrocompat; verificar_dados_minimos seta corretamente
     campos_pendentes: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def pronto_para_oferecer_slot(self) -> bool:
-        return (
-            self.nome_completo_ok
-            and self.data_nascimento_ok
-            and self.cpf_ok
-            and self.convenio_definido_ok
-        )
+        if not (self.nome_completo_ok and self.data_nascimento_ok and self.convenio_definido_ok):
+            return False
+        if self.cpf_exigido and not self.cpf_ok:
+            return False
+        return True
 
     @property
     def total_pendentes(self) -> int:
@@ -157,22 +194,27 @@ def verificar_dados_minimos(known: Optional[dict]) -> ChecklistResultado:
     conv = k.get("convenio")
     conv_ok = convenio_definido_ok(conv)
 
+    # CPF só é exigido quando paciente é Particular.
+    # Convênio definido E NÃO-particular => CPF dispensável (Fábio 02/06/2026).
+    cpf_exigido = bool(conv_ok and _eh_particular(conv))
+
     # Monta lista de pendentes em ordem de coleta natural
     pendentes = []
     if not nome_ok:
         pendentes.append("nome completo do paciente")
     if not data_ok:
         pendentes.append("data de nascimento")
-    if not c_ok:
-        pendentes.append("CPF do paciente (ou do responsável, se for menor)")
     if not conv_ok:
         pendentes.append("convênio (particular ou nome da operadora)")
+    if cpf_exigido and not c_ok:
+        pendentes.append("CPF do paciente (ou do responsável, se for menor)")
 
     return ChecklistResultado(
         nome_completo_ok=nome_ok,
         data_nascimento_ok=data_ok,
         cpf_ok=c_ok,
         convenio_definido_ok=conv_ok,
+        cpf_exigido=cpf_exigido,
         campos_pendentes=tuple(pendentes),
     )
 

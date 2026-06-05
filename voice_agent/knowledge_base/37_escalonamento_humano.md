@@ -30,7 +30,7 @@ com isso. É só um instante, certo? 💙
 4.2. Pular para a etapa correspondente no funil Kommo (se houver).
 4.3. Anotar em **N.STATUS** o motivo do escalonamento ("convênio fora lista", "reclamação", "urgência" etc.).
 4.4. **Parar de enviar mensagens automáticas** até humano assumir.
-4.5. Se humano não responder em 10 min em horário comercial, enviar mensagem padrão:
+4.5. Se humano não responder em 10 min, enviar mensagem padrão:
 > "Nossa equipe está finalizando outros atendimentos e já te chama. Obrigado pela paciência."
 
 ## 5. O QUE NUNCA FAZER

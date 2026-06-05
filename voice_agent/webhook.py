@@ -3986,6 +3986,64 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # LISTAR TEMPLATES META (task #221 — 04/06/2026)
+    # Pra debugar nome exato + status dos templates aprovados
+    # ================================================================
+    @app.get("/admin/listar-templates-meta")
+    def admin_listar_templates_meta(request: Request) -> JSONResponse:
+        """Lista todos os templates da WABA com nome/status/categoria.
+
+        Usa wa_cloud.list_templates() que chama Meta Graph API.
+        Útil pra descobrir nome EXATO de templates aprovados quando
+        send_template retorna 132001 (template não existe).
+
+        Query params opcionais:
+          - filtro (str): substring case-insensitive no nome
+          - status (str): APPROVED, PENDING, REJECTED, PAUSED
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        if not wa_cloud:
+            return JSONResponse(
+                {"error": "wa_cloud indisponível"}, status_code=500,
+            )
+
+        try:
+            templates = wa_cloud.list_templates()
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                {"error": f"list_templates falhou: {exc}"},
+                status_code=500,
+            )
+
+        q = request.query_params
+        filtro = (q.get("filtro") or "").lower()
+        status_filtro = (q.get("status") or "").upper()
+
+        if filtro:
+            templates = [
+                t for t in templates
+                if filtro in (t.get("name") or "").lower()
+            ]
+        if status_filtro:
+            templates = [
+                t for t in templates
+                if (t.get("status") or "").upper() == status_filtro
+            ]
+
+        return JSONResponse({
+            "ok": True,
+            "total": len(templates),
+            "templates": templates,
+        })
+
+    # ================================================================
     # WEBHOOK KOMMO TRIGGER (task #219 — 04/06/2026)
     # ================================================================
     @app.post("/admin/kommo-trigger-disparar")
