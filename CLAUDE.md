@@ -89,10 +89,16 @@ Detalhes em `lia-atendimento-blink/memoria/bugs-licoes/etapa-a-classificar-e-ren
 | Field ID | Nome | Uso |
 |---|---|---|
 | 1255723 | `1.DIA CONSULTA` (date_time) | ja_agendado camada 2 — Lia detecta retrocesso |
-| (vários) | `ATIVADO IA?` | controla reativação (Solicitado/Ativado/Não ativado) |
+| 1260817 | `ATIVADO IA?` (select) | controla reativação (Ativado/Solicitado/Desativado) |
+| 853206 | `CONVÊNIO` (select) | usado pelo build_message + checklist |
+| 1175268 | `Ñ ACEITO CONVÊNIO` | flag pra Inas/SulAmerica/Bradesco/etc |
+| 1245125 | `UNIDADE` (select) | Asa Norte / Águas Claras |
+| 1256257 | `MÉDICOS` (multiselect) | Karla / Fabrício |
 | (vários) | `FONTE_CAPTACAO` | origem do lead (Meta/Indicação/etc) |
-| (vários) | `CONVENIO` | usado pelo build_message |
 | (vários) | `NO-SHOW COUNT` | sanção progressiva |
+| **1260854** | **`STATUS CONVERSA` (select, 15 valores)** | **task #216 — onde a conversa parou** |
+| **1260856** | **`ULTIMA MSG OUTBOUND` (textarea)** | **task #216 — último outbound Lia/humano** |
+| **1260858** | **`PROXIMA ACAO` (select, 12 valores)** | **task #216 — o que precisa acontecer** |
 
 Campos sinal (em criação, task #49):
 - SINAL STATUS · SINAL VALOR · SINAL DATA PIX · SINAL COMPROVANTE
@@ -951,6 +957,20 @@ Sessão 28/05/2026 acumulou 5+ erros do mesmo tipo. Padrão:
    ded7b3e/c4e6e4e. Token GitHub `ghp_7NNf...` está em scripts e em
    `CLAUDE.md` deste projeto. **Regra:** antes de cada commit, varrer
    diff por strings que casam regex CPF (`\d{11}`) ou token (`ghp_[A-Za-z0-9]{36}`).
+
+---
+
+## 16-A. PROTOCOLO ANTI-OMISSÃO E ANTI-REPETIÇÃO (04/06/2026)
+
+**OBRIGATÓRIO**: ler `lia-atendimento-blink/memoria/protocolo-claude-cowork.md` no início de toda sessão Cowork. Esse arquivo contém:
+
+- **Checklist 10 itens pré-ação operacional** (Boeing rule) — verificar TODAS antes de enviar msg WhatsApp / gravar Medware / ofertar slot
+- **Anti-desculpability** — regras de comunicação (não dizer "vou consultar e volto" sem voltar, não pedir Fábio rodar curl quando posso usar MCP, etc)
+- **Bugs C-01 a C-07 indexados** — bugs MEUS (Claude Cowork operando), não da Lia. NÃO REPETIR.
+- **Protocolo de indexação** — toda vez que cometo bug operacional, adiciono entrada Bug C-NN ANTES de seguir
+- **Ritual de início de sessão** — leitura obrigatória
+
+Origem: Fábio 04/06/2026 — "Já passou o tempo de errar a mesma coisa. Demonstra falta de qualidade." Zero tolerância pra bugs repetidos.
 
 ---
 
