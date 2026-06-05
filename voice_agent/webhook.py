@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from . import followup
@@ -108,6 +109,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "Webhook que processa mensagens do WhatsApp (texto + áudio) "
             "com Whisper + Claude Sonnet/Haiku."
         ),
+    )
+
+    # CORS — necessário pros artifacts Cowork chamarem /admin/* via fetch
+    # do navegador. Endpoints /admin/* já são protegidos por WEBHOOK_SECRET,
+    # então liberar GET/POST de qualquer origem é seguro.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+        allow_credentials=False,
     )
 
     # Arquivos estáticos — imagens de cabeçalho de templates do WhatsApp etc.
@@ -4120,6 +4132,135 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             dry_run=dry_run,
         )
         return JSONResponse(resultado)
+
+    # ================================================================
+    # DEDUP ASSÍNCRONO COM BARRA DE PROGRESSO (task #229 — 05/06/2026)
+    # Fábio pediu pra rodar em background + poder fazer outras coisas.
+    # ================================================================
+    @app.post("/admin/dedup-async-start")
+    @app.get("/admin/dedup-async-start")
+    def admin_dedup_async_start(request: Request) -> JSONResponse:
+        """Dispara dedup em background. Retorna job_id pra polling.
+
+        Query params:
+          - dry_run (default true)
+          - max_leads (default 500, max 1000)
+          - status_ids (CSV de etapas; default = STATUS_IDS_DEDUP_SEGUROS)
+          - status_destino (default 143)
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        from voice_agent.dedup_job import iniciar_job
+        from voice_agent.deduplicar_leads import STATUS_IDS_DEDUP_SEGUROS
+
+        q = request.query_params
+
+        def _bool(name, default):
+            v = (q.get(name) or "").lower()
+            if v in ("1", "true", "yes", "on"):
+                return True
+            if v in ("0", "false", "no", "off"):
+                return False
+            return default
+
+        try:
+            max_leads = min(int(q.get("max_leads") or "500"), 1000)
+        except ValueError:
+            max_leads = 500
+        try:
+            status_destino = int(q.get("status_destino") or "143")
+        except ValueError:
+            status_destino = 143
+
+        sids_raw = (q.get("status_ids") or "").strip()
+        if sids_raw:
+            try:
+                sids = [
+                    int(x) for x in sids_raw.split(",")
+                    if x.strip().isdigit()
+                ]
+            except ValueError:
+                sids = list(STATUS_IDS_DEDUP_SEGUROS)
+        else:
+            sids = list(STATUS_IDS_DEDUP_SEGUROS)
+
+        dry_run = _bool("dry_run", True)
+        kommo_client = getattr(pipeline, "kommo", None)
+        redis_cli = getattr(pipeline, "_redis", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+        if redis_cli is None:
+            return JSONResponse(
+                {"error": "redis indisponível — sem como rastrear job"},
+                status_code=500,
+            )
+
+        job_id = iniciar_job(
+            redis_cli, kommo_client,
+            pipeline_id=8601819,
+            status_ids=sids,
+            status_destino=status_destino,
+            max_leads=max_leads,
+            dry_run=dry_run,
+        )
+        return JSONResponse({
+            "ok": True,
+            "job_id": job_id,
+            "status_url": f"/admin/dedup-async-status?job_id={job_id}",
+            "params": {
+                "status_ids": sids, "max_leads": max_leads,
+                "dry_run": dry_run, "status_destino": status_destino,
+            },
+        })
+
+    @app.get("/admin/dedup-async-status")
+    def admin_dedup_async_status(request: Request) -> JSONResponse:
+        """Devolve estado atual do job. Usado pelo artifact via polling.
+
+        Query params:
+          - job_id (obrigatório)
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        from voice_agent.dedup_job import get_status, calcular_eta
+        job_id = (request.query_params.get("job_id") or "").strip()
+        if not job_id:
+            return JSONResponse({"error": "job_id obrigatório"}, status_code=400)
+
+        redis_cli = getattr(pipeline, "_redis", None)
+        if redis_cli is None:
+            return JSONResponse(
+                {"error": "redis indisponível"}, status_code=500,
+            )
+
+        estado = get_status(redis_cli, job_id)
+        if not estado:
+            return JSONResponse(
+                {"error": "job_id não encontrado ou expirou"}, status_code=404,
+            )
+
+        # adiciona ETA
+        estado["eta_segundos"] = calcular_eta(estado)
+        if estado.get("iniciado_em"):
+            estado["decorrido_segundos"] = max(
+                0,
+                int(__import__("time").time()) - int(estado["iniciado_em"]),
+            )
+        return JSONResponse(estado)
 
     # ================================================================
     # LISTAR TEMPLATES META (task #221 — 04/06/2026)

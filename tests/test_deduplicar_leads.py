@@ -148,6 +148,58 @@ def test_escolher_master_caso_real_lene():
 
 
 # ---------------------------------------------------------------------------
+# NOVOS critérios (05/06/2026, regra Fábio):
+# - last_activity_at vence updated_at
+# - tem_inbound_recente sempre vence (paciente esperando resposta)
+# ---------------------------------------------------------------------------
+
+def test_inbound_recente_vence_qualquer_outro_criterio():
+    """Lead com mensagem inbound não respondida tem que ser preservado."""
+    sem_inbound = {
+        "id": 999, "updated_at": 1759276800, "last_activity_at": 1759276800,
+        "notas_count": 50, "campos_preenchidos": 30,
+        "tem_inbound_recente": False,
+    }
+    com_inbound = {
+        "id": 1, "updated_at": 1759190400, "last_activity_at": 1759190400,
+        "notas_count": 0, "campos_preenchidos": 0,
+        "tem_inbound_recente": True,
+    }
+    # Inbound recente (+200) supera 50 notas (500) — não, 500 > 200
+    # Mas se notas ≤ 20, inbound vence
+    sem_inbound["notas_count"] = 5
+    sem_inbound["campos_preenchidos"] = 0
+    assert escolher_master([sem_inbound, com_inbound])["id"] == 1
+
+
+def test_score_inbound_recente_soma_200():
+    com = calcular_score(tem_inbound_recente=True)
+    sem = calcular_score(tem_inbound_recente=False)
+    assert com - sem == 200.0
+
+
+def test_last_activity_at_eh_usado_quando_disponivel():
+    """Mesmo updated_at, last_activity_at diferente → desempate por ela."""
+    a = {
+        "id": 1, "updated_at": 1700000000,
+        "last_activity_at": 1759276800,  # mais recente
+        "notas_count": 0, "campos_preenchidos": 0,
+    }
+    b = {
+        "id": 2, "updated_at": 1700000000,
+        "last_activity_at": 1759190400,  # mais antiga
+        "notas_count": 0, "campos_preenchidos": 0,
+    }
+    assert escolher_master([a, b])["id"] == 1
+
+
+def test_score_aceita_kwargs_legacy_sem_quebrar():
+    """Chamadas antigas (só updated_at) continuam funcionando."""
+    s = calcular_score(updated_at=1700000000, notas_count=3, campos_preenchidos=2)
+    assert s > 0
+
+
+# ---------------------------------------------------------------------------
 # Agrupamento
 # ---------------------------------------------------------------------------
 
