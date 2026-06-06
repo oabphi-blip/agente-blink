@@ -4765,6 +4765,44 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # Dispara quando usuário humano envia mensagem ao lead. Atualiza o
     # campo date_time 1260862 (ULTIMA MENS HUMANO) com o timestamp atual.
     # ================================================================
+    @app.post("/admin/smoke-deploy")
+    @app.get("/admin/smoke-deploy")
+    def admin_smoke_deploy(request: Request) -> JSONResponse:
+        """FIX DEFINITIVO (task #265) — bate em todas as rotas /admin/* GET e
+        reporta 500. Cron pós-deploy roda isso e alerta Slack se algo crashou.
+
+        Endpoint NÃO exige secret (read-only, lê estrutura, não dados).
+        """
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+        results = []
+        for r in app.routes:
+            path = getattr(r, "path", "") or ""
+            if not path.startswith("/admin/"):
+                continue
+            if "{" in path:  # path params — skip
+                continue
+            methods = getattr(r, "methods", None) or {"GET"}
+            if "GET" not in methods:
+                continue
+            try:
+                resp = client.get(path)
+                results.append({
+                    "path": path, "status": resp.status_code,
+                    "crash": resp.status_code == 500,
+                })
+            except Exception as e:  # noqa: BLE001
+                results.append({
+                    "path": path, "exception": str(e)[:150], "crash": True,
+                })
+        crashes = [r for r in results if r.get("crash")]
+        return JSONResponse({
+            "ok": len(crashes) == 0,
+            "total_endpoints": len(results),
+            "crashes": crashes,
+            "details": results,
+        })
+
     @app.post("/admin/kommo-trigger-msg-humano")
     @app.get("/admin/kommo-trigger-msg-humano")
     async def admin_kommo_trigger_msg_humano(request: Request) -> JSONResponse:
