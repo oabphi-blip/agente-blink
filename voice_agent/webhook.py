@@ -3567,8 +3567,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         Retorna contadores brutos + taxas calculadas + alarmes ativos.
         """
-        if not _check_admin_secret(request):
-            return JSONResponse({"erro": "unauthorized"}, status_code=401)
+        if settings.webhook_secret:
+            _got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if _got != settings.webhook_secret:
+                return JSONResponse({"erro": "unauthorized"}, status_code=401)
         try:
             from . import metricas_funcionamento as mf
             redis_c = getattr(pipeline, "_redis", None) if pipeline else None
@@ -3589,8 +3594,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         Chamado por cron interno (a cada 1h) OU manualmente.
         Idempotente: dedup Redis 1h por alarme pra não floodar Slack.
         """
-        if not _check_admin_secret(request):
-            return JSONResponse({"erro": "unauthorized"}, status_code=401)
+        if settings.webhook_secret:
+            _got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if _got != settings.webhook_secret:
+                return JSONResponse({"erro": "unauthorized"}, status_code=401)
         try:
             from . import metricas_funcionamento as mf
             import os as _os
@@ -3652,8 +3662,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         Retorna detalhes pra ação humana imediata.
         """
-        if not _check_admin_secret(request):
-            return JSONResponse({"erro": "unauthorized"}, status_code=401)
+        if settings.webhook_secret:
+            _got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if _got != settings.webhook_secret:
+                return JSONResponse({"erro": "unauthorized"}, status_code=401)
         if kommo_client is None:
             return JSONResponse({"erro": "kommo_indisponivel"}, status_code=500)
         try:
