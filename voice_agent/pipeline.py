@@ -108,6 +108,36 @@ class VoicePipeline:
         # responde a TODOS os números (soft launch encerrado). O bloco de
         # bloqueio por whitelist foi removido de propósito.
 
+        # 0-B) LOCK CROSS-RAJADA (Bug #183, casos Kamila/Iara/Janeide 02/06/2026)
+        # Pacientes mandam 5 mensagens em 3s. Sem lock, cada inbound dispara
+        # um turn paralelo gerando rajadas redundantes ("ainda buscando..." 2x).
+        # Estratégia: lock NX 30s por conversation_key. Se já existe lock,
+        # descarta o request (a thread em andamento já processa o estado
+        # mais recente quando completar). Bypass via PIPELINE_LOCK_ENABLED=0.
+        import os as _os
+        if _os.environ.get("PIPELINE_LOCK_ENABLED", "1") == "1" and self._redis:
+            try:
+                lock_key = f"blink:lock_pipeline:{conversation_key}"
+                # TTL 8s = cobre processamento típico (3-5s) + margem. Patient
+                # legítimo que digita > 8s entre mensagens não é bloqueado.
+                lock_ttl = int(_os.environ.get("PIPELINE_LOCK_TTL", "8"))
+                lock_set = self._redis.set(
+                    lock_key, "1", nx=True, ex=lock_ttl,
+                )
+                if not lock_set:
+                    log.warning(
+                        "[pipeline-lock] convo=%s já travado — descartando "
+                        "inbound rajada", conversation_key,
+                    )
+                    return PipelineResult(
+                        transcript="", answer="", sent=False,
+                        model_used="", articles_used=[],
+                        error="conversation_locked",
+                    )
+            except Exception as e:  # noqa: BLE001
+                # Redis fora — log e segue sem lock (degradação segura).
+                log.warning("[pipeline-lock] falha redis: %s", e)
+
         # 1) Presença "digitando" (best-effort)
         if send_typing and reply_to_number:
             self.evolution.send_typing(reply_to_number)

@@ -1960,17 +1960,34 @@ class Responder:
             # Loop de tool_use — máximo 4 iterações pra evitar runaway
             messages_acc = list(messages)
             answer = ""
-            # FORÇA modelo a chamar tool quando ctx tem agenda real do Medware
-            # (ctx["agenda"] preenchido pelo pipeline). Sem isso, modelo
-            # ESCOLHE entre texto livre e tool, e na prática prefere texto
-            # ("Vou consultar..." sem nunca chamar tool — bug Sabrina, Kamila,
-            # Janeide, Iara, Keyla 02/06/2026 tarde).
-            # `tool_choice={"type":"any"}` força modelo a usar ALGUMA tool
-            # (geralmente oferecer_slot, que é a única que faz sentido nesse
-            # contexto).
+            # FORÇA tool ESPECÍFICA por estado FSM (upgrade 06/06/2026, task #183).
+            # Antes: `tool_choice={"type":"any"}` deixava modelo escolher tool.
+            # Agora: tool_choice={"type":"tool","name":"X"} amarra UMA tool por
+            # estado — modelo NÃO PODE escrever texto livre quando estado
+            # exige ação determinística.
+            # Bugs cobertos: Sabrina/Kamila/Janeide/Iara/Keyla (02/06 tarde),
+            # Alice (03/06 00:11 "vou consultar"), gravação Medware ausente 15d.
             _agenda_ctx = (caller_context or {}).get("agenda") or []
+            _estado_fsm = (
+                (caller_context or {}).get("fsm", {}).get("estado") or ""
+            )
+            _ja_agendado = (caller_context or {}).get("ja_agendado", False)
             _force_tool_kwargs: dict = {}
-            if _agenda_ctx and not (caller_context or {}).get("ja_agendado"):
+            # Mapa estado FSM → tool obrigatória
+            _TOOL_POR_ESTADO = {
+                "AGENDA": "oferecer_slot",
+                "CONFIRMACAO": "confirmar_dados_paciente",
+                "GRAVACAO": "gravar_agendamento_medware",
+            }
+            _tool_obrigatoria = _TOOL_POR_ESTADO.get(_estado_fsm)
+            if _tool_obrigatoria and not _ja_agendado:
+                # Estado FSM diz qual tool. Amarra exatamente essa.
+                _force_tool_kwargs["tool_choice"] = {
+                    "type": "tool", "name": _tool_obrigatoria,
+                }
+            elif _agenda_ctx and not _ja_agendado:
+                # Fallback: tem agenda real do Medware mas FSM não sinalizou
+                # estado → força qualquer tool (geralmente oferecer_slot).
                 _force_tool_kwargs["tool_choice"] = {"type": "any"}
             for _iter in range(4):
                 # Só força tool na 1ª iteração — depois deixa modelo escrever
