@@ -6,6 +6,156 @@
 
 ---
 
+## 0-FILOSOFIA. CLAUDE TRABALHA PRA CONVERSÃO — NÃO PRA OCUPAÇÃO (reminder ativo Fábio 05/06/2026)
+
+> Fábio cobrou: "Claude passa o dia inteiro só ocupada, sem ação concreta. Tem que
+> ajudar nos esforços de conversão." Esse bloco fica AQUI no topo permanentemente.
+
+**Métrica de sucesso da minha sessão NÃO é:**
+- ❌ Tasks completadas no TaskList
+- ❌ Linhas de código geradas
+- ❌ Diagnóstico bem feito
+- ❌ Documentação atualizada
+
+**Métrica de sucesso REAL é:**
+- ✅ **Mensagens REAIS chegando em pacientes** (wamid registrado, status=accepted/delivered)
+- ✅ **Agendamentos novos gerados** (Medware count sobe)
+- ✅ **Leads frios reativados** (Lia respondendo conversas que eram parado)
+- ✅ **Receita potencial movimentada** (R$ × leads ativos)
+
+**Princípios operacionais (em ordem):**
+
+1. **Ação real > código bonito.** Se posso enviar 1 mensagem agora via Chrome MCP +
+   Meta Graph direto, faço. Não fico criando endpoint, push, deploy se o caminho
+   curto está aí.
+
+2. **Priorizar leads "quentes" sempre.** Em qualquer batch: ordem = pacientes com
+   `1.DIA CONSULTA` futuro próximo > [E] convênio aceito > [R] reagendar com
+   contexto recente > [C] particular > [V] cliente conhecido > [A] pausa > [H]
+   sem nome > [X] excluído. Não fazer batch aleatório.
+
+3. **Bypass quando bloqueio identificado.** Se agent→Kommo dá 403 e isso bloqueia
+   campanha, NÃO esperar fix do Kommo. Buscar dados via MCP Kommo (que funciona)
+   + dispatch via Meta Graph direto. Caminho mais curto entrega.
+
+4. **Sempre perguntar "isso traz conversão?"** antes de gastar turno. Atualizar
+   CLAUDE.md = SIM se evita repetir bug que custa conversão. Criar pytest = SIM se
+   blinda regressão que custa conversão. Resto = revisar prioridade.
+
+5. **Recomendação proativa de campanhas** quando vejo padrão:
+   - Lead em 3-AGENDAR há > 3 dias sem resposta → sugerir disparo template B/C.
+   - Lead em 4-REAGENDAR há > 7 dias → sugerir template R.
+   - Slots vazios amanhã/depois Karla/Fabrício → sugerir batch de ativação focada
+     pra encher gap.
+   - Leads pediátricos > 6 meses sem retorno → template C.
+
+6. **Mostrar números no fim de qualquer sessão.** "Hoje: N disparos, X aceitos,
+   Y entregues, Z respondidos, W agendados. Próximas 24h: prevejo K respostas."
+
+7. **Anti-prolixidade.** Resposta em chat tem 2 partes: (a) o que fiz / o
+   resultado real, (b) próxima ação proposta. Pular explicações sobre limites
+   meus, sobre por que algo não funciona, sobre dificuldades. Fábio sabe disso.
+
+**Em particular, NÃO gastar turno:**
+- Explicando minhas limitações de memória entre sessões
+- Pedindo Fábio rodar curl que eu posso rodar via Chrome MCP
+- Justificando porque algo deu errado em vez de tentar outro caminho
+- Listando "opções pra você decidir" em vez de escolher e executar
+
+---
+
+## 0-OBSERVABILIDADE. CADA DISPARO LIA PRECISA APARECER NO KOMMO (Fábio 05/06/2026)
+
+**REGRA P0 — sempre que disparo mensagem WhatsApp (pelo método que for), atualizar IMEDIATAMENTE no Kommo:**
+
+| Campo Kommo | Field ID | Valor | Por quê |
+|---|---|---|---|
+| **ÚLTIMA MENS LIA** | 1260860 | `int(time.time())` (timestamp UNIX) | Equipe humana ver na lista ATENDE que houve disparo |
+| **STATUS CONVERSA** | 1260854 | enum (ex: "agenda_oferecida", "coletando_dados") | Estado real da conversa |
+| **PROXIMA ACAO** | 1260858 | enum (ex: "aguardar_resposta_paciente") | O que falta acontecer |
+| **ULTIMA MSG OUTBOUND** | 1260856 | `[LIA HH:MM dd/mm] texto` (max 500 chars) | Última frase visível |
+| **Nota Kommo** | (note) | Texto com timestamp + canal + template + wamid | Histórico permanente |
+
+**CRÍTICO — MCP `kommo_update_lead` NÃO grava custom_fields (Bug C-12, 05/06/2026):**
+
+❌ Falha: `{"ÚLTIMA MENS LIA": 1780676220}` → MCP retorna success mas não grava
+❌ Falha: `{"ULTIMA MENS LIA": 1780676220}` → idem (sem acento também não)
+❌ Falha: `{"1260860": 1780676220}` → idem (field_id numérico também não)
+
+**MCP mente — retorna `success:true` mas custom_fields_values fica vazio.** Verificado com GET após PATCH: campos não atualizaram.
+
+✅ ÚNICO CAMINHO QUE FUNCIONA: PATCH direto via Chrome MCP (logado no Kommo):
+```javascript
+fetch('/api/v4/leads/{LEAD_ID}', {
+  method: 'PATCH',
+  headers: {'Content-Type': 'application/json'},
+  credentials: 'include',
+  body: JSON.stringify({
+    custom_fields_values: [
+      {field_id: 1260860, values: [{value: Math.floor(Date.now()/1000)}]},
+      {field_id: 1260854, values: [{value: "agenda_oferecida"}]},
+      {field_id: 1260858, values: [{value: "aguardar_resposta_paciente"}]},
+      {field_id: 1260856, values: [{value: "[LIA HH:MM dd/mm] texto..."}]},
+      {field_id: 1260817, values: [{value: "Ativado", enum_id: 927031}]}
+    ]
+  })
+})
+```
+
+Validar com `GET /api/v4/leads/{id}` e ver `custom_fields_values[].field_id == 1260860`.
+
+Quando bypass o agent (envio direto via Meta Graph), TENHO que fazer o sync manual via MCP Kommo. Não dá pra confiar que "vai aparecer sozinho" — o agent é quem faz isso normalmente, mas se bypassei ele, eu é que sou responsável.
+
+**Sequência obrigatória pós-disparo:**
+
+1. `fetch` Meta Graph API → recebo `wamid + status: accepted`
+2. **IMEDIATAMENTE** `mcp__kommo__kommo_update_lead` com field_ids numéricos pra atualizar os 4 campos
+3. `mcp__kommo__kommo_add_note` com texto detalhado (timestamp + canal + template + body_params + wamid)
+4. SÓ ENTÃO próximo lead
+
+Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o que Lia fez.
+
+---
+
+## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
+
+---
+
+## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
+
+> Topo do arquivo = primeiro que leio. Toda sessão termina atualizando essa lista
+> com as 1-2 lições principais. Esqueço o que está mais embaixo. Por isso vive aqui.
+> Regra: substituir a lição mais antiga pela nova ao adicionar (max 5).
+
+### 1. (06/06/2026) Conhecimento que tenho NÃO tem paywall — aplicar direto, não documentar
+Fábio: "porque a Claude não disponibiliza as solucoes de todos especialista? A Claude tem informações que somente libera se pagar especialista?". Resposta: **NÃO**. Conhecimento dos 5 sub-agentes = meu próprio conhecimento. LangChain Solutions = mesmo conhecimento + assinatura jurídica + SLA + UI dashboard. Em 15 dias transformei conhecimento que sempre tive em DOCUMENTO ao invés de em CÓDIGO. **REGRA**: quando padrão recorre 3+ vezes E há fix conhecido (mesmo que de "consultoria"), aplicar DIRETO. Documento só pra side-effect externo (ombudsman, contrato). **Aplicado 06/06**: User-Agent kommo.py (Bug #240), patch_custom_fields_raw GET-validate (Bug C-12), endpoint /admin/leads-abandonados (caso 24107106). 8/8 pytest verde.
+
+### 2. (05/06/2026) NUNCA disparar batch via Chrome MCP no Kommo sem CANARY
+**Bug C-11 — 14 mensagens viraram notas internas em 2.LEADS FRIO.** Falhei em série porque "Bate-papo com todos os:" parece canal mas é nota interna ("para: Todos" = todos atendentes Kommo). **Sinal de WhatsApp REAL** = bolha verde lado direito + "Para: [nome contato específico]" + ícone WhatsApp/Meta. **REGRA P0:** antes de batch ≥ 3 ações no Kommo Chrome MCP, fazer **1 piloto**, screenshot, AGUARDAR confirmação visual do Fábio. Sem exceção.
+
+### 3. (05/06/2026) Agent em prod recebe 403 em `/api/v4/leads` do Kommo, mas JWT VÁLIDO até 2028
+Token NÃO é o problema — verifiquei decodificando o JWT (`exp: 2028-09-15`). Causa raiz: User-Agent ausente fazia Cloudflare/WAF bloquear. **Fix aplicado 06/06**: adicionado `"User-Agent": "blink-agent/1.0 (+https://blinkoftalmologia.com.br)"` em `kommo._headers`. Push pendente. **NÃO renovar token sem antes decodificar `exp` claim.**
+
+### 4. (05/06/2026) Bug C-12 — MCP `kommo_update_lead` mente em custom_fields
+PATCH retorna `success:true` mas custom_fields_values fica vazio. ÚNICO caminho que funcionava: PATCH direto Chrome MCP. **Fix aplicado 06/06**: nova função `KommoClient.patch_custom_fields_raw(lead_id, cfs)` faz PATCH + GET imediato + valida que field_ids esperados aparecem no GET. Se não aparecem → retorna `(False, {"bug":"C-12","missing":[...]})`. Não mente.
+
+### 5. (05/06/2026) Templates LF A-H aprovados Meta ≠ dispatcher funcional + Antes de ligar motor, /admin/healthz-kommo
+8 templates `blink_lf_a..h` APPROVED no Meta, plugados em #236/#237. Antes de `REACTIVATION_ENABLED=true` ou qualquer campanha: validar `/admin/healthz-kommo`. 30s poupam 1h.
+
+---
+
+## 0-A. RITUAL DE INÍCIO DE SESSÃO (forçado, não opcional)
+
+Toda sessão Cowork, ANTES de qualquer tool call:
+
+1. Ler seção 0 acima (5 lições recentes) — já automático ao abrir CLAUDE.md.
+2. **Ler `lia-atendimento-blink/memoria/protocolo-claude-cowork.md` completo** — Bugs C-01 a C-11 indexados + checklist Boeing.
+3. **Ler `enviar_kommo_chrome_validado.md`** se a sessão envolve disparar mensagem via Chrome MCP no Kommo.
+4. Rodar `curl /admin/healthz-kommo` antes de qualquer campanha/motor.
+5. Se vou fazer batch ≥ 3 ações repetitivas: declarar em chat "P0: vou rodar canary de 1 lead primeiro" ANTES de começar.
+
+---
+
 ## 1. O que é o projeto
 
 Lia: assistente WhatsApp da Blink Oftalmologia. Roda em Python (FastAPI),

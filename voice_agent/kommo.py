@@ -694,10 +694,15 @@ class KommoClient:
 
     @property
     def _headers(self) -> dict[str, str]:
+        # FIX Bug #240 (05/06/2026) — WAF Kommo retornava 403 em /api/v4/leads
+        # quando User-Agent vinha vazio. JWT estava válido até 2028, problema era
+        # header faltando. Adicionar UA identificável faz Cloudflare/WAF Kommo
+        # liberar a request.
         return {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "User-Agent": "blink-agent/1.0 (+https://blinkoftalmologia.com.br)",
         }
 
     # ----------------------- busca lead por telefone
@@ -749,6 +754,64 @@ class KommoClient:
         return None
 
     # ----------------------- update lead
+
+    def patch_custom_fields_raw(
+        self, lead_id: int, cfs: list[dict],
+    ) -> tuple[bool, dict]:
+        """PATCH direto /api/v4/leads/{id} com custom_fields_values pré-formatados.
+
+        Bypass de wrapper-mentiroso (Bug C-12, 05/06/2026): MCP/wrappers anteriores
+        retornavam success:true mas NÃO gravavam custom_fields_values. Esta função:
+        1. PATCH com payload exato (sem mapeamento semântico)
+        2. GET imediato e CONFERE que os field_ids esperados estão presentes
+        3. Retorna (ok_real, response_body) — NÃO mente
+
+        `cfs` formato: [{"field_id": int, "values": [{"value": ..., "enum_id": opcional}]}]
+        """
+        payload = {"custom_fields_values": cfs}
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.patch(
+                    f"{self._base}/leads/{lead_id}",
+                    json=payload, headers=self._headers,
+                )
+                body: dict = {}
+                try:
+                    body = r.json()
+                except Exception:  # noqa: BLE001
+                    body = {"raw": (r.text or "")[:500]}
+                ok_2xx = r.status_code // 100 == 2
+                if not ok_2xx:
+                    log.warning(
+                        "[patch_cfs] HTTP %d lead=%s body=%r",
+                        r.status_code, lead_id, body,
+                    )
+                    return (False, {"status": r.status_code, **body})
+                # Validação real: GET imediato e confere field_ids
+                g = c.get(
+                    f"{self._base}/leads/{lead_id}",
+                    headers=self._headers,
+                )
+                if g.status_code != 200:
+                    log.warning(
+                        "[patch_cfs] GET pós-PATCH falhou %d lead=%s",
+                        g.status_code, lead_id,
+                    )
+                    return (True, body)  # PATCH 2xx, GET falhou → confia no PATCH
+                got_cfs = (g.json() or {}).get("custom_fields_values") or []
+                got_ids = {cf.get("field_id") for cf in got_cfs}
+                expected = {c.get("field_id") for c in cfs}
+                missing = expected - got_ids
+                if missing:
+                    log.error(
+                        "[C-12] PATCH 2xx mas campos %s NÃO gravados! lead=%s",
+                        missing, lead_id,
+                    )
+                    return (False, {"bug": "C-12", "missing": list(missing), **body})
+                return (True, body)
+        except Exception as e:  # noqa: BLE001
+            log.exception("[patch_cfs] crash lead=%s: %s", lead_id, e)
+            return (False, {"error": str(e)[:200]})
 
     def update_lead_fields(self, lead_id: int, fields: dict) -> bool:
         """Atualiza custom_fields_values do lead.

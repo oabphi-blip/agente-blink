@@ -3548,6 +3548,96 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return JSONResponse(res.to_dict())
 
     # ================================================================
+    # LEADS ABANDONADOS — caso 24107106 (05/06/2026)
+    # Lia promete agenda, paciente espera, ninguém volta. Watchdog
+    # estava lá mas não disparou alerta. Endpoint varre rajada-órfã:
+    # último inbound > X min sem outbound subsequente AND IA Ativada.
+    # ================================================================
+    @app.get("/admin/leads-abandonados")
+    def admin_leads_abandonados(
+        request: Request,
+        minutos: int = 30,
+        max_leads: int = 50,
+    ) -> JSONResponse:
+        """Lista leads onde paciente mandou msg há >= `minutos` sem Lia responder.
+
+        Critério (interseção):
+        - status_id ∈ etapas ativas (não fechadas, não em handoff humano)
+        - ATIVADO IA? = Ativado (field 1260817, enum 927031)
+        - ÚLTIMA MENS LIA (1260860) < (timestamp_now - minutos*60)
+          OU campo vazio + lead atualizado nos últimos `minutos*4` min
+
+        Retorna detalhes pra ação humana imediata.
+        """
+        if not _check_admin_secret(request):
+            return JSONResponse({"erro": "unauthorized"}, status_code=401)
+        if kommo_client is None:
+            return JSONResponse({"erro": "kommo_indisponivel"}, status_code=500)
+        try:
+            import time as _t
+            limite_ts = int(_t.time()) - (minutos * 60)
+            statuses_ativos = [
+                96441724, 106919911, 102560495, 106184631,
+                101507507, 101109455, 106653499, 106184983,
+            ]
+            abandonados: list[dict] = []
+            for status_id in statuses_ativos:
+                try:
+                    leads = kommo_client.list_leads_by_status(
+                        status_id=status_id, limit=max_leads,
+                    )
+                except Exception:  # noqa: BLE001
+                    continue
+                for lead in leads:
+                    lid = lead.get("id")
+                    cfs = lead.get("custom_fields_values") or []
+                    ativado_ia = None
+                    ultima_lia_ts = None
+                    for cf in cfs:
+                        fid = cf.get("field_id")
+                        vals = cf.get("values") or [{}]
+                        v = vals[0].get("value") if vals else None
+                        if fid == 1260817:
+                            ativado_ia = v
+                        elif fid == 1260860:
+                            ultima_lia_ts = v
+                    if ativado_ia != "Ativado":
+                        continue
+                    if ultima_lia_ts and isinstance(ultima_lia_ts, (int, float)):
+                        if int(ultima_lia_ts) > limite_ts:
+                            continue  # Lia respondeu dentro da janela, ok
+                    abandonados.append({
+                        "lead_id": lid,
+                        "name": lead.get("name"),
+                        "status_id": status_id,
+                        "ultima_lia_ts": ultima_lia_ts,
+                        "minutos_sem_resposta": (
+                            int((_t.time() - ultima_lia_ts) / 60)
+                            if ultima_lia_ts else None
+                        ),
+                        "url": f"https://univeja.kommo.com/leads/detail/{lid}",
+                    })
+                    if len(abandonados) >= max_leads:
+                        break
+                if len(abandonados) >= max_leads:
+                    break
+            # Ordena pelos mais antigos primeiro
+            abandonados.sort(
+                key=lambda x: x.get("minutos_sem_resposta") or 0, reverse=True,
+            )
+            return JSONResponse({
+                "ok": True,
+                "total": len(abandonados),
+                "janela_min": minutos,
+                "leads": abandonados,
+            })
+        except Exception as e:  # noqa: BLE001
+            log.exception("[leads-abandonados] crash: %s", e)
+            return JSONResponse(
+                {"erro": "crash", "detalhe": str(e)[:200]}, status_code=500,
+            )
+
+    # ================================================================
     # DISPARO AUTOMÁTICO POR LEAD (task #212 — 04/06/2026)
     # ================================================================
     @app.post("/admin/disparar-lead/{lead_id}")
@@ -3668,6 +3758,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         dry_run: bool = False,
         template_override: Optional[str] = None,
         body_params_override: Optional[list] = None,
+        categoria_lf: Optional[str] = None,
     ) -> dict:
         """Helper: dispara template aprovado direto pra cold lead.
 
@@ -3678,12 +3769,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
           template_override: nome do template Meta (default = 1089...)
           body_params_override: lista de strings pras variáveis {{1}}, {{2}}...
                                 Se None, usa [primeiro_nome] (1 variável).
+          categoria_lf: letra A-H — se setada, resolve TemplateMeta + params
+                        via templates_meta.resolver_template_lf() lendo dados
+                        do lead. Vence default 1089. Vence override quando
+                        ambos são passados? NÃO: override explícito vence.
 
         Sequência:
           1. Pega contato (telefone+nome+status_id) via Kommo
-          2. Envia template aprovado via WhatsApp Cloud
-          3. Grava nota Kommo com o texto + timestamp
-          4. Marca dedup Redis (24h)
+          2. (opcional) Resolve template LF por categoria
+          3. Envia template aprovado via WhatsApp Cloud
+          4. Grava nota Kommo com o texto + timestamp
+          5. Marca dedup Redis (24h)
 
         Retorna {ok, telefone, nome, primeiro_nome, wamid, motivo}.
         """
@@ -3700,17 +3796,58 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         nome = info.get("nome") or ""
         primeiro = _primeiro_nome_lead(nome)
 
+        # Resolver template LF por categoria (vence default, perde pra override)
+        template_lf_resolved_name = None
+        template_lf_resolved_params = None
+        if categoria_lf and not template_override:
+            try:
+                from voice_agent.templates_meta import resolver_template_lf
+                # Buscar convênio do Kommo p/ categoria A (precisa do nome)
+                convenio = None
+                if categoria_lf.upper() == "A":
+                    try:
+                        full = kommo_client.get_lead(lead_id)
+                        for cf in (full.get("custom_fields_values") or []):
+                            if (cf.get("field_name") or "").upper() == "CONVÊNIO":
+                                vals = cf.get("values") or []
+                                if vals:
+                                    convenio = vals[0].get("value")
+                                break
+                    except Exception:  # noqa: BLE001
+                        pass
+                resolved = resolver_template_lf(
+                    categoria_lf,
+                    nome_paciente=primeiro,
+                    nome_contato=primeiro,
+                    nome_convenio=convenio,
+                )
+                if resolved is None:
+                    return {
+                        "ok": False,
+                        "motivo": f"categoria_lf={categoria_lf} sem dados "
+                                  f"suficientes (ex: convênio vazio p/ A)",
+                        "telefone": telefone, "primeiro_nome": primeiro,
+                    }
+                tpl_meta, params_resolved = resolved
+                template_lf_resolved_name = tpl_meta.template_name
+                template_lf_resolved_params = params_resolved
+            except Exception as exc:  # noqa: BLE001
+                log.warning("[DISPARAR-CAT-LF] resolver falhou lead=%s cat=%s: %s",
+                            lead_id, categoria_lf, exc)
+
         template_name = (
             template_override
+            or template_lf_resolved_name
             or settings.reactivation_template_name
             or "1089_mens_ativar_conv_parada_qz7kbz"
         )
         template_lang = getattr(settings, "reactivation_template_lang", "pt_BR")
-        body_params = (
-            body_params_override
-            if body_params_override is not None
-            else [primeiro]
-        )
+        if body_params_override is not None:
+            body_params = body_params_override
+        elif template_lf_resolved_params is not None:
+            body_params = template_lf_resolved_params
+        else:
+            body_params = [primeiro]
 
         if dry_run:
             return {
@@ -3771,6 +3908,133 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "template": template_name,
             "wamid": wamid,
         }
+
+    # ================================================================
+    # DISPARO DIRETO (task #243, 05/06/2026) — bypass total do Kommo
+    # ================================================================
+    # Quando agent→Kommo retorna 403 (Bug #240/C-10 IP banlist?), o caminho
+    # `_disparar_template_aprovado_para_lead` falha em `get_lead_main_contact`
+    # ANTES de chegar no Meta. Esse endpoint aceita telefone + nome direto
+    # no body — não toca Kommo pra buscar contato. Só usa Meta Cloud API.
+    @app.post("/admin/disparar-direto")
+    async def admin_disparar_direto(request: Request) -> JSONResponse:
+        """Dispara template Meta direto sem passar por Kommo lookup.
+
+        Body JSON obrigatório:
+            {
+              "telefone": "5561999990000",       # E.164 SEM '+'
+              "primeiro_nome": "Maria",          # vai em {{1}} se template tiver 1 var
+              "template": "blink_lf_b_particular_v1",
+              "body_params": ["Maria"]           # opcional; default = [primeiro_nome]
+            }
+
+        Opcional:
+            "lead_id": 22789618                  # se setado, grava nota Kommo via MCP
+            "language": "pt_BR"                  # default pt_BR
+            "dry_run": false
+
+        Retorna: { ok, wamid, telefone, template, status_meta, body_preview }.
+
+        Não toca get_lead_main_contact — bypass do Bug #240/#240.
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "JSON inválido"}, status_code=400)
+
+        telefone = (body.get("telefone") or "").strip()
+        primeiro = (body.get("primeiro_nome") or "").strip() or "você"
+        template = (body.get("template") or "").strip()
+        body_params = body.get("body_params")
+        language = body.get("language") or "pt_BR"
+        dry_run = bool(body.get("dry_run", False))
+        lead_id = body.get("lead_id")
+
+        # Validações mínimas
+        digits = "".join(c for c in telefone if c.isdigit())
+        if not digits or len(digits) < 10:
+            return JSONResponse(
+                {"error": "telefone inválido — precisa de E.164 com DDI+DDD"},
+                status_code=400,
+            )
+        if not digits.startswith("55") and len(digits) in (10, 11):
+            digits = "55" + digits
+        if not template:
+            return JSONResponse(
+                {"error": "template é obrigatório"}, status_code=400,
+            )
+        if body_params is not None and not isinstance(body_params, list):
+            return JSONResponse(
+                {"error": "body_params deve ser lista"}, status_code=400,
+            )
+        if body_params is None:
+            body_params = [primeiro]
+
+        if dry_run:
+            return JSONResponse({
+                "ok": True, "dry_run": True,
+                "telefone": digits, "primeiro_nome": primeiro,
+                "template": template, "body_params": body_params,
+                "msg": "dry_run — não enviou",
+            })
+
+        # Envio real via Meta Cloud (wa_cloud já está injetado no app)
+        try:
+            resp = wa_cloud.send_template(
+                to=digits, name=template, language=language,
+                body_params=body_params,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({
+                "ok": False, "telefone": digits, "template": template,
+                "motivo": f"send_template falhou: {str(exc)[:200]}",
+            }, status_code=500)
+
+        wamid = None
+        try:
+            wamid = (resp.get("messages") or [{}])[0].get("id")
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Se lead_id passado, grava nota Kommo via add_note (esse endpoint
+        # tipicamente funciona mesmo quando outros 403, pois POST diferente)
+        nota_id = None
+        if lead_id:
+            try:
+                import time as _t
+                ts_br = _t.strftime("%d/%m/%Y %H:%M", _t.localtime())
+                params_str = " | ".join(
+                    f"{{{{{i+1}}}}}={p}" for i, p in enumerate(body_params)
+                )
+                nota = (
+                    f"[Disparo direto {ts_br}]\n\n"
+                    f"Template: {template}\n"
+                    f"Parâmetros: {params_str}\n"
+                    f"Telefone: {digits}\n"
+                    f"wamid: {wamid or 'n/a'}\n\n"
+                    f"Enviado via /admin/disparar-direto "
+                    f"(bypass de get_lead_main_contact). Bug #240/C-10."
+                )
+                kommo_client = getattr(pipeline, "kommo", None)
+                if kommo_client:
+                    nota_id = kommo_client.add_note(lead_id=int(lead_id), text=nota)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("[DISPARAR-DIRETO] nota Kommo falhou lead=%s: %s",
+                            lead_id, exc)
+
+        return JSONResponse({
+            "ok": True, "wamid": wamid, "telefone": digits,
+            "template": template, "body_params": body_params,
+            "lead_id": lead_id, "kommo_nota_id": nota_id,
+        })
 
     @app.post("/admin/disparar-template/{lead_id}")
     async def admin_disparar_template_custom(
@@ -3965,6 +4229,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         categoria = (q.get("categoria") or "").upper()
         unidade_filtro = (q.get("unidade") or "").lower()
         medico_filtro = (q.get("medico") or "").lower()
+        # NOVO: template_lf=A..H roteia pra template específico aprovado
+        template_lf = (q.get("template_lf") or "").upper().strip() or None
         try:
             max_leads = min(int(q.get("max") or "30"), 200)
         except ValueError:
@@ -3974,6 +4240,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if categoria not in ("R", "E", "C"):
             return JSONResponse(
                 {"error": "categoria deve ser R, E ou C"}, status_code=400,
+            )
+        if template_lf and template_lf not in {"A","B","C","D","E","F","G","H"}:
+            return JSONResponse(
+                {"error": "template_lf deve ser uma letra A-H"},
+                status_code=400,
             )
 
         kommo_client = getattr(pipeline, "kommo", None)
@@ -4046,6 +4317,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         for lead_id in candidatos:
             res = _disparar_template_aprovado_para_lead(
                 lead_id, kommo_client, wa_cloud, dry_run=dry_run,
+                categoria_lf=template_lf,
             )
             res["lead_id"] = lead_id
             if res.get("ok"):
@@ -4055,6 +4327,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return JSONResponse({
             "ok": True,
             "categoria": categoria,
+            "template_lf": template_lf,
             "filtros": {"unidade": unidade_filtro, "medico": medico_filtro,
                         "max": max_leads},
             "candidatos_encontrados": len(candidatos),
@@ -4418,7 +4691,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             if got and got != settings.webhook_secret:
                 raise HTTPException(401, "Secret inválido")
 
-        # Extrai lead_id (JSON OU form)
+        # Extrai lead_id (JSON OU form) — Bug C-13 (05/06/2026):
+        # Kommo Automation no evento `add_outgoing_message` envia o lead_id
+        # em `message[add][0][element_id]`, NÃO em `leads[update]`. Sem
+        # esse parser, todo webhook de mensagem humana retornava 400 e o
+        # campo ULTIMA MENS HUMANO ficava vazio.
         lead_id = None
         try:
             ct = (request.headers.get("content-type") or "").lower()
@@ -4427,8 +4704,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 lead_id = body.get("lead_id") or body.get("id")
             else:
                 form = await request.form()
+                # Formato Kommo "leads[update]" (status, custom_fields)
                 lead_id = (
                     form.get("leads[update][0][id]")
+                    or form.get("leads[add][0][id]")
+                    # Formato Kommo "message[add]" — add_outgoing_message
+                    # element_id = id do lead, element_type=2 = lead
+                    or form.get("message[add][0][element_id]")
                     or form.get("lead_id") or form.get("id")
                 )
         except Exception:  # noqa: BLE001
