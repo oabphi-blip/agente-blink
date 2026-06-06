@@ -500,6 +500,137 @@ _stop_event_global: threading.Event | None = None
 _threads_iniciadas: list[threading.Thread] = []
 
 
+# ============================================================
+# WORKER MÉTRICAS — alarme horário + replay 23h (task #260)
+# ============================================================
+
+def _funcionamento_enabled() -> bool:
+    """METRICAS_FUNCIONAMENTO_ENABLED=1 liga os 2 workers de métrica."""
+    return os.environ.get("METRICAS_FUNCIONAMENTO_ENABLED", "1") == "1"
+
+
+def _eh_hora_replay_noturno() -> bool:
+    """Roda 1x ao dia entre 23h e 23h59 BRT."""
+    from datetime import datetime, timedelta, timezone
+    agora = datetime.now(timezone(timedelta(hours=-3)))
+    return agora.hour == 23
+
+
+def _worker_alarmes_horario_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Worker que checa /admin/funcionamento a cada 1h e dispara alarmes Slack.
+
+    Lê snap das taxas; se cair, posta no Slack (dedup 1h por alarme).
+    """
+    log.info("[CRON alarmes-horarios] worker iniciado (intervalo=1h)")
+    if stop_event.wait(180):
+        return
+    intervalo = int(os.environ.get("METRICAS_ALARME_INTERVALO_SEG", "3600"))
+    while not stop_event.is_set():
+        if not _funcionamento_enabled():
+            log.debug("[CRON alarmes-horarios] desligado — pulando")
+        else:
+            try:
+                from . import metricas_funcionamento as mf
+                redis_cli = getattr(pipeline, "_redis", None)
+                snap = mf.funcionamento_hoje(redis_cli)
+                alarmes = snap.get("alarmes_ativos") or []
+                if alarmes:
+                    slack_url = os.environ.get("SLACK_WEBHOOK_URL") or ""
+                    if slack_url:
+                        try:
+                            import httpx
+                            for a in alarmes:
+                                dedup_k = (
+                                    f"blink:alarme_funcionamento:"
+                                    f"{hash(a) & 0xFFFFFFFF}"
+                                )
+                                if redis_cli is not None:
+                                    try:
+                                        if redis_cli.get(dedup_k):
+                                            continue
+                                    except Exception:  # noqa: BLE001
+                                        pass
+                                with httpx.Client(timeout=8.0) as cli:
+                                    cli.post(slack_url, json={
+                                        "text": (
+                                            f":rotating_light: "
+                                            f"*Funcionamento Lia*\n{a}"
+                                        ),
+                                    })
+                                if redis_cli is not None:
+                                    try:
+                                        redis_cli.setex(dedup_k, 3600, "1")
+                                    except Exception:  # noqa: BLE001
+                                        pass
+                            log.warning(
+                                "[CRON alarmes] %d alarme(s) postado(s)",
+                                len(alarmes),
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            log.warning("[CRON alarmes] slack falhou: %s", e)
+            except Exception as e:  # noqa: BLE001
+                log.warning("[CRON alarmes-horarios] crash silencioso: %s", e)
+        if stop_event.wait(intervalo):
+            return
+
+
+def _worker_replay_noturno_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Worker que roda 1x/noite (23h BRT) varrendo abandonados do dia.
+
+    Para cada abandonado >= 30min sem resposta Lia, posta resumo no Slack
+    pra revisão humana. Detecta regressão sem esperar paciente reclamar.
+    """
+    log.info("[CRON replay-noturno] worker iniciado — alvo 23h BRT")
+    if stop_event.wait(180):
+        return
+    # Checa a cada 30min se entrou na janela 23h BRT
+    while not stop_event.is_set():
+        if _funcionamento_enabled() and _eh_hora_replay_noturno():
+            # Dedup do dia
+            redis_cli = getattr(pipeline, "_redis", None)
+            from datetime import datetime, timedelta, timezone
+            hoje_brt = datetime.now(
+                timezone(timedelta(hours=-3))
+            ).strftime("%Y-%m-%d")
+            dedup_key = f"blink:replay_noturno:{hoje_brt}"
+            ja = False
+            if redis_cli is not None:
+                try:
+                    ja = bool(redis_cli.get(dedup_key))
+                except Exception:  # noqa: BLE001
+                    pass
+            if not ja:
+                try:
+                    from . import metricas_funcionamento as mf
+                    snap = mf.funcionamento_hoje(redis_cli)
+                    slack_url = os.environ.get("SLACK_WEBHOOK_URL") or ""
+                    if slack_url:
+                        import httpx
+                        with httpx.Client(timeout=10.0) as cli:
+                            cli.post(slack_url, json={
+                                "text": (
+                                    f":crystal_ball: *Replay noturno {hoje_brt}*\n"
+                                    f"Contadores: {snap.get('contadores')}\n"
+                                    f"Taxas: {snap.get('taxas')}\n"
+                                    f"Alarmes: {snap.get('alarmes_ativos') or 'OK'}"
+                                ),
+                            })
+                    if redis_cli is not None:
+                        try:
+                            redis_cli.setex(dedup_key, 86400, "1")
+                        except Exception:  # noqa: BLE001
+                            pass
+                    log.info("[CRON replay-noturno] resumo enviado")
+                except Exception as e:  # noqa: BLE001
+                    log.warning("[CRON replay-noturno] crash: %s", e)
+        if stop_event.wait(1800):  # 30min
+            return
+
+
 def iniciar_cron(pipeline) -> dict:
     """Liga os workers de cron interno. Idempotente — só liga uma vez."""
     global _stop_event_global
@@ -534,9 +665,30 @@ def iniciar_cron(pipeline) -> dict:
     t3.start()
     _threads_iniciadas.append(t3)
 
+    # task #260: alarmes horários de funcionamento
+    t4 = threading.Thread(
+        target=_worker_alarmes_horario_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-alarmes-horarios",
+    )
+    t4.start()
+    _threads_iniciadas.append(t4)
+
+    # task #260: replay noturno 23h BRT
+    t5 = threading.Thread(
+        target=_worker_replay_noturno_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-replay-noturno",
+    )
+    t5.start()
+    _threads_iniciadas.append(t5)
+
     return {
         "started": True,
-        "workers": ["classificar", "renovacao", "campanha_semanal"],
+        "workers": [
+            "classificar", "renovacao", "campanha_semanal",
+            "alarmes_horarios", "replay_noturno",
+        ],
         "dry_run": _dry_run_default(),
         "intervalo_classificar_seg": _intervalo_classificar_seg(),
         "intervalo_renovacao_seg": _intervalo_renovacao_seg(),

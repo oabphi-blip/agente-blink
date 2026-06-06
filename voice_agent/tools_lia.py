@@ -301,6 +301,13 @@ def handle_oferecer_slot(
         except Exception as e:  # noqa: BLE001
             efeitos.append(f"redis falhou: {e}")
 
+    # Métricas live (task #260)
+    try:
+        from . import metricas_funcionamento as _mf
+        _mf.incrementar(redis_client, "tool:oferecer_slot:ok")
+    except Exception:  # noqa: BLE001
+        pass
+
     return ResultadoTool(
         texto_para_paciente=msg,
         efeitos_colaterais=efeitos,
@@ -437,6 +444,43 @@ def handle_gravar_agendamento_medware(
             # data_hora "YYYY-MM-DDTHH:MM" — medware.criar_agendamento já aceita esse formato
             data_hora = f"{data_iso}T{hora}" if "T" not in data_iso else data_iso
 
+            # MODO DRY-RUN (ambiente de teste, 06/06/2026 — task #183 follow-up)
+            # Quando LIA_GRAVACAO_DRY_RUN=1, faz TODAS validações + log estruturado
+            # MAS NÃO chama medware_client.criar_agendamento. Resposta humana sai
+            # normalmente. Marca dedup Redis com prefixo "dryrun:" pra diferenciar
+            # de gravação real. Operador valida fluxo completo sem efeito Medware.
+            import os as _os_dry
+            if _os_dry.environ.get("LIA_GRAVACAO_DRY_RUN", "0") == "1":
+                log.info(
+                    "[GRAVAR-MEDWARE][DRY-RUN] convo=%s cod_med=%s cod_uni=%s "
+                    "slot=%s %s nome=%r cpf=%r convenio=%r",
+                    convo_key, cod_med, cod_uni, data_iso, hora,
+                    known.get("nome_paciente", ""), known.get("cpf", ""),
+                    known.get("convenio"),
+                )
+                efeitos.append(
+                    f"DRY-RUN: validações OK, NÃO chamado Medware. "
+                    f"med={cod_med} uni={cod_uni} slot={data_iso} {hora}"
+                )
+                if redis_client is not None and convo_key:
+                    try:
+                        redis_client.setex(
+                            f"blink:agendamento_gravado:{convo_key}",
+                            86400,
+                            json.dumps({
+                                "dry_run": True,
+                                "data_iso": data_iso, "hora": hora,
+                                "cod_medico": cod_med, "cod_unidade": cod_uni,
+                            }),
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        efeitos.append(f"redis dry-run dedup falhou: {e}")
+                return ResultadoTool(
+                    texto_para_paciente=msg,
+                    efeitos_colaterais=efeitos,
+                    tool_name="gravar_agendamento_medware",
+                )
+
             resultado = medware_client.criar_agendamento(
                 cod_medico=cod_med,
                 cod_unidade=cod_uni,
@@ -459,6 +503,12 @@ def handle_gravar_agendamento_medware(
                     "[GRAVAR-MEDWARE] OK convo=%s cod_ag=%s med=%s uni=%s slot=%s %s",
                     convo_key, cod_ag, cod_med, cod_uni, data_iso, hora,
                 )
+                # Métricas live (task #260)
+                try:
+                    from . import metricas_funcionamento as _mf
+                    _mf.incrementar(redis_client, "tool:gravar_agendamento_medware:ok")
+                except Exception:  # noqa: BLE001
+                    pass
                 # Marca Redis pra dedup de 24h (futuras tool calls não re-gravam)
                 if redis_client is not None and convo_key:
                     try:
@@ -485,6 +535,12 @@ def handle_gravar_agendamento_medware(
                     "[GRAVAR-MEDWARE] FAIL convo=%s motivo=%s detalhe=%s",
                     convo_key, motivo, detalhe,
                 )
+                # Métricas live (task #260)
+                try:
+                    from . import metricas_funcionamento as _mf
+                    _mf.incrementar(redis_client, "tool:gravar_agendamento_medware:fail")
+                except Exception:  # noqa: BLE001
+                    pass
                 return ResultadoTool(
                     texto_para_paciente="",
                     erro=f"medware_falhou: {motivo}",

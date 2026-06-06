@@ -3553,6 +3553,89 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # estava lá mas não disparou alerta. Endpoint varre rajada-órfã:
     # último inbound > X min sem outbound subsequente AND IA Ativada.
     # ================================================================
+    # ================================================================
+    # MÉTRICAS LIVE DE FUNCIONAMENTO (task #260, 06/06/2026)
+    # Resposta direta à pergunta "o que GARANTE o funcionamento" — número
+    # em vez de promessa. Counters Redis simples + endpoint que lê.
+    # ================================================================
+    @app.get("/admin/funcionamento")
+    def admin_funcionamento(request: Request, dias: int = 1) -> JSONResponse:
+        """Métricas live do funcionamento da Lia.
+
+        ?dias=1 → snapshot de hoje (default)
+        ?dias=7 → série dos últimos 7 dias
+
+        Retorna contadores brutos + taxas calculadas + alarmes ativos.
+        """
+        if not _check_admin_secret(request):
+            return JSONResponse({"erro": "unauthorized"}, status_code=401)
+        try:
+            from . import metricas_funcionamento as mf
+            redis_c = getattr(pipeline, "_redis", None) if pipeline else None
+            if dias <= 1:
+                return JSONResponse(mf.funcionamento_hoje(redis_c))
+            return JSONResponse(mf.funcionamento_ultimos_n_dias(redis_c, n=dias))
+        except Exception as e:  # noqa: BLE001
+            log.exception("[admin/funcionamento] crash: %s", e)
+            return JSONResponse(
+                {"erro": "crash", "detalhe": str(e)[:200]}, status_code=500,
+            )
+
+    @app.post("/admin/funcionamento/checar-alarmes")
+    @app.get("/admin/funcionamento/checar-alarmes")
+    def admin_checar_alarmes(request: Request) -> JSONResponse:
+        """Roda checagem de alarmes — se taxa caiu, envia Slack.
+
+        Chamado por cron interno (a cada 1h) OU manualmente.
+        Idempotente: dedup Redis 1h por alarme pra não floodar Slack.
+        """
+        if not _check_admin_secret(request):
+            return JSONResponse({"erro": "unauthorized"}, status_code=401)
+        try:
+            from . import metricas_funcionamento as mf
+            import os as _os
+            redis_c = getattr(pipeline, "_redis", None) if pipeline else None
+            snap = mf.funcionamento_hoje(redis_c)
+            alarmes = snap.get("alarmes_ativos") or []
+            if not alarmes:
+                return JSONResponse({
+                    "ok": True, "alarmes": [], "msg": "tudo dentro do target",
+                })
+            slack_url = _os.environ.get("SLACK_WEBHOOK_URL") or ""
+            enviados = []
+            for a in alarmes:
+                # Dedup 1h por alarme — mesmo texto não floods
+                dedup_k = f"blink:alarme_funcionamento:{hash(a) & 0xFFFFFFFF}"
+                try:
+                    if redis_c is not None and redis_c.get(dedup_k):
+                        enviados.append({"alarme": a, "skipped": "dedup_1h"})
+                        continue
+                except Exception:  # noqa: BLE001
+                    pass
+                if slack_url:
+                    try:
+                        import httpx as _httpx
+                        with _httpx.Client(timeout=8.0) as cli:
+                            cli.post(slack_url, json={
+                                "text": f":rotating_light: *Funcionamento Lia* {a}\n"
+                                        f"Snapshot: {snap.get('contadores')}",
+                            })
+                        if redis_c is not None:
+                            redis_c.setex(dedup_k, 3600, "1")
+                        enviados.append({"alarme": a, "slack": "ok"})
+                    except Exception as e:  # noqa: BLE001
+                        enviados.append({"alarme": a, "slack_erro": str(e)[:120]})
+                else:
+                    enviados.append({"alarme": a, "slack": "SLACK_WEBHOOK_URL vazia"})
+            return JSONResponse({
+                "ok": True, "alarmes": alarmes, "enviados": enviados,
+            })
+        except Exception as e:  # noqa: BLE001
+            log.exception("[admin/funcionamento/checar-alarmes] crash: %s", e)
+            return JSONResponse(
+                {"erro": "crash", "detalhe": str(e)[:200]}, status_code=500,
+            )
+
     @app.get("/admin/leads-abandonados")
     def admin_leads_abandonados(
         request: Request,

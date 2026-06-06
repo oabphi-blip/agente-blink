@@ -440,6 +440,15 @@ class VoicePipeline:
                     "tentativas_no_estado": _snap.tentativas_no_estado,
                     "motivo_ultima_transicao": _snap.motivo_ultima_transicao,
                 }
+                # Métricas live (task #260): conta ENTRADA no estado pra calcular
+                # taxa de "AGENDA→oferecer_slot OK" e tendência por dia.
+                try:
+                    from . import metricas_funcionamento as _mf
+                    _mf.incrementar(
+                        _redis, f"fsm:{_snap.estado.value}:enter",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
         except Exception as e:  # noqa: BLE001
             log.warning("[FSM] inicialização falhou: %s", e)
 
