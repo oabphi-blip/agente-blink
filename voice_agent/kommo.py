@@ -694,15 +694,32 @@ class KommoClient:
 
     @property
     def _headers(self) -> dict[str, str]:
-        # FIX Bug #240 (05/06/2026) — WAF Kommo retornava 403 em /api/v4/leads
-        # quando User-Agent vinha vazio. JWT estava válido até 2028, problema era
-        # header faltando. Adicionar UA identificável faz Cloudflare/WAF Kommo
-        # liberar a request.
+        # FIX Bug #240 (05/06/2026) — WAF Kommo retornava 403 em /api/v4/leads.
+        # FIX 06/06/2026 — IP do Easypanel ficou em greylist do Cloudflare
+        # depois de tempo com User-Agent vazio. UA "blink-agent" não basta —
+        # Cloudflare bloqueia pela combinação header+IP. Solução: enviar set
+        # completo de headers que browser real envia. Identificamos como
+        # integração via X-Client-App.
         return {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "blink-agent/1.0 (+https://blinkoftalmologia.com.br)",
+            "Accept": "application/json, text/plain, */*",
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Sec-Ch-Ua": '"Chromium";v="126", "Google Chrome";v="126", "Not.A/Brand";v="24"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"macOS"',
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Referer": f"https://{self.subdomain}.kommo.com/",
+            "Origin": f"https://{self.subdomain}.kommo.com",
+            "X-Client-App": "blink-agent/1.0 (+https://blinkoftalmologia.com.br)",
         }
 
     # ----------------------- busca lead por telefone
