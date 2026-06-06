@@ -631,6 +631,74 @@ def _worker_replay_noturno_loop(
             return
 
 
+def _reativar_ia_enabled() -> bool:
+    """REATIVAR_IA_CRON_ENABLED=1 liga o worker de varredura 6h."""
+    return os.environ.get("REATIVAR_IA_CRON_ENABLED", "1") == "1"
+
+
+def _reativar_ia_intervalo_seg() -> int:
+    return int(os.environ.get("REATIVAR_IA_INTERVALO_SEG", "21600"))  # 6h
+
+
+def _reativar_ia_max_leads() -> int:
+    return min(int(os.environ.get("REATIVAR_IA_MAX_LEADS", "1000")), 5000)
+
+
+def _worker_reativar_ia_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Worker que varre TODOS os leads em etapas ativas a cada 6h e
+    reativa IA dos que estão Desativado.
+
+    Resolve caso lead Maite 22186627 (06/06/2026) — leads que ficam parados
+    em uma etapa ativa sem mudança de etapa não disparavam o webhook #233,
+    ficavam invisíveis pra Lia. Este worker varre periodicamente.
+    """
+    log.info(
+        "[CRON reativar-ia] worker iniciado (intervalo=%ds, max_leads=%d)",
+        _reativar_ia_intervalo_seg(), _reativar_ia_max_leads(),
+    )
+    if stop_event.wait(300):  # espera 5min após boot
+        return
+    while not stop_event.is_set():
+        if not _reativar_ia_enabled():
+            log.debug("[CRON reativar-ia] desligado — pulando")
+        else:
+            try:
+                from . import reativacao_ia
+                kommo_client = getattr(pipeline, "kommo", None)
+                if kommo_client:
+                    res = reativacao_ia.reativar_ia_em_etapas_ativas(
+                        kommo_client,
+                        max_leads=_reativar_ia_max_leads(),
+                        dry_run=False,
+                    )
+                    log.info(
+                        "[CRON reativar-ia] varredura: lidos=%d, "
+                        "desativados=%d, reativados=%d, falhas=%d",
+                        res.get("total_lidos", 0),
+                        res.get("encontrados_desativados", 0),
+                        res.get("reativados", 0),
+                        res.get("falhas", 0),
+                    )
+                    # Métrica: reativações por execução
+                    try:
+                        from . import metricas_funcionamento as _mf
+                        _mf.incrementar(
+                            getattr(pipeline, "_redis", None),
+                            "cron:reativar_ia:reativados",
+                            valor=res.get("reativados", 0),
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                else:
+                    log.warning("[CRON reativar-ia] kommo_client indisponível")
+            except Exception as e:  # noqa: BLE001
+                log.warning("[CRON reativar-ia] crash: %s", e)
+        if stop_event.wait(_reativar_ia_intervalo_seg()):
+            return
+
+
 def iniciar_cron(pipeline) -> dict:
     """Liga os workers de cron interno. Idempotente — só liga uma vez."""
     global _stop_event_global
@@ -683,11 +751,20 @@ def iniciar_cron(pipeline) -> dict:
     t5.start()
     _threads_iniciadas.append(t5)
 
+    # task #264: varredura 6h pra reativar IA em leads parados
+    t6 = threading.Thread(
+        target=_worker_reativar_ia_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-reativar-ia",
+    )
+    t6.start()
+    _threads_iniciadas.append(t6)
+
     return {
         "started": True,
         "workers": [
             "classificar", "renovacao", "campanha_semanal",
-            "alarmes_horarios", "replay_noturno",
+            "alarmes_horarios", "replay_noturno", "reativar_ia",
         ],
         "dry_run": _dry_run_default(),
         "intervalo_classificar_seg": _intervalo_classificar_seg(),

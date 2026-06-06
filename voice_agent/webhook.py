@@ -4876,9 +4876,57 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return JSONResponse(
                 {"error": f"update falhou: {e}"}, status_code=500,
             )
+
+        # OBSERVABILIDADE (task #264, 06/06/2026) — busca texto da última msg
+        # outbound (humano) e grava como nota. Antes, webhook só carimbava
+        # timestamp, deixando equipe humana cega sobre o que foi falado.
+        # Caso real: lead 21860523 (Adriana catarata) — ULTIMA MENS HUMANO
+        # 05/06 19:46 mas nenhuma nota com o texto.
+        msg_texto = None
+        try:
+            msgs = kommo_client.get_lead_messages(lead_id_int, limit=20)
+            # Filtra outgoing chat messages + criados nos últimos 5min (deve
+            # ser a mensagem que disparou este webhook)
+            recentes_outgoing = [
+                m for m in msgs
+                if (m.get("note_type") or "").lower().startswith("outgoing")
+                and m.get("text")
+            ]
+            if recentes_outgoing:
+                # Ordena por created_at desc se vier
+                recentes_outgoing.sort(
+                    key=lambda m: m.get("created_at") or 0, reverse=True,
+                )
+                msg_texto = recentes_outgoing[0].get("text") or ""
+        except Exception as e:  # noqa: BLE001
+            log.warning(
+                "[trigger-msg-humano] get_lead_messages falhou lead=%s: %s",
+                lead_id_int, e,
+            )
+        nota_id = None
+        if msg_texto:
+            try:
+                from datetime import datetime, timedelta, timezone
+                brt = datetime.now(timezone(timedelta(hours=-3)))
+                stamp = brt.strftime("%H:%M %d/%m")
+                # Trunca pra 500 chars pra não estourar Kommo
+                txt_trunc = msg_texto[:500]
+                if len(msg_texto) > 500:
+                    txt_trunc += "..."
+                nota_texto = (
+                    f"[ATENDENTE {stamp}] {txt_trunc}"
+                )
+                nota_id = kommo_client.add_note(lead_id_int, nota_texto)
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "[trigger-msg-humano] add_note falhou lead=%s: %s",
+                    lead_id_int, e,
+                )
         return JSONResponse({
             "ok": bool(ok), "lead_id": lead_id_int,
             "ts_ultima_msg_humano": ts_now,
+            "texto_capturado": bool(msg_texto),
+            "nota_gravada_id": nota_id,
         })
 
     # ================================================================
