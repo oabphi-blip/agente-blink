@@ -69,23 +69,27 @@ class TestFlagOnAgenda:
                 opus_agenda_enabled=True,
             ) == OPUS, f"Falhou pra estado {estado!r}"
 
-    def test_flag_on_agenda_sem_slots_nao_usa_opus(self):
-        """Quando Medware vem vazio, não desperdiça Opus — cai pro padrão."""
+    def test_flag_on_agenda_sem_slots_USA_opus(self):
+        """REGRESSÃO 07/06/2026 noite — paciente Karla Delalibera Pacheco
+        (lead 24039387). Quando ctx.agenda vazio, ANTES retornávamos None
+        e Sonnet caía no ciclo 'vou consultar e não volta'. AGORA usamos Opus
+        EXATAMENTE pra ele chamar a tool e popular ctx.agenda.
+        """
         assert _select_model_for_state(
             estado_fsm="AGENDA",
             ctx_agenda=[],
             opus_model=OPUS,
             opus_agenda_enabled=True,
-        ) is None
+        ) == OPUS
 
-    def test_flag_on_agenda_ctx_none_nao_usa_opus(self):
-        """Quando ctx vem None (sem chave 'agenda') — cai pro padrão."""
+    def test_flag_on_agenda_ctx_none_USA_opus(self):
+        """ctx None == ctx_agenda vazio. Mesmo motivo do teste anterior."""
         assert _select_model_for_state(
             estado_fsm="AGENDA",
             ctx_agenda=None,
             opus_model=OPUS,
             opus_agenda_enabled=True,
-        ) is None
+        ) == OPUS
 
 
 class TestFlagOnOutrosEstados:

@@ -1828,10 +1828,14 @@ def _select_model_for_state(
         return None
     if (estado_fsm or "").upper() != "AGENDA":
         return None
-    # Só upgrade pra Opus quando Medware respondeu com slots reais — senão
-    # gastar Opus sem ter o que oferecer não vale a pena.
-    if not ctx_agenda:
-        return None
+    # CORREÇÃO 07/06/2026 noite — paciente Karla Delalibera Pacheco
+    # (lead 24039387). Antes a regra era "só Opus se ctx_agenda preenchido".
+    # Erro: quando state=AGENDA mas Sonnet ainda não chamou tool oferecer_slot,
+    # ctx.agenda está vazio → meu helper retornava None → caía pro Sonnet → ciclo
+    # do "vou consultar e não volta" se repetia. É EXATAMENTE quando ctx.agenda
+    # está vazio que precisamos do Opus pra chamar a tool e popular ctx.agenda.
+    # ctx_agenda agora é só logging/observabilidade, não decisão.
+    _ = ctx_agenda  # parâmetro mantido na assinatura pra compat de teste/log
     return opus_model
 
 
