@@ -2570,6 +2570,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "humanize_debounce_sec": settings.humanize_debounce_sec,
                 "reactivation_enabled": settings.reactivation_enabled,
                 "reactivation_dry_run": settings.reactivation_dry_run,
+                # Auditoria do switch Opus (07/06/2026 — caso Karla Pacheco).
+                # Antes faltava aqui e eu não conseguia provar pro Fábio se
+                # o fix estava on/off em prod. Agora expõe os 2 campos.
+                "lia_opus_agenda_enabled": settings.lia_opus_agenda_enabled,
+                "claude_opus_model": settings.claude_opus_model,
+                "claude_sonnet_model": settings.claude_sonnet_model,
+                "claude_haiku_model": settings.claude_haiku_model,
             },
         })
 
