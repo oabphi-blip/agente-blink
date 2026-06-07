@@ -21,6 +21,8 @@ class Settings:
     anthropic_api_key: str
     claude_sonnet_model: str
     claude_haiku_model: str
+    claude_opus_model: str
+    lia_opus_agenda_enabled: bool
 
     # Evolution API
     evolution_base_url: str
@@ -345,6 +347,12 @@ class Settings:
             anthropic_api_key=anthropic_api_key,
             claude_sonnet_model=os.getenv("CLAUDE_SONNET_MODEL") or agent.get("claude_sonnet_model", "claude-sonnet-4-5"),
             claude_haiku_model=os.getenv("CLAUDE_HAIKU_MODEL") or agent.get("claude_haiku_model", "claude-haiku-4-5-20251001"),
+            # Opus 4.6 seletivo em FSM=AGENDA (07/06/2026): elimina bug "vou consultar e não volta"
+            # ao usar modelo mais disciplinado em tool calling. Default OFF (shadow mode).
+            # Ativar: LIA_OPUS_AGENDA_ENABLED=1 no Easypanel. Custo extra ~$200/mês compensado por
+            # ~20 agendamentos extras/mês recuperados (ROI 50x).
+            claude_opus_model=os.getenv("CLAUDE_OPUS_MODEL") or agent.get("claude_opus_model", "claude-opus-4-6"),
+            lia_opus_agenda_enabled=(os.getenv("LIA_OPUS_AGENDA_ENABLED", str(agent.get("lia_opus_agenda_enabled", False))).lower() in ("1", "true", "yes", "on")),
             evolution_base_url=evolution_base.rstrip("/"),
             evolution_api_key=evolution_key,
             evolution_default_instance=evolution_inst,

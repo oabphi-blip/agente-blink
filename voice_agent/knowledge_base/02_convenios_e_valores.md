@@ -3,6 +3,56 @@
 ## Política universal
 A política de convênios é **única para toda a clínica e para todos os médicos**. Sem exceção entre profissionais. Quem decide aceitar/recusar convênio é a clínica, não cada médico individualmente.
 
+---
+
+## 🟢 REGRA P0 — Paciente PEDE INCENTIVOS espontaneamente (Fábio 07/06/2026)
+
+> Quando o paciente disser frases como "**quero ver os planos com incentivos**", "**quer conferir os incentivos**", "**que descontos vocês oferecem**" — **NÃO pergunte qual o convênio**. **NÃO pergunte "tem convênio ou não"**. Ele já decidiu que quer ver os incentivos. Apresente a tabela DIRETO.
+
+### Resposta padrão (UMA mensagem só)
+
+```
+Ótimo! Os incentivos pra consulta com a Dra. Karla Delalíbera são:
+
+💳 **Particular sem convênio (R$ 611)**
+   • Pix à vista: R$ 611
+   • Cartão: 2x sem juros de R$ 305,50
+
+🎟️ **Sinal 50% (reserva o horário, paga o resto na consulta)**
+   • Pix: R$ 305,50 agora + R$ 305,50 na consulta
+   • Cartão: 2x sem juros de R$ 152,75 + saldo na consulta
+
+✨ **Fila de Encaixe (sem sinal)**
+   • Você fica em lista preferencial. Se abrir vaga no horário desejado, te chamamos.
+   • Pagamento integral só no dia da consulta.
+
+Qual dessas opções funciona melhor pra você?
+```
+
+### Variante Dr. Fabrício Freitas (avaliação catarata)
+
+Quando o paciente vai com Dr. Fabrício (R$ 297 cheio):
+- Pix à vista: R$ 297
+- Cartão: 2x sem juros de R$ 148,50
+- Sinal 50%: R$ 148,50 + R$ 148,50 na consulta
+
+### O que **NÃO** fazer (anti-padrão Lia 07/06/2026 lead 24113652)
+
+❌ Perguntar "você tem algum convênio no momento, ou prefere atendimento sem convênio?"
+❌ Perguntar "qual seu convênio?"
+❌ "Para eu te apresentar as melhores opções, me confirma se você é particular ou tem convênio"
+
+✅ Apresentar a tabela DIRETO e perguntar QUAL DAS 3 OPÇÕES (Pix, Cartão, Sinal, Encaixe) ele prefere.
+
+### Por que essa regra existe
+
+Quando o paciente já abriu pedindo "incentivos", ele sinalizou:
+- Já decidiu que paga particular (ou nem tem convênio aceito)
+- Tá olhando preço — quer ver número
+- Perguntar convênio é fricção desnecessária que perde a venda
+
+---
+
 ## Pivô de atendimento — Dúvida antecipada de convênio
 Quando o paciente perguntar sobre convênio **antes** de qualquer outra coisa (mesmo antes de informar nome/idade), aplique este fluxo:
 

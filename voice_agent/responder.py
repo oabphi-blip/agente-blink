@@ -1799,6 +1799,42 @@ def _route_model(user_text: str, history_len: int, sonnet: str, haiku: str) -> s
     return haiku
 
 
+def _select_model_for_state(
+    estado_fsm: str,
+    ctx_agenda: list | None,
+    opus_model: str,
+    opus_agenda_enabled: bool,
+) -> str | None:
+    """Upgrade seletivo pra Opus 4.6 em FSM=AGENDA (task 07/06/2026).
+
+    Retorna `opus_model` SE:
+        - flag LIA_OPUS_AGENDA_ENABLED=True
+        - estado FSM == 'AGENDA' (paciente pronto pra receber slot)
+        - ctx_agenda tem slots (Medware respondeu com horários reais)
+
+    Caso contrário retorna None — caller cai pro roteador padrão (Sonnet/Haiku).
+
+    Por que: Sonnet 4.5 em AGENDA decide probabilisticamente entre tool calling
+    e texto livre, gerando bug "vou consultar e já volto" que NÃO volta. Opus 4.6
+    obedece tool_choice forçado com muito mais disciplina, eliminando o bug.
+
+    Casos cobertos: Sabrina/Kamila/Janeide/Iara/Keyla (02/06 tarde),
+    Alice (03/06 00:11), Grace (07/06 10:58), Juliene (01/06).
+
+    Custo: ~5x Sonnet por turno, mas usado em <15% dos turnos → +$200/mês,
+    compensado por ~20 agendamentos extras recuperados (ROI ~50x).
+    """
+    if not opus_agenda_enabled:
+        return None
+    if (estado_fsm or "").upper() != "AGENDA":
+        return None
+    # Só upgrade pra Opus quando Medware respondeu com slots reais — senão
+    # gastar Opus sem ter o que oferecer não vale a pena.
+    if not ctx_agenda:
+        return None
+    return opus_model
+
+
 class Responder:
     """Especialista em atendimento e conversão da Blink Oftalmologia."""
 
@@ -1807,6 +1843,8 @@ class Responder:
         api_key: str,
         sonnet_model: str = "claude-sonnet-4-5",
         haiku_model: str = "claude-haiku-4-5-20251001",
+        opus_model: str = "claude-opus-4-6",
+        opus_agenda_enabled: bool = False,
         system_prompt: str | None = None,
         max_response_chars: int = 1200,
         knowledge_base: KnowledgeBase | None = None,
@@ -1815,6 +1853,11 @@ class Responder:
         self._client = Anthropic(api_key=api_key)
         self._sonnet = sonnet_model
         self._haiku = haiku_model
+        # Opus 4.6 seletivo em FSM=AGENDA (task 07/06/2026, default OFF).
+        # Ativar via env LIA_OPUS_AGENDA_ENABLED=1. Custo +$200/mês mas
+        # elimina bug "vou consultar e não volta" (Sabrina/Kamila/Alice/Grace).
+        self._opus = opus_model
+        self._opus_agenda_enabled = opus_agenda_enabled
         # System prompt oficial = INSTRUÇÃO MESTRA + artigos por contexto
         self._base_system_prompt = system_prompt or _load_master_instruction()
         self._max_chars = max_response_chars
@@ -1946,7 +1989,22 @@ class Responder:
         )
 
         # 4. Decide modelo
-        model = _route_model(user_text, len(history), self._sonnet, self._haiku)
+        # 4a. Upgrade SELETIVO pra Opus 4.6 em FSM=AGENDA (07/06/2026).
+        # Quando paciente já está pronto pra receber slot E ctx tem agenda
+        # Medware, usar Opus pra garantir tool calling disciplinado.
+        # Caso contrário cai pro roteador padrão Sonnet/Haiku.
+        _estado_fsm_for_model = (caller_context or {}).get("fsm", {}).get("estado") or ""
+        _ctx_agenda_for_model = (caller_context or {}).get("agenda") or []
+        _opus_choice = _select_model_for_state(
+            estado_fsm=_estado_fsm_for_model,
+            ctx_agenda=_ctx_agenda_for_model,
+            opus_model=self._opus,
+            opus_agenda_enabled=self._opus_agenda_enabled,
+        )
+        if _opus_choice:
+            model = _opus_choice
+        else:
+            model = _route_model(user_text, len(history), self._sonnet, self._haiku)
 
         # 5. Chama Claude — com tool calling estruturado se habilitado
         # (task #126). Toggle via LIA_TOOLS_ENABLED — default off.

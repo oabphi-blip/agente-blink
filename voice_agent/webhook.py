@@ -65,6 +65,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         api_key=settings.anthropic_api_key,
         sonnet_model=settings.claude_sonnet_model,
         haiku_model=settings.claude_haiku_model,
+        opus_model=settings.claude_opus_model,
+        opus_agenda_enabled=settings.lia_opus_agenda_enabled,
         max_response_chars=settings.max_response_chars,
         conversation_store=conversation_store,
     )
@@ -3669,6 +3671,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             )
             if _got != settings.webhook_secret:
                 return JSONResponse({"erro": "unauthorized"}, status_code=401)
+        # Bug fix (06/06/2026): kommo_client estava fora de escopo
+        kommo_client = getattr(pipeline, "kommo", None)
         if kommo_client is None:
             return JSONResponse({"erro": "kommo_indisponivel"}, status_code=500)
         try:
@@ -3681,8 +3685,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             abandonados: list[dict] = []
             for status_id in statuses_ativos:
                 try:
+                    # Bug fix: assinatura real é status_ids=[sid] + pipeline_id
                     leads = kommo_client.list_leads_by_status(
-                        status_id=status_id, limit=max_leads,
+                        pipeline_id=8601819,
+                        status_ids=[status_id],
+                        limit=max_leads,
                     )
                 except Exception:  # noqa: BLE001
                     continue

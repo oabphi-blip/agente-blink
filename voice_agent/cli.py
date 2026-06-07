@@ -39,6 +39,8 @@ def _build_pipeline(settings: Settings) -> VoicePipeline:
         api_key=settings.anthropic_api_key,
         sonnet_model=settings.claude_sonnet_model,
         haiku_model=settings.claude_haiku_model,
+        opus_model=settings.claude_opus_model,
+        opus_agenda_enabled=settings.lia_opus_agenda_enabled,
         max_response_chars=settings.max_response_chars,
     )
     evolution = EvolutionClient(
