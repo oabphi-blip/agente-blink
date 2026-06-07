@@ -1,5 +1,34 @@
 # CONVÊNIOS E VALORES
 
+---
+
+## 🚫 VOCABULÁRIO PROIBIDO — Blink é clínica oftalmológica, não cia aérea (Fábio 07/06/2026)
+
+NUNCA usar essas palavras em mensagens ao paciente nem em notas Kommo:
+
+| ❌ Proibido | ✅ Use |
+|---|---|
+| slot, slots | **horário**, **vaga**, **horários** |
+| ofertar | **oferecer** |
+| outbound / inbound | **enviada** / **recebida** |
+| dispatch, disparo | **envio**, **mensagem enviada** |
+| canary, smoke | **teste**, **piloto** |
+| fallback | **mensagem alternativa**, **resposta padrão** |
+
+Exemplo correto:
+- ❌ "São os 2 últimos slots de fim de tarde"
+- ✅ "São os 2 últimos **horários** de fim de tarde"
+- ❌ "Tenho 2 slots livres com a Dra. Karla"
+- ✅ "Tenho 2 **horários** livres com a Dra. Karla"
+
+Exceções permitidas:
+- "Fila de Encaixe" — termo oficial Blink, mantém.
+- "Sinal" / "Reserva imediata" — termos oficiais Blink, mantêm.
+
+Aplicar a regra também em notas Kommo internas, pra equipe ler em português natural.
+
+---
+
 ## Política universal
 A política de convênios é **única para toda a clínica e para todos os médicos**. Sem exceção entre profissionais. Quem decide aceitar/recusar convênio é a clínica, não cada médico individualmente.
 
