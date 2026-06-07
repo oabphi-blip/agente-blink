@@ -690,7 +690,13 @@ class KommoClient:
 
     @property
     def _base(self) -> str:
-        return f"https://{self.subdomain}.kommo.com/api/v4"
+        # FIX 07/06/2026 — IP do Easypanel (2.24.110.21) está em blocklist
+        # do Cloudflare/WAF do Kommo: 403 nginx em TODAS chamadas /api/v4.
+        # Workaround definitivo: roteamos via Cloudflare Worker proxy
+        # (kommo-proxy.oabphi.workers.dev), que faz fetch interno até
+        # univeja.kommo.com do IP da Cloudflare (não blocklisted).
+        # Worker source: deploy/cloudflare-worker-kommo-proxy.js
+        return "https://kommo-proxy.oabphi.workers.dev/api/v4"
 
     @property
     def _headers(self) -> dict[str, str]:
