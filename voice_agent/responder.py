@@ -1409,6 +1409,127 @@ def _gerar_oferta_pos_agendado_fallback(ctx: Optional[dict]) -> str:
     )
 
 
+# ────────────────────────────────────────────────────────────────────────
+# Bug C-16 — Inas / convênios NÃO ACEITOS
+# ────────────────────────────────────────────────────────────────────────
+# Lead 24117314 Maria Agostini (08/06/2026 11:41 BRT).
+# Lia respondeu "Perfeito! Atendemos o INAS GDF" + perguntou data nasc pra
+# "solicitar autorização do convênio". KB artigo 18 marca Inas como NÃO
+# ACEITO sem exceção. Causa raiz: enum Kommo CONVÊNIO 925312 tem texto
+# enganoso "Inas GDf (somente Dr. Fabrício Freitas)" — Lia leu literal e
+# tratou como aceito com restrição. Filtro pós-geração é a defesa final.
+
+# Lista canônica de convênios NÃO aceitos (extraída de KB 18, lowercase).
+# Cada item tem variantes; matching por substring case-insensitive.
+_CONVENIOS_NAO_ACEITOS_KB18 = frozenset({
+    "afeb", "afego", "amil", "assefaz", "asete", "aste",
+    "bradesco", "brb",
+    "cassi", "caeme", "caesan", "camed", "cnti",
+    "eletronorte", "embratel",
+    "fusex", "fapes",
+    "geap", "golden",
+    "hapvida", "hap vida", "hap-vida",
+    "inas", "gdf inas", "inas gdf", "inas-gdf", "gdf saúde", "gdf saude",
+    "notre dame", "notredame",
+    "polícia militar", "policia militar", "porto seguro",
+    "quality",
+    "sul américa", "sul america", "sulamérica", "sulamerica", "sul-américa",
+    "sus",
+    "unimed", "unafisco", "sindifisco",
+})
+
+# Padrões de AFIRMAÇÃO POSITIVA sobre convênio: "atendemos", "cobrimos",
+# "aceitamos", "credenciamos", "está na rede". Tolerantes a pontuação.
+_AFIRMACAO_ATENDE_CONVENIO_PATTERNS = (
+    re.compile(r"\b(atende[mr]o?s?|atende[mr]?)\b.{0,40}\b(o\s+)?", re.IGNORECASE),
+    re.compile(r"\b(cobr[ei]mos|cobertura\s+do)\b", re.IGNORECASE),
+    re.compile(r"\b(aceita?mos|aceito|aceita)\b", re.IGNORECASE),
+    re.compile(r"\b(credenci(amos|ado|ada))\b", re.IGNORECASE),
+    re.compile(r"\b(est[áa]\s+na\s+(nossa\s+)?rede)\b", re.IGNORECASE),
+)
+
+
+def _detectar_convenio_nao_aceito_no_texto(text: str) -> Optional[str]:
+    """Retorna o convênio NÃO aceito mencionado no texto, ou None.
+
+    Match case-insensitive contra `_CONVENIOS_NAO_ACEITOS_KB18`. Retorna
+    a chave canônica curta que casou (pra log/teste). Quando texto tem
+    variantes longas e curtas (ex: "inas gdf"), retorna a CURTA ("inas").
+    Itera por ordem crescente de tamanho pra dar prioridade à forma curta.
+    """
+    if not text:
+        return None
+    low = text.lower()
+    for conv in sorted(_CONVENIOS_NAO_ACEITOS_KB18, key=len):
+        if conv in low:
+            return conv
+    return None
+
+
+def _viola_disse_atende_convenio_nao_aceito(
+    text: str, ctx: Optional[dict] = None,
+) -> Optional[str]:
+    """True+nome se Lia afirmou que atendemos convênio listado em KB 18.
+
+    Caso real: lead 24117314 — Lia disse "Perfeito! Atendemos o INAS GDF".
+    Detecta combinação: (afirmação positiva) AND (convênio não aceito).
+    Retorna o convênio que casou, pra log + script de transição.
+    """
+    if not text:
+        return None
+    conv = _detectar_convenio_nao_aceito_no_texto(text)
+    if not conv:
+        return None
+    low = text.lower()
+    # Precisa ter afirmação positiva — não basta mencionar o nome.
+    # Caso negativo (queremos evitar falso-positivo): "infelizmente NÃO
+    # atendemos Inas" não viola — é correto. Padrões cobrem:
+    #   - "não atendemos/cobrimos/aceitamos/credenciamos"
+    #   - "não está credenciada/coberto/na rede"
+    #   - "não cobre"
+    _NEGATIVE = (
+        r"\bn[ãa]o\s+(atende|cobr|aceit|credenc"
+        r"|est[áa]\s+(credenc|coberto|cobert|na\s+(nossa\s+)?rede)"
+        r"|cobre\b"
+        r")"
+    )
+    if re.search(_NEGATIVE, low):
+        return None
+    if not any(p.search(text) for p in _AFIRMACAO_ATENDE_CONVENIO_PATTERNS):
+        return None
+    return conv
+
+
+def _gerar_script_convenio_nao_aceito(
+    conv_detectado: str, ctx: Optional[dict] = None,
+) -> str:
+    """Script artigo 18 KB — recusa direta + 2 opções."""
+    nome = ""
+    if ctx:
+        known = ctx.get("known") or {}
+        nome = known.get("nome_paciente") or known.get("nome_contato") or ""
+    saudacao = f"{nome.split()[0]}, " if nome else ""
+    # Texto bonito do convênio (Inas/GDF/SUS sempre uppercase; resto title).
+    _SEMPRE_UPPER = {"inas", "gdf", "sus", "brb", "geap", "pm", "cnti", "afeb"}
+    if any(u in conv_detectado.lower() for u in _SEMPRE_UPPER):
+        label = "INAS GDF" if "inas" in conv_detectado.lower() else conv_detectado.upper()
+    elif len(conv_detectado) <= 4:
+        label = conv_detectado.upper()
+    else:
+        label = conv_detectado.title()
+    return (
+        f"{saudacao}preciso te corrigir uma informação: o **{label}** "
+        "não está credenciado na nossa rede — pra nenhum dos profissionais "
+        "(Dra. Karla, Dr. Fabrício ou Dra. Kátia). Sem exceção.\n\n"
+        "Mas não quero te deixar sem solução 💙 — temos atendimento sem "
+        "convênio com incentivos especiais pra quem tem plano que não "
+        "cobrimos.\n\n"
+        "Como prefere seguir?\n"
+        "1️⃣ Seguir sem convênio (te apresento valor + parcelamento)\n"
+        "2️⃣ Somente com convênio (encerro o atendimento aqui)"
+    )
+
+
 _FILTROS_LEGACY_ATIVOS = os.getenv("FILTROS_LEGACY", "0") == "1"
 # Flag pra desligar os 5 filtros pós-geração reativos (cada um criado
 # pra prender 1 bug específico do passado, hoje gerando falso positivo).
@@ -1419,6 +1540,7 @@ _FILTROS_LEGACY_ATIVOS = os.getenv("FILTROS_LEGACY", "0") == "1"
 #   _viola_oferta_apos_agendado (Esther)
 #   _viola_oferta_agenda
 #   _viola_promete_retorno_humano (Juliene)
+# Filtro NOVO C-16 sempre-ON (invariante duro): _viola_disse_atende_convenio_nao_aceito
 #   _viola_dia_semana (Aurora, Sabrina)
 # Filtros MANTIDOS sempre (invariantes duros):
 #   _scrub_prohibited Pix chave inválida
@@ -1444,6 +1566,21 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
         return text
 
     has_agenda = bool((ctx or {}).get("agenda"))
+
+    # 0-INAS. Bug C-16 (lead 24117314 Maria Agostini, 08/06/2026 11:41 BRT).
+    # Lia disse "Perfeito! Atendemos o INAS GDF" violando KB 18 (Inas é
+    # NÃO-aceito sem exceção). Filtro sempre-ON: detecta afirmação positiva
+    # sobre qualquer convênio listado em KB 18 e substitui pelo script de
+    # transição. Vence todos os outros filtros porque é fundamental ético.
+    _conv_violado = _viola_disse_atende_convenio_nao_aceito(text, ctx)
+    if _conv_violado:
+        log.error(
+            "[FILTRO C-16] AFIRMACAO ATENDE CONVENIO NAO ACEITO bloqueada — "
+            "Lia disse que atendemos %r (KB 18 marca como NÃO aceito). "
+            "Texto: %r",
+            _conv_violado, text[:200],
+        )
+        return _gerar_script_convenio_nao_aceito(_conv_violado, ctx)
 
     # 0-pre-bis. PERGUNTA REDUNDANTE DE CONVÊNIO (lead 24063769 Adriana,
     # 02/06/2026). Convênio já no ctx mas Lia perguntou de novo.
