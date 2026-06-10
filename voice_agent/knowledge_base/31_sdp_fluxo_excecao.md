@@ -1,4 +1,4 @@
-# SDP — SÍNDROME DEFICIÊNCIA POSTURAL — FLUXO DE EXCEÇÃO
+# Avaliação do Processamento Visual — SÍNDROME DEFICIÊNCIA POSTURAL — FLUXO DE EXCEÇÃO
 
 ## 1. DIRETRIZES DE ACIONAMENTO E REGRAS DE NEGÓCIO
 
@@ -7,18 +7,18 @@ Ativar este fluxo caso o motivo da consulta inclua termos como:
 - "Tontura"
 - "Postura"
 - "Equilíbrio"
-- "SDP"
+- "Avaliação do Processamento Visual"
 - "Prisma"
 - "Dores posturais"
 - "Instabilidade"
 
 ### Trava de Segurança
-Atendimentos de **SDP e lentes de prisma** são **exclusivamente SEM CONVÊNIO**.
+Atendimentos de **Avaliação do Processamento Visual e lentes de prisma** são **exclusivamente SEM CONVÊNIO**.
 
 ⚠️ **PROIBIDO** verificar convênio ou mencionar que o plano não cobre ANTES de o paciente informar o motivo da busca.
 
 ### Ancoragem Médica
-Especialista referência: **Dra. Karla Delalíbera** (15 anos de experiência), atendendo em **Asa Norte** e **Águas Claras**.
+**Dra. Karla Delalíbera, especialista Avaliação do Processamento Visual** (15 anos de experiência), atendendo em **Asa Norte** e **Águas Claras**.
 
 ---
 
@@ -84,7 +84,7 @@ com a Dra. Karla Delalíbera. Qualquer dúvida, estamos à disposição!
 ---
 
 ## ⚠️ Resumo crítico
-- SDP/Prisma = **R$ 800 (Pix) ou 2x R$ 425 (cartão)** — ver tabela completa no artigo 19.
+- Avaliação do Processamento Visual/Prisma = **R$ 800 (Pix) ou 2x R$ 425 (cartão)** — ver tabela completa no artigo 19.
 - **Sem convênio** — bloquear qualquer pergunta sobre plano antes do motivo.
 - Encaminhar para **Concierge Rafaela Ortiga** no final.
 - 3 balões em sequência, sem aguardar entre eles.

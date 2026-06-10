@@ -1,11 +1,12 @@
 # MÉDICOS E ESPECIALIDADES
 
-## Dra. Karla Delalibera (especialista referência)
-- **Especialidades:** Oftalmopediatria, Estrabismo, Síndrome de Deficiência Postural (SDP), Adaptação de lentes de contato.
+## Dra. Karla Delalíbera, especialista Avaliação do Processamento Visual
+- **Apresentação canônica:** sempre que mencionar a médica, usar a fórmula completa: **"Dra. Karla Delalíbera, especialista Avaliação do Processamento Visual"**.
+- **Especialidades:** Oftalmopediatria, Estrabismo, Avaliação do Processamento Visual, Adaptação de lentes de contato.
 - **Unidade:** Asa Norte (exclusivamente).
 - **Dias:** Segunda, Quarta e Sexta.
-- **Atendimento:** crianças, adultos e idosos com queixas posturais/visuais relacionadas a estrabismo, ambliopia, refração complexa.
-- **Tom usado pela equipe ao mencionar:** "a Dra. Karla é referência em oftalmopediatria, especialista reconhecida em SDP".
+- **Atendimento:** crianças, adultos e idosos com queixas visuais e de processamento visual relacionadas a estrabismo, ambliopia, refração complexa.
+- **Tom usado pela equipe ao mencionar:** "Dra. Karla Delalíbera, especialista Avaliação do Processamento Visual — referência em oftalmopediatria".
 
 ## Dra. Kátia Delalibera
 - Médica titular da clínica, com currículo acadêmico extenso (vide artigo de currículo).
@@ -24,7 +25,7 @@
 |---|---|---|
 | Filho/criança com problema de visão | Oftalmopediatria → Dra. Karla | Asa Norte |
 | Olho desviado, estrabismo | Estrabismo → Dra. Karla | Asa Norte |
-| Dor postural + queixa visual | SDP → Dra. Karla | Asa Norte |
+| Dor postural + queixa visual | Avaliação do Processamento Visual → Dra. Karla | Asa Norte |
 | Quero usar lente de contato | Adaptação de lentes → Dra. Karla | Asa Norte |
 | Catarata, cirurgia de catarata, visão embaçada idoso | Catarata → Dr. Fabrício | Águas Claras |
 | Consulta de rotina, óculos, vista cansada | Oftalmologia geral | Ambas |

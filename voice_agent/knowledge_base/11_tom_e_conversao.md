@@ -50,7 +50,7 @@ Sempre listar o que está INCLUSO antes do preço.
 > "Voltando por aqui..."
 
 ### 5. AUTORIDADE DO PROFISSIONAL
-Mencionar currículo/exclusividade da médica (Dra. Karla referência em SDP, Dra. Kátia com trabalhos publicados, Dr. Fabrício cirurgião exclusivo).
+Mencionar currículo/exclusividade da médica (**Dra. Karla Delalíbera, especialista Avaliação do Processamento Visual**, Dra. Kátia com trabalhos publicados, Dr. Fabrício cirurgião exclusivo).
 
 ### 6. PARCELAMENTO ANTES DO "NÃO"
 Sempre mostrar 3x sem juros ANTES de o paciente objetar preço.

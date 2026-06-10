@@ -261,7 +261,7 @@ SONNET_TRIGGERS = {
     # Catarata e venda complexa
     "catarata", "cirurgia", "lente intraocular", "lio", "multifocal",
     "premium", "dr fabricio", "dr fabrício", "fabricio freitas",
-    # SDP / Estrabismo / Prisma
+    # Avaliação do Processamento Visual / Estrabismo / Prisma
     "sdp", "síndrome postural", "sindrome postural", "estrabismo",
     "prisma", "tontura", "deficiência postural", "deficiencia postural",
     # Objeções e situações sensíveis
@@ -374,9 +374,24 @@ def _agenda_block(ctx: Optional[dict]) -> str:
         "\n     'Algum desses cabe pra você? Se preferir outro dia/horário,"
         "\n     me diz que ajusto.'"
         "\n• NUNCA liste a agenda toda. NUNCA mais de 2 horários por mensagem."
-        "\n• Só se o paciente recusar os 2 OU pedir dia/turno específico,"
-        "\n  AÍ SIM pergunte: 'Qual dia da semana e turno fica melhor?' —"
-        "\n  e use a resposta pra escolher 2 novos slots na próxima rodada."
+        "\n"
+        "\n⚠️ SEQUÊNCIA OBRIGATÓRIA (Bug C-18 — Fábio 10/06/2026):"
+        "\n  PASSO 1: oferta 2 slots concretos (regra acima)."
+        "\n  PASSO 2: SE — e SOMENTE SE — o paciente RECUSAR os 2 slots OU"
+        "\n            pedir dia/hora específico que não está na oferta,"
+        "\n            AÍ SIM pergunte juntos NUMA SÓ mensagem:"
+        "\n               'Qual dia da semana, qual turno (manhã/tarde) e"
+        "\n               qual período do turno (início, meio ou fim) fica"
+        "\n               melhor pra você?'"
+        "\n            JÁ NO CONTEXTO certo: com {{MÉDICO}}, na {{UNIDADE}}."
+        "\n  PASSO 3: com a resposta da preferência, escolha 2 NOVOS slots"
+        "\n            que casem com dia+turno+período pedidos."
+        "\n"
+        "\nObjetivo da sequência: AGILIDADE. Mostrar opções concretas primeiro"
+        "\n(o paciente quer ver, não responder formulário). Só quando NÃO der"
+        "\nmatch, pergunte preferência — e pergunte uma vez só, sem ficar"
+        "\nindo e vindo sem definição. O paciente NÃO carrega 3 decisões"
+        "\nseparadas (dia → turno → período em 3 turnos). Tudo em UMA pergunta."
         "\n• Se paciente pedir DIA/HORA específicos (ex: 'sexta às 9h'):"
         "\n  procure na lista abaixo. Se tiver, oferece esse. Se NÃO tiver,"
         "\n  diga isso E ofereça o mais próximo da preferência dele."
@@ -1271,7 +1286,7 @@ def _gerar_resposta_valor_sem_repergunta(ctx: Optional[dict]) -> str:
     if "fabr" in medico.lower() or "catarata" in especialidade.lower():
         valor_str = "R$ 297 (avaliação com Dr. Fabrício Freitas)"
     elif "sdp" in especialidade.lower() or "aprend" in especialidade.lower():
-        valor_str = "R$ 800 (SDP — Aprendizagem com Dra. Karla)"
+        valor_str = "R$ 800 (Avaliação do Processamento Visual — Dra. Karla)"
     elif "karla" in medico.lower() or medico:
         valor_str = "R$ 611 (consulta com Dra. Karla Delalibera)"
     else:
@@ -1281,7 +1296,7 @@ def _gerar_resposta_valor_sem_repergunta(ctx: Optional[dict]) -> str:
             "• Consulta Dra. Karla (rotina, oftalmopediatria, "
             "estrabismo): **R$ 611**\n"
             "• Avaliação catarata Dr. Fabrício: **R$ 297**\n"
-            "• SDP (Aprendizagem, Dra. Karla): **R$ 800**\n\n"
+            "• Avaliação do Processamento Visual (Dra. Karla): **R$ 800**\n\n"
             "Qual desses atendimentos interessa pra você? "
             "Já te passo o horário."
         )
@@ -1912,7 +1927,7 @@ def _route_model(user_text: str, history_len: int, sonnet: str, haiku: str) -> s
     """Roteador Sonnet vs Haiku por complexidade.
 
     Regras:
-    - Sonnet se mensagem contém gatilho sensível (urgência, catarata, SDP, objeção, criança).
+    - Sonnet se mensagem contém gatilho sensível (urgência, catarata, Avaliação do Processamento Visual, objeção, criança).
     - Sonnet se for primeira interação (history vazia) — abre conversa bem.
     - Sonnet em conversas longas (>10 turnos) — manter qualidade.
     - Haiku para confirmações/agradecimentos simples no meio da conversa.
@@ -2421,7 +2436,7 @@ class Responder:
                             "(mapa fixo da clínica), mesmo sem o paciente "
                             "nomear: Catarata / Refrativa / Lentes → "
                             "'Dr. Fabricio Freitas'; Oftalmopediatria / "
-                            "Estrabismo / SDP / Oftalmologia Geral / consulta "
+                            "Estrabismo / Avaliação do Processamento Visual / Oftalmologia Geral / consulta "
                             "de rotina → 'Dra. Karla Delalibera'; "
                             "Retina → 'Dra. Katia Delalibera'."
                         ),
@@ -2438,7 +2453,7 @@ class Responder:
                             "óculos → 'Refrativa'."
                         ),
                         "enum": [
-                            "Oftalmopediatria", "Estrabismo", "SDP",
+                            "Oftalmopediatria", "Estrabismo", "Avaliação do Processamento Visual",
                             "Catarata", "Retina", "Oftalmologia Geral",
                             "Lentes", "Refrativa",
                         ],

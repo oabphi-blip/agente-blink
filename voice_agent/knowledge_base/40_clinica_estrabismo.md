@@ -1,7 +1,7 @@
 # Estrabismo — Boas práticas Blink
 
 > ⚠️ **STATUS: ESQUELETO** — preenchimento clínico depende de revisão da
-> Dra. Karla Delalíbera (especialista em estrabismo, oftalmopediatria, SDP).
+> **Dra. Karla Delalíbera, especialista Avaliação do Processamento Visual** (também referência em estrabismo e oftalmopediatria).
 > Pedido formal enviado em 09/06/2026 via `lia-atendimento-blink/pedidos_karla/`.
 
 ## 1. Faixas etárias críticas (preencher Karla)

@@ -83,6 +83,9 @@ FIELD_MEDICOS = (1256257, {
 FIELD_ESPECIALIDADE = (1259130, {
     "Oftalmopediatria": 923858, "Pediatria": 923858, "Oftalmopediatra": 923858,
     "Oftalmologia Geral": 923860, "Rotina": 923860, "Check-up": 923860,
+    "Avaliação do Processamento Visual": 923862, "Avaliacao do Processamento Visual": 923862,
+    "Processamento Visual": 923862,
+    # Aliases retrocompatibilidade — termo antigo (SDP) ainda aparece em dados Kommo:
     "SDP": 923862, "Síndrome Deficiência Postural": 923862, "Postural": 923862,
     "Estrabismo": 923864,
     "Retina": 923868, "Retina e vítreo": 923868, "Retina e Vítreo": 923868,

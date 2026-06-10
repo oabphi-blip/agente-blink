@@ -64,6 +64,25 @@
 
 ---
 
+## 0-APRESENTAÇÃO CANÔNICA DA DRA. KARLA (Fábio 10/06/2026)
+
+**Sempre que mencionar a médica titular, usar a fórmula EXATA:**
+
+> **"Dra. Karla Delalíbera, especialista Avaliação do Processamento Visual"**
+
+Substituições já feitas em todo o KB:
+- `01_medicos_e_especialidades.md` — cabeçalho + tom equipe
+- `11_tom_e_conversao.md` — autoridade do profissional
+- `31_sdp_fluxo_excecao.md` — ancoragem médica
+- `40_clinica_estrabismo.md` — status do esqueleto
+- `_MASTER_INSTRUCTION.md` — seção 5.6 ancoragem médica
+
+**Termo proibido:** "SDP" / "Síndrome da Deficiência Postural" — **NÃO** mencionar em mensagens ao paciente, em respostas da Lia, ou em material visível. Único uso permitido = aliases de DETECÇÃO no código (knowledge.py / responder.py / kommo.py) pra reconhecer paciente que digite o termo antigo. Lia responde sempre com "Avaliação do Processamento Visual".
+
+Valor da consulta: **R$ 800 (Avaliação do Processamento Visual — Dra. Karla)**.
+
+---
+
 ## 0-OBSERVABILIDADE. CADA DISPARO LIA PRECISA APARECER NO KOMMO (Fábio 05/06/2026)
 
 **REGRA P0 — sempre que disparo mensagem WhatsApp (pelo método que for), atualizar IMEDIATAMENTE no Kommo:**
@@ -126,6 +145,20 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 > Topo do arquivo = primeiro que leio. Toda sessão termina atualizando essa lista
 > com as 1-2 lições principais. Esqueço o que está mais embaixo. Por isso vive aqui.
 > Regra: substituir a lição mais antiga pela nova ao adicionar (max 5).
+
+### 0. (10/06/2026) Bug C-18 — Lia perguntando turno+período ANTES de ofertar slot (Melissa 22779280)
+Fábio: "para ser mais agil. Se o paciente não aceitar [os 2 slots], ai sim pode ser perguntado, o dia da semana, o turno, e o periodo do turno. No respectivo dia da semana, na unidade especifica, e com o médico. Para não ficar indo e vindo sem definição".
+
+**Caso (10/06/2026 15:40):** lead 22779280 Melissa de Almeida Ramos. Paciente sugeriu "semana de 29/06". Lia ignorou e perguntou: "qual médico? qual unidade? qual motivo?" — carga decisória. Deveria ter buscado Medware Karla Asa Norte na semana de 29/06 (31 slots reais) e oferecido 2 imediatamente.
+
+**REGRA SEQUENCIAL OBRIGATÓRIA (revisão 10/06):**
+1. **PASSO 1**: oferta 2 slots concretos imediatamente (1 manhã + 1 tarde do dia mais próximo da preferência).
+2. **PASSO 2**: SE — e SOMENTE SE — paciente RECUSAR os 2 OU pedir dia/hora específico fora da oferta, AÍ SIM perguntar JUNTOS NUMA SÓ mensagem: "Qual dia da semana, qual turno (manhã/tarde) e qual período do turno (início, meio ou fim) fica melhor?". JÁ contextualizado com {{MÉDICO}} e {{UNIDADE}}.
+3. **PASSO 3**: com a resposta, escolher 2 NOVOS slots que casem com dia+turno+período pedidos.
+
+**Anti-padrão:** 3 perguntas em 3 turnos separados (dia → turno → período). Paciente não carrega 3 decisões. Tudo em UMA mensagem ou nenhuma. Objetivo: **AGILIDADE**, não "indo e vindo sem definição".
+
+**Fix:** `_agenda_block` em `voice_agent/responder.py` agora descreve PASSO 1→2→3 explícito + pytest `tests/test_bug_c18_sequencia_agenda.py` 5/5 verde.
 
 ### 1. (07/06/2026 TARDE) Switch Opus 4.6 seletivo em FSM=AGENDA — elimina bug "vou consultar e não volta"
 Causa raiz do bug recorrente (Sabrina/Kamila/Janeide/Iara/Keyla 02/06, Alice 03/06, Juliene 01/06, **Grace 07/06 10:58**): Sonnet 4.5 em AGENDA decide PROBABILISTICAMENTE entre chamar tool `oferecer_slot` ou escrever texto livre. Mesmo com `tool_choice` forçado (#183), Sonnet às vezes ignora.
