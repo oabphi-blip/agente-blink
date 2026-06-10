@@ -1450,6 +1450,128 @@ class KommoClient:
             )
             return []
 
+    def search_leads_by_window(
+        self,
+        pipeline_id: int,
+        ts_from: int,
+        ts_to: int,
+        limit: int = 250,
+    ) -> list[dict]:
+        """Lista leads do pipeline criados dentro da janela [ts_from, ts_to].
+
+        Usado pelo Lia Engineer Eval Loop pra coletar métricas de funil.
+
+        Args:
+            pipeline_id: ATENDE = 8601819.
+            ts_from: epoch UTC inicial.
+            ts_to: epoch UTC final.
+            limit: máx por página.
+
+        Returns:
+            Lista de dicts de lead com custom_fields_values populado.
+            Pagina automaticamente até 1500 leads (5 páginas). Retorna []
+            em erro.
+        """
+        try:
+            out: list[dict] = []
+            for page in range(1, 7):
+                params = {
+                    "filter[pipeline_id]": int(pipeline_id),
+                    "filter[created_at][from]": int(ts_from),
+                    "filter[created_at][to]": int(ts_to),
+                    "limit": min(int(limit), 250),
+                    "page": page,
+                }
+                with httpx.Client(timeout=self.timeout) as c:
+                    r = c.get(
+                        f"{self._base}/leads",
+                        params=params,
+                        headers=self._headers,
+                    )
+                if r.status_code == 204:
+                    break
+                if r.status_code != 200:
+                    log.warning(
+                        "Kommo search_leads_by_window p%d: HTTP %d",
+                        page, r.status_code,
+                    )
+                    break
+                data = r.json() or {}
+                page_leads = list(((data.get("_embedded") or {}).get("leads") or []))
+                if not page_leads:
+                    break
+                out.extend(page_leads)
+                if len(page_leads) < params["limit"]:
+                    break
+            return out
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo search_leads_by_window erro: %s", e)
+            return []
+
+    def list_recent_notes(
+        self,
+        since: datetime,
+        author_user_id: int | None = 0,
+        limit: int = 250,
+        note_type: str | None = "common",
+    ) -> list[dict]:
+        """Lista notas globais Kommo desde `since` (UTC), opcionalmente
+        filtradas por autor e tipo. Usado pelo Lia Engineer Autônomo pra
+        detectar bugs em produção em tempo quase real.
+
+        Args:
+            since: timestamp UTC inicial.
+            author_user_id: 0 = bot/automação (Lia). None = qualquer.
+            limit: máx 250 (limite Kommo API).
+            note_type: "common" / "incoming_chat_message" / etc. None = todos.
+
+        Returns:
+            Lista de dicts, cada um com keys
+            {id, lead_id, created_at (epoch), created_by, note_type, params/text}.
+            Normaliza pra incluir `lead_id` (vem aninhado no _embedded).
+            Retorna [] em erro.
+
+        Endpoint Kommo: GET /api/v4/leads/notes (notas globais — sem lead_id).
+        """
+        try:
+            from datetime import timezone as _tz
+            if since.tzinfo is None:
+                since = since.replace(tzinfo=_tz.utc)
+            ts_from = int(since.timestamp())
+            params: dict = {
+                "limit": min(int(limit), 250),
+                "order[updated_at]": "desc",
+                "filter[updated_at][from]": ts_from,
+            }
+            if note_type:
+                params["filter[note_type]"] = note_type
+            if author_user_id is not None:
+                params["filter[created_by]"] = int(author_user_id)
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.get(
+                    f"{self._base}/leads/notes",
+                    params=params,
+                    headers=self._headers,
+                )
+            if r.status_code == 204:
+                return []
+            if r.status_code != 200:
+                log.warning(
+                    "Kommo list_recent_notes: HTTP %d desde %s",
+                    r.status_code, since.isoformat(),
+                )
+                return []
+            data = r.json() or {}
+            notas = list(((data.get("_embedded") or {}).get("notes") or []))
+            # Normalizar: incluir lead_id no top-level (Kommo coloca em entity_id)
+            for n in notas:
+                if "lead_id" not in n:
+                    n["lead_id"] = n.get("entity_id")
+            return notas
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo list_recent_notes erro: %s", e)
+            return []
+
     def get_lead_messages(
         self, lead_id: int | str, limit: int = 30,
     ) -> list[dict]:

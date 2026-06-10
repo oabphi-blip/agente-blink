@@ -1,0 +1,41 @@
+{
+  "name": "blink_nps_pos_consulta_v1",
+  "language": "pt_BR",
+  "category": "UTILITY",
+  "components": [
+    {
+      "type": "BODY",
+      "text": "Olá, {{1}}! 😊\n\nAqui é a Lia, da Blink Oftalmologia. Você esteve com {{2}} na {{3}} no dia {{4}}.\n\nGostaríamos de saber como foi a experiência. Em uma escala de 0 a 10, *quanto você recomendaria a Blink para um amigo ou familiar?*\n\nResponda só com um número de 0 a 10. Sua resposta é muito importante pra continuar melhorando! 💙",
+      "example": {
+        "body_text": [
+          ["Carlos", "Dra. Karla Delalíbera", "Asa Norte", "10/06/2026"]
+        ]
+      }
+    },
+    {
+      "type": "FOOTER",
+      "text": "Blink Oftalmologia • Sua opinião nos ajuda a evoluir"
+    },
+    {
+      "type": "BUTTONS",
+      "buttons": [
+        {"type": "QUICK_REPLY", "text": "0-6 (Detrator)"},
+        {"type": "QUICK_REPLY", "text": "7-8 (Neutro)"},
+        {"type": "QUICK_REPLY", "text": "9-10 (Promotor)"}
+      ]
+    }
+  ],
+  "_metadata": {
+    "uso": "Disparado automaticamente D+1 após consulta realizada (status 8-REALIZADO).",
+    "params": {
+      "{{1}}": "primeiro nome do paciente",
+      "{{2}}": "Dra. Karla Delalíbera | Dr. Fabrício Freitas",
+      "{{3}}": "Asa Norte | Águas Claras",
+      "{{4}}": "dd/mm/aaaa da consulta"
+    },
+    "categoria": "UTILITY (não promocional — pesquisa pós-atendimento)",
+    "expected_response": "número 0-10 OU botão clicado",
+    "calculo_nps": "% promotores (9-10) − % detratores (0-6)",
+    "submissao_meta": "via /v22.0/{WABA_ID}/message_templates POST com este JSON"
+  }
+}
