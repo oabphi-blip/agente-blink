@@ -146,7 +146,46 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 > com as 1-2 lições principais. Esqueço o que está mais embaixo. Por isso vive aqui.
 > Regra: substituir a lição mais antiga pela nova ao adicionar (max 5).
 
-### 0. (10/06/2026) Bug C-18 — Lia perguntando turno+período ANTES de ofertar slot (Melissa 22779280)
+### 0. (10/06/2026) Bug C-22 — Lia ignorou pergunta sobre GDF (Sandra 24130752)
+Sandra perguntou "atendem GDF?" e Lia simplesmente pulou pra "vamos marcar com Karla, me passa nome + data nascimento". Ignorou a pergunta sobre convênio NÃO aceito.
+
+**Causa raiz:** filtro `_viola_disse_atende_convenio_nao_aceito` (C-16) só pega Lia DIZENDO que atende — não pega OMISSÃO. Set `_CONVENIOS_NAO_ACEITOS_KB18` também não tinha "gdf" sozinho (só "gdf saúde").
+
+**Fix:**
+- Filtro novo `_viola_omitiu_resposta_convenio_nao_aceito` em `responder.py`: detecta inbound do paciente mencionando conv NÃO aceito + outbound da Lia SEM marcas de reconhecimento ("não credenciado" / "sem convênio" / "condições especiais") → substitui pelo script.
+- "gdf" sozinho adicionado ao set.
+- KB 14 reescrita com árvore decisional T1→T2→T3→T4 (Fábio 10/06):
+  - **T1** = dispara template Meta `1019_sem_convenio` (2 botões: "Seguir Sem Convênio" / "Somente Com Convênio")
+  - **T2** = motivo (APV → R$ 800 Pix; catarata → R$ 445 Pix; outro → T3)
+  - **T3** = qtde (1-2 = R$ 611 Pix; 3+ = sábado família R$ 511 Pix — Asa Norte penúltimo, Águas Claras último)
+  - **T4** = escada objeção: [1] 2x R$ 335 → [2] família → [3] urgência? URGENTE = coleta preferência + R$ 611 regular; SEM URGÊNCIA = campanha incentivo (lista espera com preço menor sem horário fixo)
+- Regra E4-NA no `_MASTER_INSTRUCTION.md`.
+- Pytest `tests/test_bug_c22_convenio_omissao.py` — 21 cenários.
+
+**Princípios fixos:** NUNCA tabela inteira; UM valor por turno; reserva sem pagamento NÃO existe; coletar preferências é pra indicar depois.
+
+### 1. (10/06/2026) Bug C-21 — Batch ferias atropelou protocolo médico (Maria Alice 21545155)
+Fábio: "instrucao, pacientes de 0 a 2 anos, consulta a cada seis meses. Neste caso, está preenchido consulta recente, e, não foi detectado, ocorrendo erro na abordagem. Tem que reconhecer o erro. Seguir instrucao para nao causar constrangimentos e erros nos prtocolos medicos".
+
+**Caso (10/06/2026 16:48):** lead 21545155 Maria Alice Alvarenga Peixoto (12a, oftalmopediatria Karla Águas Claras). Campo `1.MÊS PRÓX CONSULTA = "Maio 2027"` (próxima já definida pela médica), `1.DIA CONSULTA = 14/05/2026` (consulta realizada há 1 mês). Nome do lead: "Retorno em maio 2027". Batch ferias julho mandou template `blink_proxima_consulta_ferias_v1` mesmo assim. Parâmetro corrupted `{{1}}=FᥲFᥲ́`.
+
+**Causa raiz:** `scripts/batch_ferias_julho.py` filtrava só por `status_id` finalizado e convênio bloqueado — NÃO consultava `1.MÊS PRÓX CONSULTA` (1260588) nem `1.DIA CONSULTA` (1255723). Atropelou protocolo médico definido pela Dra. Karla.
+
+**Protocolo Dra. Karla:** 0-2 anos = retorno cada 6m; 3-12 anos = anual; adulto = anual.
+
+**Fix:**
+- `protocolo_medico_ja_definido(lead)` em `batch_ferias_julho.py`: bloqueia se `1.MÊS PRÓX CONSULTA` preenchido OU `1.DIA CONSULTA` <6m atrás. Contador `SKIP_PROTOCOLO`.
+- Regra E1.6 no `_MASTER_INSTRUCTION.md` — Lia consulta os 2 campos ANTES de qualquer oferta.
+- Script auditoria `scripts/auditar_batch_julho_protocolo.py` + `AUDITAR_BUG_C21.command` — roda nos 81 disparos OK do batch 10/06 16:39 pra identificar quantos foram atropelados → desculpa retroativa em nota Kommo.
+
+**Princípio:** quando médico definiu janela de retorno (1.MÊS PRÓX CONSULTA preenchido), batch RESPEITA. Atropelar = constrangimento + descrédito da médica.
+
+### 1. (10/06/2026) Bug C-20 — Nome do contato inválido no Kommo causa "Olá Você" / "Olá Inbra"
+No batch ferias julho, leads 12871624 (Wendel/contato="Inbra") e 20901861 (Fábio Jr./contato vazio) tiveram saudação esquisita. Fábio: "nome estranhos pode criar abordagem para solicitar o nome do contato, para está referenciando a conversa".
+
+**Fix:** `voice_agent/contato_nome.py` com `nome_contato_invalido(nome)` (detecta vazio, "Você", "Inbra", "Cliente", "Test", números, equipe Blink) + `saudacao_segura()` (cai pra "Olá" puro sem fallback) + `pergunta_nome_contato()` ("Olá! 😊 Pra te chamar pelo nome certo, com quem estou falando, por favor?"). Regra E1.5 no `_MASTER_INSTRUCTION.md`. Pytest 19 cenários verde.
+
+### 2. (10/06/2026) Bug C-18 — Lia perguntando turno+período ANTES de ofertar slot (Melissa 22779280)
 Fábio: "para ser mais agil. Se o paciente não aceitar [os 2 slots], ai sim pode ser perguntado, o dia da semana, o turno, e o periodo do turno. No respectivo dia da semana, na unidade especifica, e com o médico. Para não ficar indo e vindo sem definição".
 
 **Caso (10/06/2026 15:40):** lead 22779280 Melissa de Almeida Ramos. Paciente sugeriu "semana de 29/06". Lia ignorou e perguntou: "qual médico? qual unidade? qual motivo?" — carga decisória. Deveria ter buscado Medware Karla Asa Norte na semana de 29/06 (31 slots reais) e oferecido 2 imediatamente.

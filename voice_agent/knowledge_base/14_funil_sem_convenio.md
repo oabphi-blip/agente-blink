@@ -1,21 +1,123 @@
 # ROTEIRO DE ATENDIMENTO SEM CONVÊNIO
 
-## SCRIPT: TRANSIÇÃO DE CONVÊNIO NÃO ACEITO → SEM CONVÊNIO
+> ⚠️ **VERSÃO 10/06/2026 — ÁRVORE DECISIONAL GRADATIVA (Fábio).**
+> A Lia NUNCA despeja a tabela inteira de valores. UM valor por turno.
+> Sequência obrigatória: T1 (template 1019) → T2 (motivo) → T3 (qtde) →
+> T4 (objeção em escada). Reserva sem pagamento NÃO existe — coletar
+> preferências de horário é pra INDICAR depois, não pra reservar.
 
-Sempre que o convênio não for aceito (ver artigo 18 — Convênios Não Aceitos), o agente deve responder **EXATAMENTE** assim, respeitando as quebras de linha:
+## T1 · DISPARO DO TEMPLATE META `1019_sem_convenio`
+
+Quando o convênio mencionado pelo paciente está na lista do artigo 18 (não
+aceitos), o agente NÃO escreve texto livre — DISPARA o template Meta
+aprovado `1019_sem_convenio`, que tem 2 botões interativos:
 
 ```
-[Nome do Paciente], ✨ Esse plano ainda não faz parte da nossa rede credenciada.
-Porém, nós liberamos condições especiais de atendimento sem convênio para que
-você não fique sem os nossos cuidados! 💙
+Olá, [Nome de contato]!
 
-Como você prefere seguir? 👇
-1️⃣ Seguir sem convênio
-2️⃣ Somente com convênio
+Ainda não estamos credenciados ao seu convênio, mas oferecemos
+incentivos especiais para pacientes com convênios que ainda não
+atendemos.
+
+Qual a sua escolha:
+[ Seguir Sem Convênio ]   [ Somente Com Convênio ]
 ```
+
+### Bifurcação pela escolha do paciente
+
+- **"Seguir Sem Convênio"** → avança para **T2** (perguntar motivo).
+- **"Somente Com Convênio"** → encerra com cordialidade:
+  > "Combinado, [Nome]. Quando você quiser considerar outro caminho ou
+  > tiver outro convênio, é só me chamar. Estamos à disposição 💙"
 
 ### 🚨 TRAVA NEGATIVA
-**ESTRITAMENTE PROIBIDO** iniciar a frase com a palavra "infelizmente" ou qualquer lamento.
+**ESTRITAMENTE PROIBIDO** iniciar com "infelizmente" ou pedir desculpas
+pela recusa. **PROIBIDO** prometer "vou consultar a recepção", "talvez
+algum médico atenda" — a recusa é definitiva (artigo 18).
+
+---
+
+## T2 · MOTIVO DA CONSULTA (após o paciente clicar "Seguir Sem Convênio")
+
+Pergunta aberta. Bifurca pela especialidade:
+
+- **Avaliação do Processamento Visual (Dra. Karla)** →
+  > "Combinado. Pra Avaliação do Processamento Visual, o valor é **R$ 800 via Pix**.
+  > Posso te oferecer 2 horários em [unidade]?"
+- **Catarata (Dr. Fabrício)** →
+  > "Combinado. A consulta de avaliação com o Dr. Fabrício é **R$ 445 via Pix**.
+  > Posso te oferecer 2 horários?"
+- **Rotina / oftalmopediatria / outro motivo** → avança para **T3**.
+
+---
+
+## T3 · QUANTIDADE DE PACIENTES
+
+> "Vai ser consulta pra você só, ou tem mais alguém da família indo junto?"
+
+### Bifurcação pela quantidade
+
+- **1 ou 2 pacientes** →
+  > "Combinado. Pra [1/2] paciente(s), o valor é **R$ 611 via Pix**.
+  > Posso te oferecer 2 horários esta semana?"
+
+- **3 ou mais pacientes (família)** → SÁBADO FAMÍLIA:
+  > "Que ótimo, [Nome]! Pra família temos uma condição especial nos sábados,
+  > com valor reduzido: **R$ 511 por paciente via Pix**.
+  >
+  > Funciona assim:
+  > • Asa Norte → **penúltimo sábado do mês**
+  > • Águas Claras → **último sábado do mês**
+  >
+  > Qual unidade fica melhor pra você?"
+
+---
+
+## T4 · ESCADA DE OBJEÇÃO (um item por turno)
+
+Só dispara quando o paciente objetar preço ("tá caro", "vou pensar", "depois
+eu te falo"). NUNCA despeja todas as opções juntas.
+
+### [1] Parcelamento (primeiro turno de objeção)
+> "Posso facilitar: **2× R$ 335 sem juros** no cartão. Já alivia bastante, né?"
+
+### [2] Família / sábado (segundo turno de objeção, se ainda objetar)
+> "Te entendo, [Nome]. Se você quiser trazer 1 ou 2 da família junto num
+> sábado (Asa Norte penúltimo, Águas Claras último), fica **R$ 511 por
+> paciente**. Tem alguém que poderia consultar junto?"
+
+### [3] Pergunta sobre URGÊNCIA (terceiro turno de objeção)
+> "[Nome], a consulta tem urgência? Ou pode esperar um horário melhor pra
+> você?"
+
+#### [3a] URGENTE → coleta preferências e indica horário regular
+> "Entendi. Pra eu te oferecer o melhor horário possível: qual **dia da
+> semana**, **turno** (manhã/tarde) e **período do turno** (início, meio
+> ou fim) fica melhor pra você?"
+>
+> Com a resposta, indica horário dentro do valor R$ 611 Pix (até 2
+> pacientes). **NÃO promete reserva sem pagamento.**
+
+#### [3b] SEM URGÊNCIA → campanha de incentivo (lista de espera)
+> "[Nome], então posso te incluir nas nossas **campanhas com valores
+> diferenciados**. Você ganha preço melhor e a gente te avisa quando
+> aparecer vaga compatível com sua preferência. Como prefere?"
+>
+> Coleta dia/turno/período → entra na fila campanha (sem horário fixo).
+> **NÃO indica horário imediato.**
+
+---
+
+## ⚠️ Princípios invariantes (NUNCA quebrar)
+
+1. **Nunca** despeja tabela inteira de valores.
+2. **Um** valor por turno (motivo → qtde → valor → objeção em escada).
+3. **Reserva sem pagamento NÃO existe** — coletar preferências é pra
+   indicar depois, não pra reservar.
+4. **Avaliação Processamento Visual** e **Catarata** pulam T3 — vão direto
+   pro valor.
+5. **Sábado família** é cadência mensal: Asa Norte penúltimo, Águas Claras
+   último.
 
 ---
 

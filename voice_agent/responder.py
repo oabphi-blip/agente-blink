@@ -1445,6 +1445,7 @@ _CONVENIOS_NAO_ACEITOS_KB18 = frozenset({
     "geap", "golden",
     "hapvida", "hap vida", "hap-vida",
     "inas", "gdf inas", "inas gdf", "inas-gdf", "gdf saúde", "gdf saude",
+    "gdf",  # token isolado — quase sempre se refere ao GDF Saúde (Bug C-22 Sandra)
     "notre dame", "notredame",
     "polícia militar", "policia militar", "porto seguro",
     "quality",
@@ -1545,6 +1546,73 @@ def _gerar_script_convenio_nao_aceito(
     )
 
 
+# Bug C-22 (Fábio 10/06/2026) — Lia ignora pergunta sobre convênio NÃO aceito.
+# Lead 24130752 Sandra: "vocês atendem GDF?" — Lia simplesmente PULOU pra
+# "vamos marcar com Karla, me passa dados". Sem reconhecer GDF não credenciado,
+# sem oferecer condições especiais.
+#
+# Diferença vs Bug C-16:
+#   C-16: paciente menciona, Lia AFIRMA que atende (errado positivo)
+#   C-22: paciente PERGUNTA, Lia IGNORA e pula pra outro assunto (errado por omissão)
+#
+# Detecção: olha último user_text no ctx, vê se menciona convênio NÃO aceito,
+# E verifica se text outbound atual NÃO reconhece a recusa.
+
+_RECUSA_OU_OFERTA_PADRAO_PATTERNS = (
+    re.compile(r"\bn[ãa]o\s+(somos|estamos|est[aá])?\s*credenc", re.IGNORECASE),
+    re.compile(r"\bn[ãa]o\s+(atende[mr]?o?s?|cobr[iemo]+s?|aceit[aoe]?m?o?s?)", re.IGNORECASE),
+    re.compile(r"\bn[ãa]o\s+est[áa]\s+(coberto|na\s+(nossa\s+)?rede)", re.IGNORECASE),
+    re.compile(r"sem\s+conv[êe]nio", re.IGNORECASE),
+    re.compile(r"condi[çc][oõ]es?\s+(especi|diferenc)", re.IGNORECASE),
+    re.compile(r"incentiv", re.IGNORECASE),
+    re.compile(r"plano\s+(que\s+)?n[ãa]o\s+(cobr|atend|aceit)", re.IGNORECASE),
+)
+
+
+def _viola_omitiu_resposta_convenio_nao_aceito(
+    text: str, ctx: Optional[dict] = None,
+) -> Optional[str]:
+    """True+conv se paciente perguntou sobre conv NÃO aceito e Lia ignorou.
+
+    Caso real: lead 24130752 Sandra perguntou "atendem GDF?" — Lia respondeu
+    "Ótimo! Vamos marcar com Dra. Karla, me passa nome e data nascimento".
+
+    Algoritmo:
+      1. Pega último user_text do ctx (ou ctx['user_text']).
+      2. Detecta se user_text menciona conv NÃO aceito (KB 18).
+      3. Se sim: verifica se TEXT outbound atual contém alguma das marcas
+         de reconhecimento (não credenciado / sem convênio / condições
+         especiais / incentivos).
+      4. Se text NÃO reconhece → bug. Retorna nome do convênio.
+
+    Não vale como bug se Lia SÓ enviou saudação inicial (1ª resposta).
+    """
+    if not text or not ctx:
+        return None
+    user_text = ctx.get("user_text") or ""
+    if not user_text:
+        # Tentar achar no histórico
+        hist = ctx.get("history") or ctx.get("historico") or []
+        for h in reversed(hist[-5:] if hist else []):
+            if isinstance(h, dict) and h.get("role") == "user":
+                user_text = h.get("content") or h.get("text") or ""
+                if user_text:
+                    break
+    if not user_text:
+        return None
+    conv = _detectar_convenio_nao_aceito_no_texto(user_text)
+    if not conv:
+        return None
+    # Verifica se text outbound RECONHECE a recusa (qualquer um dos padrões)
+    for p in _RECUSA_OU_OFERTA_PADRAO_PATTERNS:
+        if p.search(text):
+            return None
+    # Se também menciona o convênio explicitamente E está respondendo (não
+    # pulou pra outro assunto), ainda assim conta como omissão se NÃO houve
+    # reconhecimento — caso da Sandra.
+    return conv
+
+
 _FILTROS_LEGACY_ATIVOS = os.getenv("FILTROS_LEGACY", "0") == "1"
 # Flag pra desligar os 5 filtros pós-geração reativos (cada um criado
 # pra prender 1 bug específico do passado, hoje gerando falso positivo).
@@ -1596,6 +1664,21 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             _conv_violado, text[:200],
         )
         return _gerar_script_convenio_nao_aceito(_conv_violado, ctx)
+
+    # 0-INAS-bis. Bug C-22 (lead 24130752 Sandra, 10/06/2026 17:54 BRT).
+    # Paciente perguntou "atendem GDF?" — Lia ignorou e pulou pra "vamos
+    # marcar com Karla". Filtro detecta omissão: inbound menciona conv NÃO
+    # aceito + outbound NÃO reconhece a recusa → substitui pelo script.
+    _conv_omitido = _viola_omitiu_resposta_convenio_nao_aceito(text, ctx)
+    if _conv_omitido:
+        log.error(
+            "[FILTRO C-22] OMISSAO RESPOSTA CONVENIO NAO ACEITO bloqueada — "
+            "paciente perguntou sobre %r e Lia ignorou. user_text=%r outbound=%r",
+            _conv_omitido,
+            ((ctx or {}).get("user_text") or "")[:120],
+            text[:200],
+        )
+        return _gerar_script_convenio_nao_aceito(_conv_omitido, ctx)
 
     # 0-pre-bis. PERGUNTA REDUNDANTE DE CONVÊNIO (lead 24063769 Adriana,
     # 02/06/2026). Convênio já no ctx mas Lia perguntou de novo.
