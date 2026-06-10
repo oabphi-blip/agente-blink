@@ -1546,6 +1546,50 @@ def _gerar_script_convenio_nao_aceito(
     )
 
 
+# Bug C-19 (Fábio 10/06/2026) — Lia cai em "anotar preferência + equipe contata"
+# quando Medware está fora. Lead 24129390 Julia/Lucas + lead 24129498 Sarah.
+#
+# Filtro SEMPRE-ON (não depende de FILTROS_LEGACY) — invariante ético duro.
+# Detecta padrões de fallback "humano vai te ligar / equipe vai consultar".
+# Substitui pela frase honesta: "deixa eu reconsultar, volto em 1 min".
+
+_FALLBACK_EQUIPE_CONTATA_PATTERNS = (
+    re.compile(r"equipe\s+(vai\s+)?(entrar?\s+em\s+contato|consult|retorn|te\s+avis)", re.IGNORECASE),
+    re.compile(r"nossa\s+equipe\s+(retorna|entra|vai)", re.IGNORECASE),
+    re.compile(r"anotar?\s+(sua\s+)?prefer[êe]ncia.{0,80}(equipe|humano|nosso\s+time)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(vou|vamos)\s+anotar.{0,80}(equipe|equipe\s+entra|equipe\s+retorna|humano)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"vou\s+(passar|encaminhar)\s+(pra|para)\s+(nossa\s+)?equipe", re.IGNORECASE),
+    re.compile(r"vou\s+te\s+passar\s+(pra|para)\s+(um|nosso)\s+(atendente|humano|colega)", re.IGNORECASE),
+    re.compile(r"(retorno|volta(rei)?|entrarei)\s+em\s+contato.{0,40}(em\s+breve|hor[áa]rio\s+comercial|amanh[ãa])", re.IGNORECASE),
+)
+
+
+def _viola_fallback_equipe_contata(text: str, ctx: Optional[dict] = None) -> bool:
+    """True se Lia caiu em fallback 'equipe vai te contatar / anotar preferência'.
+
+    Não vale se o paciente foi REALMENTE escalado pra humano (handoff válido).
+    Casos reais: leads 24129390 Julia/Lucas, 24129498 Sarah — Medware 503 deixou
+    Lia em loop "deixa eu consultar" → caiu em "equipe entra em contato".
+    """
+    if not text:
+        return False
+    for p in _FALLBACK_EQUIPE_CONTATA_PATTERNS:
+        if p.search(text):
+            return True
+    return False
+
+
+def _gerar_resposta_honesta_medware_down(ctx: Optional[dict] = None) -> str:
+    """Substitui fallback 'equipe contata' pela frase honesta de reconsulta."""
+    known = (ctx or {}).get("known") or {}
+    nome = known.get("nome_contato") or known.get("nome_paciente") or ""
+    saudacao = f"{nome.split()[0]}, " if nome else ""
+    return (
+        f"{saudacao}deixa eu reconsultar a agenda real aqui pra você — "
+        "volto em 1 minuto com os horários certos."
+    )
+
+
 # Bug C-22 (Fábio 10/06/2026) — Lia ignora pergunta sobre convênio NÃO aceito.
 # Lead 24130752 Sandra: "vocês atendem GDF?" — Lia simplesmente PULOU pra
 # "vamos marcar com Karla, me passa dados". Sem reconhecer GDF não credenciado,
@@ -1664,6 +1708,18 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             _conv_violado, text[:200],
         )
         return _gerar_script_convenio_nao_aceito(_conv_violado, ctx)
+
+    # 0-Juliene. Bug C-19 (leads 24129390 Julia/Lucas + 24129498 Sarah,
+    # 10/06/2026). Quando Medware está fora (HTTP 503) Lia tentou consultar,
+    # falhou, e caiu em fallback "equipe vai entrar em contato" / "anotar
+    # preferência + equipe consulta". Filtro SEMPRE-ON (independe de
+    # FILTROS_LEGACY) substitui pela frase honesta de reconsulta.
+    if _viola_fallback_equipe_contata(text, ctx):
+        log.error(
+            "[FILTRO C-19] FALLBACK EQUIPE CONTATA bloqueado — Lia caiu em "
+            "'equipe vai contatar/anotar preferência'. Texto: %r", text[:200],
+        )
+        return _gerar_resposta_honesta_medware_down(ctx)
 
     # 0-INAS-bis. Bug C-22 (lead 24130752 Sandra, 10/06/2026 17:54 BRT).
     # Paciente perguntou "atendem GDF?" — Lia ignorou e pulou pra "vamos
