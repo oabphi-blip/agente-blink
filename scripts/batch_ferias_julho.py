@@ -462,11 +462,23 @@ def main() -> None:
                 time.sleep(0.3)
                 continue
 
-            # Buscar nome do contato pra body_param (mais natural que nome do paciente bebê)
+            # Buscar nome do contato pra body_param.
+            # Bug 11/06 (Fábio, lead 22723784 Enzo Olivi): NUNCA cair pro nome do
+            # paciente como fallback — o contato é a pessoa que recebe a mensagem,
+            # geralmente o responsável (mãe/pai). Se contato vazio → "olá" puro.
             contato_nome = get_lead_main_contact_name(lead)
-            primeiro = get_first_name(contato_nome) or get_first_name(nome)
-            if not primeiro:
-                primeiro = "olá"
+            primeiro = get_first_name(contato_nome)
+            # Validação anti-fallback-paciente: nome inválido vira "olá"
+            try:
+                from voice_agent.contato_nome import nome_contato_invalido
+                if nome_contato_invalido(primeiro):
+                    primeiro = "olá"
+            except ImportError:
+                # Fallback se import falhar: regras mínimas
+                proibidos = {"voce", "ola", "oi", "cliente", "paciente",
+                             "test", "teste", "inbra", "lia", ""}
+                if not primeiro or primeiro.lower() in proibidos:
+                    primeiro = "olá"
 
             # Disparar
             result = disparar(lead_id, primeiro, "Dra. Karla")
