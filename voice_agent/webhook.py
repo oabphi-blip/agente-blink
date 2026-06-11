@@ -4433,6 +4433,171 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # DISPARO FRIO DIRETO (task #309 — Fábio 11/06/2026)
+    # ================================================================
+    # Caso urgente: "estamos sem leads pra atendimento". Endpoint
+    # `/admin/disparar-categoria` retorna 0 porque (a) renomear leads
+    # (#227) tirou prefixo [R]/[E]/[C] do nome, (b) dedup Redis 24h
+    # ainda vigente. Este endpoint:
+    #   1. Lista leads em 2.LEADS FRIO (sem filtrar por keywords no nome)
+    #   2. Exclui SÓ leads cujo nome menciona convênio bloqueado
+    #   3. Dispara template aprovado (default 1020_retorno_mais_de_1_ano_v1)
+    #   4. Dedup Redis 24h per-lead (chave própria — bypassa disparar-categoria)
+    @app.post("/admin/disparar-leads-frio-direto")
+    @app.get("/admin/disparar-leads-frio-direto")
+    def admin_disparar_leads_frio_direto(request: Request) -> JSONResponse:
+        """Dispara template aprovado pra leads em 2.LEADS FRIO sem filtro
+        de prefixo no nome.
+
+        Query params:
+          - max (default 30, max 100)
+          - template (default 1020_retorno_mais_de_1_ano_v1)
+          - dry_run (true/false, default false)
+          - skip_dedup (true/false, default false — pula dedup Redis)
+          - status_id (default 101508307 = 2.LEADS FRIO)
+          - secret (obrigatório se WEBHOOK_SECRET setado)
+
+        body_params do template 1020:
+          {{1}} = primeiro_nome_contato
+          {{2}} = primeiro_nome_paciente (=mesmo)
+          {{3}} = "data anterior" (fallback — não há data precisa no Kommo)
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        import time as _t
+
+        q = request.query_params
+        try:
+            max_leads = min(int(q.get("max") or "30"), 100)
+        except ValueError:
+            max_leads = 30
+        try:
+            status_id = int(q.get("status_id") or "101508307")
+        except ValueError:
+            status_id = 101508307
+        template_name = (q.get("template") or "1020_retorno_mais_de_1_ano_v1").strip()
+        dry_run = (q.get("dry_run") or "").lower() in ("1", "true", "yes")
+        skip_dedup = (q.get("skip_dedup") or "").lower() in ("1", "true", "yes")
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        # Convênios bloqueados — exclusão por keyword no nome do lead
+        excluir_keywords = [
+            "INAS", "GDF", "CASSI", "SULAMERICA", "SUL AMERICA",
+            "BRADESCO", "UNIMED",
+        ]
+
+        try:
+            leads = kommo_client.list_stale_leads(
+                pipeline_id=8601819, limit=max_leads * 5,
+            ) or []
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                {"error": f"falha buscando leads: {exc}"}, status_code=500,
+            )
+
+        # Filtra apenas leads no status alvo (list_stale_leads pode
+        # devolver de vários status do pipeline)
+        leads = [
+            l for l in leads
+            if isinstance(l, dict) and l.get("status_id") == status_id
+        ]
+
+        # Dedup Redis 24h — chave própria pra não conflitar com /disparar-categoria
+        _r = getattr(pipeline, "_redis", None)
+
+        candidatos = []
+        descartados = {"excluido_convenio": 0, "dedup_24h": 0}
+        for lead in leads:
+            if len(candidatos) >= max_leads:
+                break
+            nome_lead = (lead.get("name") or "").upper()
+            if any(ex in nome_lead for ex in excluir_keywords):
+                descartados["excluido_convenio"] += 1
+                continue
+            lead_id = lead.get("id")
+            if not lead_id:
+                continue
+            if not skip_dedup and _r is not None:
+                key = f"blink:disparo_frio_direto:{lead_id}"
+                try:
+                    if _r.get(key):
+                        descartados["dedup_24h"] += 1
+                        continue
+                except Exception:  # noqa: BLE001
+                    pass
+            candidatos.append(int(lead_id))
+
+        if not candidatos:
+            return JSONResponse({
+                "ok": True, "total": 0,
+                "msg": "Nenhum lead casou os filtros",
+                "encontrados": len(leads),
+                "descartados": descartados,
+                "filtros": {"status_id": status_id, "max": max_leads},
+            })
+
+        ok_count = 0
+        falhas_count = 0
+        detalhes = []
+        # Template 1020 precisa de 3 body_params; outros templates podem
+        # precisar de 1 (default). Pra 1020 montamos os 3 com lookup prévio.
+        precisa_3_params = "1020" in template_name
+        for lead_id in candidatos:
+            body_params_override = None
+            if precisa_3_params:
+                try:
+                    info = kommo_client.get_lead_main_contact(lead_id)
+                except Exception:  # noqa: BLE001
+                    info = None
+                nome = (info or {}).get("nome") or ""
+                primeiro = _primeiro_nome_lead(nome) or "olá"
+                body_params_override = [primeiro, primeiro, "consulta anterior"]
+            res = _disparar_template_aprovado_para_lead(
+                lead_id, kommo_client, wa_cloud,
+                dry_run=dry_run,
+                template_override=template_name,
+                body_params_override=body_params_override,
+            )
+            if not dry_run and res.get("ok") and _r is not None:
+                try:
+                    _r.setex(
+                        f"blink:disparo_frio_direto:{lead_id}",
+                        24 * 60 * 60, "1",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+            res["lead_id"] = lead_id
+            if res.get("ok"):
+                ok_count += 1
+            else:
+                falhas_count += 1
+            detalhes.append(res)
+
+        return JSONResponse({
+            "ok": True,
+            "template": template_name,
+            "status_id": status_id,
+            "encontrados": len(leads),
+            "candidatos": len(candidatos),
+            "disparados_ok": ok_count,
+            "falhas": falhas_count,
+            "descartados": descartados,
+            "dry_run": dry_run,
+            "detalhes": detalhes,
+        })
+
+    # ================================================================
     # DISPARO POR CATEGORIA (task #214 — Opção C — 04/06/2026)
     # ================================================================
     @app.post("/admin/disparar-categoria")
