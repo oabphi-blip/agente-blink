@@ -2393,6 +2393,139 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             log.warning("[ADMIN FORCE-MEDWARE] exception: %s", e)
             return JSONResponse({"ok": False, "exception": str(e)[:300]})
 
+    @app.get("/admin/medware-pacientes-sem-retorno")
+    def admin_medware_pacientes_sem_retorno(request: Request) -> JSONResponse:
+        """Server-side: lista pacientes Medware que não consultam há mais de
+        N meses (default 12). Filtra por status==5 (Realizado), telefone E.164
+        válido, e deduplica por codPaciente. (Fábio 11/06/2026 — usado pela
+        campanha 'retorno > 1 ano' pra ter Medware como fonte da verdade.)
+
+        Query params:
+          - secret (obrigatório) = WEBHOOK_SECRET
+          - meses_min (default 12) = mínimo de meses desde a última consulta
+          - meses_busca (default 30) = janela retroativa de busca
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        if pipeline.medware is None:
+            return JSONResponse({"error": "Medware não configurado"})
+
+        import re
+        from collections import defaultdict
+        from datetime import datetime as _dt, timedelta as _td
+
+        try:
+            meses_min = int(request.query_params.get("meses_min") or "12")
+            meses_busca = int(request.query_params.get("meses_busca") or "30")
+        except ValueError:
+            meses_min, meses_busca = 12, 30
+
+        hoje = _dt.now()
+        limite = hoje - _td(days=meses_min * 30)
+        inicio_busca = hoje - _td(days=meses_busca * 30)
+
+        def _norm_phone(raw):
+            if not raw:
+                return ""
+            digitos = re.sub(r"\D", "", str(raw))
+            if not digitos:
+                return ""
+            if not digitos.startswith("55") and len(digitos) >= 10:
+                digitos = "55" + digitos
+            if len(digitos) < 12 or len(digitos) > 13:
+                return ""
+            return digitos
+
+        todos_ag = []
+        cursor = inicio_busca
+        paginas = 0
+        while cursor < hoje:
+            prox = cursor + _td(days=30)
+            if prox > hoje:
+                prox = hoje
+            di = cursor.strftime("%d/%m/%Y")
+            df = prox.strftime("%d/%m/%Y")
+            try:
+                # Buscar Karla (12080) + Fabrício (12081) separadamente
+                for cod_med in (12080, 12081):
+                    novos = pipeline.medware.listar_agendamentos(
+                        di, df, cod_medico=cod_med,
+                    )
+                    if isinstance(novos, list):
+                        todos_ag.extend(novos)
+                paginas += 1
+            except Exception as e:  # noqa: BLE001
+                log.warning("Medware listar_agendamentos %s-%s: %s", di, df, e)
+            cursor = prox
+
+        # Indexar por paciente
+        por_paciente = {}
+        for ag in todos_ag:
+            if (ag or {}).get("codStatusAgendamento") != 5:
+                continue
+            paciente = ag.get("paciente") or {}
+            cod = paciente.get("codPaciente")
+            if not cod:
+                continue
+            try:
+                data_ag = _dt.strptime(
+                    ag.get("dataHoraAgendada", ""), "%d/%m/%Y %H:%M",
+                )
+            except Exception:
+                continue
+            bucket = por_paciente.setdefault(cod, {
+                "codPaciente": cod,
+                "nome": paciente.get("nome", ""),
+                "telefone_bruto": paciente.get("telefone", ""),
+                "dataNascimento": paciente.get("dataNascimento", ""),
+                "cpf": paciente.get("cpf", ""),
+                "ultima_data": data_ag,
+                "ultima_codMedico": (ag.get("medico") or {}).get("codMedico"),
+                "ultima_codUnidade": ag.get("codUnidade"),
+                "total_consultas": 0,
+            })
+            bucket["total_consultas"] += 1
+            if data_ag > bucket["ultima_data"]:
+                bucket["ultima_data"] = data_ag
+                bucket["ultima_codMedico"] = (ag.get("medico") or {}).get("codMedico")
+                bucket["ultima_codUnidade"] = ag.get("codUnidade")
+
+        elegiveis = []
+        for p in por_paciente.values():
+            if p["ultima_data"] >= limite:
+                continue
+            tel = _norm_phone(p["telefone_bruto"])
+            if not tel:
+                continue
+            elegiveis.append({
+                "codPaciente": p["codPaciente"],
+                "nome": p["nome"],
+                "telefone": tel,
+                "dataNascimento": p["dataNascimento"],
+                "cpf": p["cpf"],
+                "ultimaConsulta": p["ultima_data"].strftime("%d/%m/%Y"),
+                "ultimaConsulta_iso": p["ultima_data"].strftime("%Y-%m-%d"),
+                "totalConsultas": p["total_consultas"],
+                "codMedico": p["ultima_codMedico"],
+                "codUnidade": p["ultima_codUnidade"],
+            })
+
+        return JSONResponse({
+            "ok": True,
+            "paginas_varridas": paginas,
+            "total_agendamentos": len(todos_ag),
+            "pacientes_unicos": len(por_paciente),
+            "elegiveis": len(elegiveis),
+            "meses_min": meses_min,
+            "data_corte": limite.strftime("%d/%m/%Y"),
+            "pacientes": elegiveis,
+        })
+
     @app.get("/admin/medware-schema-check")
     def admin_medware_schema_check(request: Request) -> JSONResponse:
         """Bate os cods hardcoded (MEDICO_CODES, UNIDADE_CODES, PLANO_CODES)
