@@ -4961,6 +4961,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         106184983,  # 7.1-NO-SHOW
     }
 
+    # Etapas onde IA deve ser AUTO-DESATIVADA quando lead entra
+    # (Bug C-24a, Fábio 11/06/2026): humano queixou que mesmo movendo
+    # pra ATENDIMENTO HUMANO, CIRURGIA, LENTES etc, Lia continuava
+    # respondendo. Webhook agora desativa automaticamente.
+    _STATUS_INATIVOS_IA = {
+        106563343,  # 1-ATENDIMENTO HUMANO
+        91486864,   # 8-REALIZADO CONSULTA (pós-consulta = humano)
+        106157327,  # 09-PRÓXIMA CONSULTA
+        106157139,  # 10-CIRURGIAS ANDAMENTO
+        106484343,  # 11-LENTES ANDAMENTO
+        106484347,  # 12-FORNECEDORES
+        142,        # Closed - won
+        143,        # Closed - lost
+    }
+
     @app.post("/admin/kommo-trigger-status-change")
     @app.get("/admin/kommo-trigger-status-change")
     async def admin_kommo_trigger_status_change(request: Request) -> JSONResponse:
@@ -5021,11 +5036,31 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 {"error": "kommo_client indisponível"}, status_code=500,
             )
 
-        # Se nova etapa não é uma das ativas, ignora silenciosamente.
+        # Bug C-24a (Fábio 11/06/2026): se nova etapa é INATIVA pra IA,
+        # força ATIVADO IA = Desativado. Cobre 1-ATENDIMENTO HUMANO,
+        # 8-REALIZADO, 09-PRÓX, 10-CIRURGIAS, 11-LENTES, 12-FORNECEDORES,
+        # 142, 143.
+        if status_int and status_int in _STATUS_INATIVOS_IA:
+            try:
+                ok_off = kommo_client.update_lead_fields(
+                    lead_id_int, {"ativado_ia": "Desativado"},
+                )
+            except Exception as e:  # noqa: BLE001
+                return JSONResponse(
+                    {"error": f"desativacao falhou: {e}"}, status_code=500,
+                )
+            return JSONResponse({
+                "ok": bool(ok_off), "lead_id": lead_id_int,
+                "status_id": status_int, "acao": "ia_desativada",
+                "motivo": "etapa inativa pra IA (Bug C-24a)",
+            })
+
+        # Se nova etapa não é uma das ativas nem inativas conhecidas,
+        # ignora silenciosamente.
         if status_int and status_int not in _STATUS_ATIVOS_IA:
             return JSONResponse({
                 "ok": True, "lead_id": lead_id_int, "status_id": status_int,
-                "acao": "ignorado", "motivo": "etapa não está na lista ativa",
+                "acao": "ignorado", "motivo": "etapa não está na lista ativa nem inativa",
             })
 
         try:

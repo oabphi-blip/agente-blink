@@ -146,7 +146,13 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 > com as 1-2 lições principais. Esqueço o que está mais embaixo. Por isso vive aqui.
 > Regra: substituir a lição mais antiga pela nova ao adicionar (max 5).
 
-### 0. (11/06/2026) Bug C-23 — Lia perguntou médico em vez de antecipar Karla (Adrielly 24135088)
+### 0. (11/06/2026) Bug C-24 — Dois fixes: auto-desativar IA em etapas inativas + Fabrício 50+ (não "exclusivamente catarata")
+
+**Bug C-24a — Auto-desativar IA:** equipe humana reclamou que quando movia lead pra "1-ATENDIMENTO HUMANO" / "10-CIRURGIAS" / "11-LENTES" / "12-FORNECEDORES" / fechados, Lia continuava respondendo. Endpoint `/admin/kommo-trigger-status-change` agora detecta `_STATUS_INATIVOS_IA = {106563343, 91486864, 106157327, 106157139, 106484343, 106484347, 142, 143}` e força `ATIVADO IA = Desativado`. Webhook Kommo "Status do lead alterado" continua o mesmo, só amplia comportamento.
+
+**Bug C-24b — Fabrício 50+ não "exclusivamente catarata":** Fábio (11/06): "tem que ter inteligência interna considerando protocolos. Paciente pode não saber que tem catarata — dizer 'exclusivamente' é restritivo". Regra E5.7-A reescrita: matching médico por IDADE + MOTIVO. Pediátrico → Karla. Adulto 18-49 + rotina → Karla APV. **Adulto 50+ + qualquer motivo → Dr. Fabrício, especialista em saúde ocular do adulto 50+**. Catarata declarada (qualquer idade) → Fabrício. APV/Prisma/Estrabismo qualquer idade → Karla. Tom proibido: "exclusivamente catarata", "só faz cirurgia". Tom correto: "Para adultos 50+ o atendimento é com Dr. Fabrício Freitas".
+
+### 1. (11/06/2026) Bug C-23 — Lia perguntou médico em vez de antecipar Karla (Adrielly 24135088)
 Adrielly 23 anos, rotina de óculos, particular. Campo MEDICOS no Kommo = "Dr. Fabrício Freitas" (errado — Fabrício SÓ catarata). Lia entrou em loop de 8 mensagens em 4 min, terminando com **"Deixa eu reconferir aqui qual médico você tinha preferência. Pode me confirmar o nome do médico que você quer atender?"**
 
 **Causa raiz:**
