@@ -146,7 +146,19 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 > com as 1-2 lições principais. Esqueço o que está mais embaixo. Por isso vive aqui.
 > Regra: substituir a lição mais antiga pela nova ao adicionar (max 5).
 
-### 0. (10/06/2026) Bug C-22 — Lia ignorou pergunta sobre GDF (Sandra 24130752)
+### 0. (11/06/2026) Bug C-23 — Lia perguntou médico em vez de antecipar Karla (Adrielly 24135088)
+Adrielly 23 anos, rotina de óculos, particular. Campo MEDICOS no Kommo = "Dr. Fabrício Freitas" (errado — Fabrício SÓ catarata). Lia entrou em loop de 8 mensagens em 4 min, terminando com **"Deixa eu reconferir aqui qual médico você tinha preferência. Pode me confirmar o nome do médico que você quer atender?"**
+
+**Causa raiz:**
+1. Lia leu MEDICOS do Kommo e ficou confusa (Fabrício não atende rotina)
+2. Em vez de IGNORAR o campo errado e usar a regra (rotina = Karla), pediu pro paciente decidir
+3. Paciente não sabe nome do médico → trava o fluxo
+
+**Regra correta:** quando motivo é rotina/check-up/óculos/queixa visual geral SEM catarata, médico é SEMPRE Dra. Karla. PROIBIDO perguntar "qual médico você quer". Lia decide pela especialidade do motivo + anuncia proativamente + corrige campo MEDICOS no Kommo se necessário. Fabrício SÓ atende catarata (avaliação + cirurgia).
+
+**Fix:** regra E5.7-A adicionada no `_MASTER_INSTRUCTION.md`. Anti-loop: nunca >3 mensagens sem resposta do paciente.
+
+### 1. (10/06/2026) Bug C-22 — Lia ignorou pergunta sobre GDF (Sandra 24130752)
 Sandra perguntou "atendem GDF?" e Lia simplesmente pulou pra "vamos marcar com Karla, me passa nome + data nascimento". Ignorou a pergunta sobre convênio NÃO aceito.
 
 **Causa raiz:** filtro `_viola_disse_atende_convenio_nao_aceito` (C-16) só pega Lia DIZENDO que atende — não pega OMISSÃO. Set `_CONVENIOS_NAO_ACEITOS_KB18` também não tinha "gdf" sozinho (só "gdf saúde").
