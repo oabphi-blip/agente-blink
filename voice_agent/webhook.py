@@ -4091,6 +4091,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             body_params = body_params_override
         elif template_lf_resolved_params is not None:
             body_params = template_lf_resolved_params
+        elif "1020" in template_name:
+            # Template 1020_retorno_mais_de_1_ano_v1 espera 3 vars:
+            # {{1}}=nome contato, {{2}}=nome paciente, {{3}}=data anterior
+            body_params = [primeiro, primeiro, "consulta anterior"]
         else:
             body_params = [primeiro]
 
@@ -4550,24 +4554,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         ok_count = 0
         falhas_count = 0
         detalhes = []
-        # Template 1020 precisa de 3 body_params; outros templates podem
-        # precisar de 1 (default). Pra 1020 montamos os 3 com lookup prévio.
-        precisa_3_params = "1020" in template_name
+        # Helper detecta template 1020 internamente e monta 3 body_params
+        # automaticamente. Não precisamos fazer lookup extra aqui.
         for lead_id in candidatos:
-            body_params_override = None
-            if precisa_3_params:
-                try:
-                    info = kommo_client.get_lead_main_contact(lead_id)
-                except Exception:  # noqa: BLE001
-                    info = None
-                nome = (info or {}).get("nome") or ""
-                primeiro = _primeiro_nome_lead(nome) or "olá"
-                body_params_override = [primeiro, primeiro, "consulta anterior"]
             res = _disparar_template_aprovado_para_lead(
                 lead_id, kommo_client, wa_cloud,
                 dry_run=dry_run,
                 template_override=template_name,
-                body_params_override=body_params_override,
             )
             if not dry_run and res.get("ok") and _r is not None:
                 try:
