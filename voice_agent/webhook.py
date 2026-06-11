@@ -4285,6 +4285,57 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "lead_id": lead_id, "kommo_nota_id": nota_id,
         })
 
+    @app.get("/admin/disparar-template-get/{lead_id}")
+    def admin_disparar_template_get(
+        lead_id: int, request: Request,
+    ) -> JSONResponse:
+        """Variante GET de /admin/disparar-template — aceita query params:
+
+          - template (str, obrigatório) — nome do template aprovado Meta
+          - body_params (str, opcional) — CSV separado por '|' (pipe)
+            ex: body_params=Cecilia|Cecilia|consulta%20anterior
+          - dry_run (bool, default false)
+          - secret (obrigatório)
+
+        Pensado pra disparo autônomo via web_fetch (que só faz GET).
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        q = request.query_params
+        template = q.get("template")
+        body_params_raw = q.get("body_params")
+        dry_run = (q.get("dry_run") or "").lower() in ("1", "true", "yes")
+
+        if not template:
+            return JSONResponse(
+                {"error": "query param 'template' obrigatório"},
+                status_code=400,
+            )
+
+        body_params = None
+        if body_params_raw:
+            body_params = [p.strip() for p in body_params_raw.split("|") if p.strip()]
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        res = _disparar_template_aprovado_para_lead(
+            lead_id, kommo_client, wa_cloud, dry_run=dry_run,
+            template_override=template,
+            body_params_override=body_params,
+        )
+        res["lead_id"] = lead_id
+        return JSONResponse(res)
+
     @app.post("/admin/disparar-template/{lead_id}")
     async def admin_disparar_template_custom(
         lead_id: int, request: Request,
