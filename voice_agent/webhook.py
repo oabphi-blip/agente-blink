@@ -4948,7 +4948,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # (task #233, 05/06/2026). Sugestão Fábio: humano move pra
     # AGENDAR/FRIO/AGENDADO → IA volta automaticamente.
     # ================================================================
-    # Etapas onde IA deve estar SEMPRE ativa
+    # Etapas onde IA deve estar SEMPRE ativa.
+    # Revisado 11/06/2026 (Fábio): incluir REALIZADO, PRÓXIMA, Closed-won/lost
+    # — Lia faz follow-up / NPS / reativação nessas etapas.
     _STATUS_ATIVOS_IA = {
         96441724,   # 0-ETAPA ENTRADA
         106919911,  # 0-a classificar
@@ -4959,21 +4961,23 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         101109455,  # 6-CONFIRMAR
         106653499,  # 7.CONFIRMADO
         106184983,  # 7.1-NO-SHOW
+        91486864,   # 8-REALIZADO CONSULTA
+        106157327,  # 09-PRÓXIMA CONSULTA
+        142,        # Closed - won
+        143,        # Closed - lost
     }
 
     # Etapas onde IA deve ser AUTO-DESATIVADA quando lead entra
-    # (Bug C-24a, Fábio 11/06/2026): humano queixou que mesmo movendo
-    # pra ATENDIMENTO HUMANO, CIRURGIA, LENTES etc, Lia continuava
-    # respondendo. Webhook agora desativa automaticamente.
+    # (Bug C-24a, Fábio 11/06/2026 revisado 13:40 BRT): lista RESTRITA
+    # a 4 etapas — humano queixou que mesmo movendo pra essas etapas
+    # operacionais, Lia continuava respondendo. Outras etapas (8-REALIZADO,
+    # 09-PRÓXIMA, Closed-won/lost) MANTÊM IA ativada porque Lia faz
+    # follow-up / NPS / reativação nesses estados.
     _STATUS_INATIVOS_IA = {
         106563343,  # 1-ATENDIMENTO HUMANO
-        91486864,   # 8-REALIZADO CONSULTA (pós-consulta = humano)
-        106157327,  # 09-PRÓXIMA CONSULTA
         106157139,  # 10-CIRURGIAS ANDAMENTO
         106484343,  # 11-LENTES ANDAMENTO
         106484347,  # 12-FORNECEDORES
-        142,        # Closed - won
-        143,        # Closed - lost
     }
 
     @app.post("/admin/kommo-trigger-status-change")
