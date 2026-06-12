@@ -146,6 +146,26 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 > com as 1-2 lições principais. Esqueço o que está mais embaixo. Por isso vive aqui.
 > Regra: substituir a lição mais antiga pela nova ao adicionar (max 5).
 
+### 0. (12/06/2026) Bug C-27 — Duplicação lead + notas vazias + KOMMO_TOKEN expirado (HTTP 403)
+
+**3 sintomas, 1 causa raiz arquitetural:**
+
+1. **Duplicação de lead.** Mesmo telefone gera N leads diferentes ao longo do tempo. Ex confirmado 12/06: telefone `+556182060168` tem 6 leads (Pryscilla / Pedro Costa Figueiredo / Lead vazio) entre abril/2024 e hoje 12/06 16:21. Webhook Kommo cria lead novo a cada nova conversa por chat_id NÃO mapeado, **sem dedup por telefone na entrada**. Atendente humana fica perdida porque não enxerga histórico.
+
+2. **Notas vazias em vários leads** (Samuel 10275014, Esther 24060221, Pryscilla 24142668). Causa raiz suspeita: `KOMMO_TOKEN` do agent está com HTTP 403 há dias (task #242 URGENTE pending desde 09/06). `kommo.add_note` falha SILENCIOSAMENTE no fluxo da Lia conversando. Atendente vê paciente respondendo "sim" mas não sabe o que Lia perguntou.
+
+3. **Tracing OFF em prod.** `/admin/replay/{lead_id}` retorna `total_turnos: 0` com observação "Para ativar coleta: TRACING_ENABLED=1". Sem tracing, replay de sessão impossível.
+
+**Fix arquitetural (pendente):**
+
+- **A. Fábio Easypanel (P0):** renovar `KOMMO_TOKEN` (regenerar via Kommo → API → Token) + setar `TRACING_ENABLED=1` + Implantar. Resolve sintomas 2 e 3 imediatamente.
+- **B. Endpoint `/admin/dedup-merge-por-telefone/{lead_id}`** (a fazer): dado um lead, busca outros leads com mesmo telefone (Kommo `/leads?query=PHONE`), lista candidatos pra merge, opcionalmente faz merge automático se há 1 lead ativo claro. Resolve sintoma 1.
+- **C. `template_texts.py` ampliação**: hoje só renderiza body+botões pra DISPAROS via endpoint admin (campanhas). Pro fluxo normal da Lia conversando, `responder.py` chama `kommo.add_note` com texto literal — mas falha silenciosamente quando token expira. Adicionar try/except + log estruturado quando add_note falhar.
+
+**Erro 226 do Kommo:** lead recém-criado (segundos atrás) pode rejeitar `add_note` com HTTP 400 erro 226 (race condition de indexação). Workaround: gravar nota no lead ATIVO mais antigo do mesmo telefone que aceita.
+
+**Lição pessoal do Claude/Cowork:** task #242 está pending como URGENTE desde 09/06 e eu continuei agindo como se não fosse causa-raiz. Fechar 2 bugs antigos (#242 KOMMO_TOKEN + #150 Mapa CHAT_ID) resolve 60% do que Fábio sente hoje. Disciplinar prioridade > caçar bugs novos.
+
 ### 0. (11/06/2026) Bug C-24 — Dois fixes: auto-desativar IA em etapas inativas + Fabrício 50+ (não "exclusivamente catarata")
 
 **Bug C-24a — Auto-desativar IA:** equipe humana reclamou que quando movia lead pra etapas operacionais, Lia continuava respondendo. **Lista RESTRITA (Fábio 11/06 13:40):** `_STATUS_INATIVOS_IA = {106563343 ATENDIMENTO HUMANO, 106157139 CIRURGIAS, 106484343 LENTES, 106484347 FORNECEDORES}` — só essas 4. As demais (8-REALIZADO, 09-PRÓXIMA, Closed-won, Closed-lost) MANTÊM IA ativa porque Lia faz follow-up / NPS / reativação nelas. Endpoint `/admin/kommo-trigger-status-change` força `ATIVADO IA = Desativado` quando entra nas 4, e `ATIVADO IA = Ativado` em todas as outras etapas operacionais.

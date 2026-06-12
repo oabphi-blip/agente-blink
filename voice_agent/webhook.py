@@ -3885,6 +3885,183 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # ================================================================
     # DISPARO AUTOMÁTICO POR LEAD (task #212 — 04/06/2026)
     # ================================================================
+    # ================================================================
+    # DEDUP MERGE POR TELEFONE (Bug C-27 — Fábio 12/06/2026)
+    # ================================================================
+    # Webhook Kommo cria lead novo a cada nova conversa por chat_id
+    # não mapeado, mesmo quando já existe lead ativo do mesmo telefone.
+    # Endpoint dado um lead, busca outros leads do mesmo telefone,
+    # ordena por relevância (ativos primeiro), retorna pra atendente
+    # decidir merge. Não merge automático — só lista candidatos
+    # explicitamente, com sumário pra decisão informada.
+    @app.get("/admin/dedup-merge-por-telefone/{lead_id}")
+    def admin_dedup_merge_por_telefone(
+        lead_id: int, request: Request,
+    ) -> JSONResponse:
+        """Dado um lead, busca outros leads com mesmo telefone E retorna
+        candidatos pra merge ranqueados.
+
+        Query params:
+          - secret (obrigatório)
+
+        Retorna:
+          {
+            "lead_id": <ID consultado>,
+            "telefone": "<telefone E.164>",
+            "nome": "<nome do contato>",
+            "status_atual": <status_id do lead consultado>,
+            "candidatos_merge": [
+              {"id", "nome", "status_id", "status_nome",
+               "created_at", "updated_at", "is_ativo", "prioridade"},
+              ...
+            ],
+            "sugestao": "merge_para_lead_X" | "nenhum_match" | "manter_separado",
+            "racional": "<explicação>"
+          }
+
+        Status considerados ATIVOS (não merge se estão sendo trabalhados):
+          0-ENTRADA (96441724), 0-a classificar (106919911),
+          2.LEADS FRIO (101508307), 3-AGENDAR (102560495),
+          4.REAGENDAR (106184631), 5-AGENDADO (101507507),
+          6-CONFIRMAR (101109455), 7.CONFIRMADO (106653499),
+          7.1-NO-SHOW (106184983).
+
+        Status considerados FINALIZADOS (peso baixo na priorização):
+          8-REALIZADO (91486864), Closed-won (142), Closed-lost (143),
+          1-ATENDIMENTO HUMANO (106563343).
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        # 1. Pega telefone do lead consultado
+        try:
+            info = kommo_client.get_lead_main_contact(lead_id)
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                {"error": f"falha buscar contato do lead {lead_id}: {exc}"},
+                status_code=500,
+            )
+
+        telefone = (info or {}).get("telefone") or ""
+        nome = (info or {}).get("nome") or ""
+        status_atual = (info or {}).get("status_id")
+        if not telefone:
+            return JSONResponse({
+                "ok": False, "lead_id": lead_id,
+                "erro": "lead sem telefone — impossível buscar duplicatas",
+            })
+
+        # 2. Busca outros leads com mesmo telefone via Kommo
+        try:
+            resultados = kommo_client.search_leads_by_text(telefone) or []
+        except AttributeError:
+            try:
+                resultados = kommo_client.search_leads(query=telefone) or []
+            except Exception:  # noqa: BLE001
+                resultados = []
+        except Exception:  # noqa: BLE001
+            resultados = []
+
+        STATUS_ATIVOS = {
+            96441724, 106919911, 101508307, 102560495, 106184631,
+            101507507, 101109455, 106653499, 106184983,
+        }
+        STATUS_FINALIZADOS = {
+            91486864, 142, 143, 106563343,
+        }
+        STATUS_NOMES = {
+            96441724: "0-ETAPA ENTRADA",
+            106919911: "0-a classificar",
+            101508307: "2.LEADS FRIO",
+            102560495: "3-AGENDAR",
+            106184631: "4.REAGENDAR",
+            101507507: "5-AGENDADO",
+            101109455: "6-CONFIRMAR",
+            106653499: "7.CONFIRMADO",
+            106184983: "7.1-NO-SHOW",
+            91486864: "8-REALIZADO",
+            142: "Closed-won",
+            143: "Closed-lost",
+            106563343: "1-ATENDIMENTO HUMANO",
+        }
+
+        candidatos = []
+        for r in resultados:
+            if not isinstance(r, dict):
+                continue
+            rid = r.get("id")
+            if not rid or int(rid) == int(lead_id):
+                continue  # exclui o próprio
+            r_status = r.get("status_id")
+            r_ativo = r_status in STATUS_ATIVOS
+            # Prioridade: ativos > finalizados; entre ativos, mais recente
+            prio = 0
+            if r_ativo:
+                prio += 1000
+            try:
+                prio += int(str(r.get("updated_at") or "0").replace("-", "").replace(":", "").replace("T", "").replace("Z", "")[:14])
+            except Exception:  # noqa: BLE001
+                pass
+            candidatos.append({
+                "id": rid,
+                "nome": r.get("name") or "",
+                "status_id": r_status,
+                "status_nome": STATUS_NOMES.get(r_status, f"id={r_status}"),
+                "created_at": r.get("created_at"),
+                "updated_at": r.get("updated_at"),
+                "is_ativo": r_ativo,
+                "prioridade": prio,
+            })
+
+        candidatos.sort(key=lambda x: x["prioridade"], reverse=True)
+
+        # 3. Decide sugestão
+        ativos = [c for c in candidatos if c["is_ativo"]]
+        sugestao = "manter_separado"
+        racional = "Sem leads ativos do mesmo telefone — manter este lead."
+        if not candidatos:
+            sugestao = "nenhum_match"
+            racional = "Nenhum outro lead do mesmo telefone encontrado."
+        elif len(ativos) == 1:
+            outro = ativos[0]
+            if outro["id"] != lead_id:
+                sugestao = f"merge_para_lead_{outro['id']}"
+                racional = (
+                    f"Há 1 lead ativo do mesmo telefone (#{outro['id']} em "
+                    f"{outro['status_nome']}). Merge SUGERIDO pra esse "
+                    f"lead pra preservar histórico."
+                )
+        elif len(ativos) > 1:
+            sugestao = "merge_para_ativo_mais_recente"
+            racional = (
+                f"Há {len(ativos)} leads ativos do mesmo telefone. "
+                f"Mais recente: #{ativos[0]['id']} em {ativos[0]['status_nome']}. "
+                f"Atendimento humano deve auditar e decidir."
+            )
+
+        return JSONResponse({
+            "ok": True,
+            "lead_id": lead_id,
+            "telefone": telefone,
+            "nome": nome,
+            "status_atual": status_atual,
+            "total_candidatos": len(candidatos),
+            "candidatos_merge": candidatos[:10],
+            "sugestao": sugestao,
+            "racional": racional,
+        })
+
     @app.post("/admin/disparar-lead/{lead_id}")
     @app.get("/admin/disparar-lead/{lead_id}")
     def admin_disparar_lead(lead_id: int, request: Request) -> JSONResponse:
@@ -4128,22 +4305,41 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception:  # noqa: BLE001
             pass
 
-        # Grava nota Kommo automática
+        # Grava nota Kommo automática — Fábio 11/06 noite: atendente
+        # precisa saber TEXTO da mensagem + PRÓXIMO PASSO claro.
         try:
             ts_br = _t.strftime("%d/%m/%Y %H:%M", _t.localtime())
             params_str = " | ".join(
                 f"{{{{{i+1}}}}}={p}" for i, p in enumerate(body_params)
             )
+            # Texto provável renderizado + próximo passo sugerido por template.
+            # Buscar via Meta Graph seria ideal mas custa req extra por disparo.
+            # Templates principais hardcoded — atualizar quando Fábio mudar.
+            from voice_agent.template_texts import (
+                renderizar_texto_template, proximo_passo_atendente,
+            )
+            texto_renderizado = renderizar_texto_template(
+                template_name, body_params, primeiro,
+            )
+            proximo_passo = proximo_passo_atendente(template_name)
             nota = (
-                f"[Lia — disparo automático {ts_br}]\n\n"
-                f"Canal: WhatsApp Cloud 8133 (template aprovado)\n"
-                f"Template: {template_name}\n"
-                f"Parâmetros: {params_str}\n"
-                f"Telefone: {telefone}\n"
+                f"📨 [Lia — disparo automático {ts_br}]\n\n"
+                f"CANAL: WhatsApp Cloud 8133\n"
+                f"TEMPLATE: {template_name}\n"
+                f"PARÂMETROS: {params_str}\n"
+                f"TELEFONE: {telefone}\n"
                 f"wamid: {wamid or 'n/a'}\n\n"
-                f"Quando paciente responder, Lia entra em conversa "
-                f"(ATIVADO IA? = Ativado) e grava agendamento autônomo "
-                f"no Medware (fix task #208)."
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📝 MENSAGEM ENVIADA AO PACIENTE:\n\n"
+                f"{texto_renderizado}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"🎯 PRÓXIMO PASSO PRA ATENDIMENTO HUMANO:\n\n"
+                f"{proximo_passo}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Lia continua ativa (ATIVADO IA? = Ativado). Se paciente "
+                f"responder, ela conduz conversa e grava agendamento "
+                f"autônomo no Medware (task #208). Atendente entra apenas "
+                f"se houver dúvida específica ou caso complexo."
             )
             kommo_client.add_note(lead_id=lead_id, text=nota)
         except Exception as exc:  # noqa: BLE001
@@ -4284,6 +4480,83 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "template": template, "body_params": body_params,
             "lead_id": lead_id, "kommo_nota_id": nota_id,
         })
+
+    @app.get("/admin/backfill-nota-disparo/{lead_id}")
+    def admin_backfill_nota_disparo(
+        lead_id: int, request: Request,
+    ) -> JSONResponse:
+        """Adiciona nota Kommo enriquecida (TEXTO + PRÓXIMO PASSO) num lead
+        que já recebeu disparo automático antes do fix de 11/06 noite.
+
+        Não dispara nada — só grava nota retroativa com texto provável do
+        template e próximo passo pro atendente humano.
+
+        Query params:
+          - template (str, obrigatório) — nome do template aprovado
+          - primeiro (str, opcional, default 'Você') — nome do contato
+          - secret (obrigatório)
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        import time as _t
+        from voice_agent.template_texts import (
+            renderizar_texto_template, proximo_passo_atendente,
+        )
+
+        q = request.query_params
+        template = q.get("template")
+        primeiro = (q.get("primeiro") or "Você").strip() or "Você"
+        if not template:
+            return JSONResponse(
+                {"error": "query param 'template' obrigatório"},
+                status_code=400,
+            )
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        texto_renderizado = renderizar_texto_template(
+            template, [primeiro], primeiro,
+        )
+        proximo = proximo_passo_atendente(template)
+        ts_br = _t.strftime("%d/%m/%Y %H:%M", _t.localtime())
+        nota = (
+            f"📨 [Lia — back-fill nota disparo {ts_br}]\n\n"
+            f"Disparo automático anterior NÃO incluía texto/próximo passo. "
+            f"Esta nota é retroativa pra ajudar atendimento.\n\n"
+            f"TEMPLATE USADO: {template}\n"
+            f"PARÂMETRO {{1}}: {primeiro}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📝 MENSAGEM ENVIADA AO PACIENTE:\n\n"
+            f"{texto_renderizado}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🎯 PRÓXIMO PASSO PRA ATENDIMENTO HUMANO:\n\n"
+            f"{proximo}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Lia ativa (ATIVADO IA? = Ativado). Se paciente responder, "
+            f"Lia conduz. Atendente só intervém se travar."
+        )
+        try:
+            kommo_client.add_note(lead_id=lead_id, text=nota)
+            return JSONResponse({
+                "ok": True, "lead_id": lead_id, "template": template,
+                "primeiro": primeiro,
+            })
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[BACKFILL-NOTA] falhou lead=%s: %s", lead_id, exc)
+            return JSONResponse(
+                {"ok": False, "lead_id": lead_id, "erro": str(exc)[:200]},
+                status_code=500,
+            )
 
     @app.get("/admin/disparar-template-get/{lead_id}")
     def admin_disparar_template_get(
