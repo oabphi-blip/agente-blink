@@ -1511,6 +1511,66 @@ class KommoClient:
             log.warning("Kommo search_leads_by_window erro: %s", e)
             return []
 
+    def search_leads_by_query(
+        self,
+        query: str,
+        pipeline_id: int | None = 8601819,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Busca leads via query texto (matching nome, contato, telefone, etc).
+
+        Origem: Bug C-27 Fábio 12/06/2026 — endpoint dedup-merge-por-telefone
+        precisava buscar todos leads do mesmo telefone, mas o método existente
+        `search_leads_by_window` filtra por created_at. Este aceita texto livre.
+
+        Args:
+            query: texto a buscar (nome paciente, telefone com ou sem DDI, etc).
+            pipeline_id: filtra dentro do pipeline ATENDE (8601819). None = all.
+            limit: máx leads por página.
+
+        Returns:
+            Lista de dicts de lead, vazia em erro.
+        """
+        if not query:
+            return []
+        try:
+            out: list[dict] = []
+            for page in range(1, 5):  # max 4 páginas = 200 leads
+                params: dict = {
+                    "query": str(query),
+                    "limit": min(int(limit), 50),
+                    "page": page,
+                }
+                if pipeline_id:
+                    params["filter[pipeline_id]"] = int(pipeline_id)
+                with httpx.Client(timeout=self.timeout) as c:
+                    r = c.get(
+                        f"{self._base}/leads",
+                        params=params,
+                        headers=self._headers,
+                    )
+                if r.status_code == 204:
+                    break
+                if r.status_code != 200:
+                    log.warning(
+                        "Kommo search_leads_by_query p%d: HTTP %d",
+                        page, r.status_code,
+                    )
+                    break
+                data = r.json() or {}
+                page_leads = list(
+                    ((data.get("_embedded") or {}).get("leads") or []),
+                )
+                if not page_leads:
+                    break
+                out.extend(page_leads)
+                if len(page_leads) < params["limit"]:
+                    break
+            return out
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo search_leads_by_query erro: %s", e)
+            return []
+
     def list_recent_notes(
         self,
         since: datetime,

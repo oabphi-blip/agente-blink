@@ -3886,6 +3886,70 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # DISPARO AUTOMÁTICO POR LEAD (task #212 — 04/06/2026)
     # ================================================================
     # ================================================================
+    # ATIVAÇÃO INTELIGENTE — preview da saudação (Fábio 12/06/2026)
+    # ================================================================
+    # Dado um lead, retorna a saudação personalizada que a Lia DEVE usar
+    # quando o paciente voltar. Demonstra que sabe quem é, recapitula
+    # onde parou. Substitui triagem genérica em leads recorrentes.
+    @app.get("/admin/ativacao-inteligente/{lead_id}")
+    def admin_ativacao_inteligente_preview(
+        lead_id: int, request: Request,
+    ) -> JSONResponse:
+        """Preview da saudação personalizada pra um lead.
+
+        Query params:
+          - secret (obrigatório)
+
+        Retorna:
+          {
+            "lead_id", "nome_lead",
+            "tipo": "generica" | "personalizada" | "lacuna_longa",
+            "saudacao": "<texto pronto>",
+            "campos_usados": [...],
+            "ancora_principal": "<dado citado mais forte>",
+            "pergunta_aberta": "<pergunta única no fim>"
+          }
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        try:
+            lead = kommo_client.get_lead(lead_id) or {}
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse(
+                {"error": f"falha buscar lead {lead_id}: {exc}"},
+                status_code=500,
+            )
+
+        # Normaliza custom_fields_values → custom_fields (formato esperado)
+        cfs_raw = lead.get("custom_fields_values") or lead.get("custom_fields") or []
+        lead_norm = {
+            "id": lead.get("id"),
+            "name": lead.get("name"),
+            "updated_at": lead.get("updated_at"),
+            "custom_fields": cfs_raw,
+        }
+
+        from voice_agent.ativacao_inteligente import (
+            gerar_saudacao_personalizada,
+        )
+        resultado = gerar_saudacao_personalizada(lead_norm)
+        resultado["lead_id"] = lead_id
+        resultado["nome_lead"] = lead.get("name")
+        return JSONResponse(resultado)
+
+    # ================================================================
     # DEDUP MERGE POR TELEFONE (Bug C-27 — Fábio 12/06/2026)
     # ================================================================
     # Webhook Kommo cria lead novo a cada nova conversa por chat_id
@@ -3964,12 +4028,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         # 2. Busca outros leads com mesmo telefone via Kommo
         try:
-            resultados = kommo_client.search_leads_by_text(telefone) or []
-        except AttributeError:
-            try:
-                resultados = kommo_client.search_leads(query=telefone) or []
-            except Exception:  # noqa: BLE001
-                resultados = []
+            resultados = kommo_client.search_leads_by_query(
+                query=telefone, pipeline_id=8601819, limit=50,
+            ) or []
         except Exception:  # noqa: BLE001
             resultados = []
 
