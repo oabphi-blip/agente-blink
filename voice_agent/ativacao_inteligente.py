@@ -187,3 +187,47 @@ def gerar_saudacao_personalizada(lead: dict) -> dict:
             else "Em que posso te ajudar hoje?"
         ),
     }
+
+
+def gerar_saudacao_de_ctx(ctx: dict | None) -> dict:
+    """Versão que aceita o formato `caller_context` do pipeline.
+
+    Converte ctx → formato lead Kommo e delega pra
+    gerar_saudacao_personalizada. Usado em responder.py pra que a Lia
+    inicie conversa com prova de escuta quando há dados conhecidos.
+
+    Args:
+        ctx: dict do pipeline com `name`, `known: {nome_paciente, medico,
+             convenio, unidade, especialidade, dia_consulta_iso, ...}`,
+             `updated_at` opcional.
+
+    Returns:
+        Mesmo dict que gerar_saudacao_personalizada.
+    """
+    if not ctx or not ctx.get("found"):
+        return gerar_saudacao_personalizada({"id": 0, "custom_fields": []})
+
+    known = ctx.get("known") or {}
+    # Constrói custom_fields no formato esperado
+    cfs = []
+
+    def _add(field_name: str, value):
+        if value:
+            cfs.append({
+                "field_name": field_name,
+                "values": [{"value": str(value)}],
+            })
+
+    _add("1.NOME PACIENTE", known.get("nome_paciente"))
+    _add("MEDICOS", known.get("medico"))
+    _add("CONVENIO", known.get("convenio"))
+    _add("UNIDADE", known.get("unidade"))
+    _add("ESPECIALID", known.get("especialidade"))
+
+    lead_norm = {
+        "id": ctx.get("lead_id") or 0,
+        "name": ctx.get("name") or "",
+        "updated_at": ctx.get("updated_at"),
+        "custom_fields": cfs,
+    }
+    return gerar_saudacao_personalizada(lead_norm)

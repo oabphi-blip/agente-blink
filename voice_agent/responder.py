@@ -458,6 +458,34 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
     if etapa:
         linhas.append(f"- Etapa atual no funil: {etapa}")
     dados = "\n".join(linhas) if linhas else "- (lead existe, mas sem campos preenchidos ainda)"
+
+    # SAUDAÇÃO COM PROVA DE ESCUTA (Bug C-27 — Fábio 12/06/2026)
+    # Quando há dados conhecidos do paciente, gera saudação personalizada
+    # que cita até 4 campos (nome paciente, médico, convênio, unidade) e
+    # demonstra reconhecimento. Substitui triagem do zero.
+    saudacao_sugerida_block = ""
+    try:
+        from voice_agent.ativacao_inteligente import gerar_saudacao_de_ctx
+        result = gerar_saudacao_de_ctx(ctx)
+        if result.get("tipo") in ("personalizada", "lacuna_longa"):
+            saudacao_sugerida_block = (
+                "\n\nSAUDAÇÃO INICIAL SUGERIDA (regra E1.7-A — prova de escuta):\n"
+                "Quando esta é a PRIMEIRA mensagem que você envia pro paciente "
+                "nesta conversa, USE A SAUDAÇÃO ABAIXO em vez de triagem do "
+                "zero. Ela demonstra que você sabe quem é, recapitula onde "
+                "parou, e abre pra próxima etapa:\n\n"
+                f"\"{result.get('saudacao')}\"\n\n"
+                "DEPOIS disso, prossiga conforme o fluxo normal (E2..E9). "
+                "Se o paciente já enviou conteúdo concreto na mensagem "
+                "atual, RESPONDA O CONTEÚDO em vez de só saudar — mas "
+                "ainda assim cite o que já sabemos dele (ex.: 'Vi aqui que "
+                "era com Dra. Karla pelo {convenio}'). Anti-constrangimento: "
+                "se {ancora_principal} for citado, NÃO repergunte essa "
+                "informação."
+            ).replace("{convenio}", str(known.get("convenio") or "convênio"))\
+             .replace("{ancora_principal}", str(result.get("ancora_principal") or "dado conhecido"))
+    except Exception:  # noqa: BLE001
+        pass
     saudacao = (
         f'O CONTATO que está escrevendo se chama {nome}. Cumprimente '
         f'SEMPRE por esse nome — "Olá, {nome}!" — de forma calorosa. '
@@ -604,6 +632,7 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
         f"\n{dados}"
         f"{alerta}"
         f"{trava_medico}"
+        f"{saudacao_sugerida_block}"
         "\n"
         "\nREGRA: É PROIBIDO reperguntar qualquer dado já listado acima. Trate-os"
         "\ncomo confirmados e avance direto para a próxima etapa pendente do"

@@ -4026,10 +4026,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "erro": "lead sem telefone — impossível buscar duplicatas",
             })
 
-        # 2. Busca outros leads com mesmo telefone via Kommo
+        # 2. Busca outros leads com mesmo telefone via /contacts→/leads
         try:
-            resultados = kommo_client.search_leads_by_query(
-                query=telefone, pipeline_id=8601819, limit=50,
+            resultados = kommo_client.get_leads_by_phone(
+                telefone, pipeline_id=8601819,
             ) or []
         except Exception:  # noqa: BLE001
             resultados = []

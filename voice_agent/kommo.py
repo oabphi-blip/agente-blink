@@ -1571,6 +1571,118 @@ class KommoClient:
             log.warning("Kommo search_leads_by_query erro: %s", e)
             return []
 
+    def search_contacts_by_query(
+        self, query: str, limit: int = 50,
+    ) -> list[dict]:
+        """Busca contatos no Kommo via query (telefone, email, nome).
+
+        Origem: Bug C-27 Fábio 12/06/2026 — dedup-merge precisa achar
+        TODOS os leads do mesmo telefone. Kommo armazena telefone no
+        /contacts não em /leads. Padrão: busca contato → pega contact_id
+        → busca leads vinculados a esse contato.
+
+        Args:
+            query: telefone (com ou sem DDI), email, ou nome.
+            limit: máx contatos por página.
+
+        Returns:
+            Lista de dicts de contato com `_embedded.leads`, ou [] em erro.
+        """
+        if not query:
+            return []
+        try:
+            out: list[dict] = []
+            for page in range(1, 4):
+                params = {
+                    "query": str(query),
+                    "limit": min(int(limit), 50),
+                    "page": page,
+                    "with": "leads",
+                }
+                with httpx.Client(timeout=self.timeout) as c:
+                    r = c.get(
+                        f"{self._base}/contacts",
+                        params=params,
+                        headers=self._headers,
+                    )
+                if r.status_code == 204:
+                    break
+                if r.status_code != 200:
+                    log.warning(
+                        "Kommo search_contacts_by_query p%d: HTTP %d",
+                        page, r.status_code,
+                    )
+                    break
+                data = r.json() or {}
+                page_contacts = list(
+                    ((data.get("_embedded") or {}).get("contacts") or []),
+                )
+                if not page_contacts:
+                    break
+                out.extend(page_contacts)
+                if len(page_contacts) < params["limit"]:
+                    break
+            return out
+        except Exception as e:  # noqa: BLE001
+            log.warning("Kommo search_contacts_by_query erro: %s", e)
+            return []
+
+    def get_leads_by_phone(
+        self, telefone: str, pipeline_id: int | None = 8601819,
+    ) -> list[dict]:
+        """Pipeline pronto: busca leads de um telefone via /contacts.
+
+        1. Busca contatos que casam o telefone.
+        2. Coleta lead_ids vinculados.
+        3. Busca cada lead via GET /leads/{id} pra ter dados completos.
+
+        Args:
+            telefone: E.164 ou local. Normaliza removendo +, espaços, parenteses.
+            pipeline_id: filtra leads desse pipeline (ATENDE = 8601819).
+
+        Returns:
+            Lista de leads (dicts), vazia em erro.
+        """
+        if not telefone:
+            return []
+        # Normaliza: só dígitos
+        import re as _re
+        tel_norm = _re.sub(r"\D", "", str(telefone))
+        if not tel_norm:
+            return []
+
+        # Busca por DDI completo + sem DDI (paciente pode ter cadastrado de várias formas)
+        queries_tentativa = [tel_norm]
+        if tel_norm.startswith("55") and len(tel_norm) >= 12:
+            queries_tentativa.append(tel_norm[2:])  # sem 55
+
+        leads_seen: set[int] = set()
+        out: list[dict] = []
+        for q in queries_tentativa:
+            contatos = self.search_contacts_by_query(q) or []
+            for c in contatos:
+                if not isinstance(c, dict):
+                    continue
+                embedded_leads = (
+                    (c.get("_embedded") or {}).get("leads") or []
+                )
+                for ld in embedded_leads:
+                    lid = ld.get("id") if isinstance(ld, dict) else None
+                    if not lid or int(lid) in leads_seen:
+                        continue
+                    # Busca lead completo
+                    try:
+                        lead_full = self.get_lead(lid)
+                    except Exception:  # noqa: BLE001
+                        lead_full = None
+                    if not lead_full:
+                        continue
+                    if pipeline_id and lead_full.get("pipeline_id") != int(pipeline_id):
+                        continue
+                    leads_seen.add(int(lid))
+                    out.append(lead_full)
+        return out
+
     def list_recent_notes(
         self,
         since: datetime,
