@@ -4619,6 +4619,141 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 status_code=500,
             )
 
+    @app.api_route("/admin/wa-send-text/{lead_id}", methods=["GET", "POST"])
+    async def admin_wa_send_text(
+        lead_id: int, request: Request,
+    ) -> JSONResponse:
+        """Envia texto livre via WhatsApp Cloud 8133 (sessão 24h ativa).
+
+        Pra resgate de mensagens com erro de envio do Kommo onde a sessão de
+        24h ainda está aberta (paciente respondeu nas últimas 24h).
+
+        Body JSON ou query params:
+          - text (str, obrigatório) — texto livre da mensagem
+          - secret (obrigatório)
+          - kommo_note (bool, default true) — grava nota Kommo confirmando
+
+        Retorna {ok, lead_id, telefone, primeiro_nome, wamid, nota_kommo_id}.
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        text = request.query_params.get("text")
+        kommo_note_flag = (
+            request.query_params.get("kommo_note", "1").lower()
+            in ("1", "true", "yes")
+        )
+
+        if request.method == "POST":
+            try:
+                body = await request.json()
+                if not text:
+                    text = body.get("text")
+                if "kommo_note" in body:
+                    kommo_note_flag = bool(body.get("kommo_note"))
+            except Exception:  # noqa: BLE001
+                pass
+
+        if not text:
+            return JSONResponse(
+                {"error": "param 'text' obrigatório"}, status_code=400,
+            )
+
+        if not wa_cloud:
+            return JSONResponse(
+                {"error": "wa_cloud indisponível"}, status_code=500,
+            )
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        try:
+            info = kommo_client.get_lead_main_contact(lead_id)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"error": f"get_lead_main_contact falhou: {str(e)[:200]}"},
+                status_code=500,
+            )
+
+        telefone = (info or {}).get("telefone") or ""
+        nome = (info or {}).get("nome") or ""
+        primeiro_nome = nome.split()[0] if nome else ""
+
+        if not telefone:
+            return JSONResponse(
+                {
+                    "error": "lead sem telefone",
+                    "info_recebida": info,
+                },
+                status_code=400,
+            )
+
+        digits = "".join(ch for ch in telefone if ch.isdigit())
+        if not digits.startswith("55"):
+            digits = "55" + digits
+
+        try:
+            resp = wa_cloud.send_text(digits, text)
+        except Exception as e:  # noqa: BLE001
+            log.warning("[WA-SEND-TEXT] falhou lead=%s: %s", lead_id, e)
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "lead_id": lead_id,
+                    "telefone": digits,
+                    "erro": str(e)[:300],
+                },
+                status_code=500,
+            )
+
+        wamid = None
+        try:
+            wamid = (
+                ((resp or {}).get("messages") or [{}])[0].get("id")
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        nota_kommo_id = None
+        if kommo_note_flag:
+            try:
+                from datetime import datetime as _dt
+                from datetime import timezone as _tz, timedelta as _td
+                brt = _tz(_td(hours=-3))
+                ts = _dt.now(brt).strftime("%d/%m/%Y %H:%M BRT")
+                preview = text[:400]
+                if len(text) > 400:
+                    preview = preview + "..."
+                nota_txt = (
+                    f"[Lia · Resgate WhatsApp 8133] · {ts}\n"
+                    f"Canal: WhatsApp Cloud 8133 (texto livre na sessão 24h)\n"
+                    f"Para: {nome or '(sem nome)'} · {digits}\n\n"
+                    f"📝 MENSAGEM ENVIADA:\n{preview}\n\n"
+                    f"wamid: {wamid or '(n/a)'}"
+                )
+                nota = kommo_client.add_note(lead_id, nota_txt)
+                if isinstance(nota, dict):
+                    nota_kommo_id = nota.get("id")
+            except Exception as e:  # noqa: BLE001
+                log.warning("[WA-SEND-TEXT] add_note falhou: %s", e)
+
+        return JSONResponse({
+            "ok": True,
+            "lead_id": lead_id,
+            "telefone": digits,
+            "primeiro_nome": primeiro_nome,
+            "wamid": wamid,
+            "nota_kommo_id": nota_kommo_id,
+        })
+
     @app.get("/admin/disparar-template-get/{lead_id}")
     def admin_disparar_template_get(
         lead_id: int, request: Request,
