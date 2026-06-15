@@ -6938,6 +6938,108 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "threads_ativas": [t.name for t in _threads_iniciadas if t.is_alive()],
         })
 
+    # ================================================================
+    # WATCHDOG PROMESSA NÃO CUMPRIDA — cron 2 min
+    # ================================================================
+    # Detecta leads onde Lia disse "deixa eu consultar / um minutinho /
+    # já volto / vou buscar" e silenciou. Move pra 1-ATENDIMENTO HUMANO,
+    # desativa IA, grava nota. Equipe humana age. Sem mensagem automática.
+    #
+    # Liga via WATCHDOG_PROMESSA_ENABLED=1 + cron interno chama esse
+    # endpoint a cada 2 min (CRON_WATCHDOG_PROMESSA_SEG default 120).
+    @app.get("/admin/watchdog-promessa-tick")
+    @app.post("/admin/watchdog-promessa-tick")
+    async def admin_watchdog_promessa_tick(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        from voice_agent.watchdog_promessa import (
+            tick as watchdog_promessa_tick,
+            silencio_min_seg_env,
+            silencio_max_seg_env,
+        )
+
+        dr_param = request.query_params.get("dry_run", "true")
+        dry_run = str(dr_param).lower() not in ("0", "false", "no", "nao")
+        max_param = request.query_params.get("max_leads", "30")
+        try:
+            max_leads = max(1, min(int(max_param), 100))
+        except (TypeError, ValueError):
+            max_leads = 30
+
+        # Redis opcional pra dedup
+        redis_client = None
+        try:
+            redis_client = pipeline.redis
+        except Exception:
+            redis_client = None
+
+        try:
+            res = watchdog_promessa_tick(
+                kommo_client=pipeline.kommo,
+                redis_client=redis_client,
+                dry_run=dry_run,
+                max_leads=max_leads,
+                silencio_min_seg=silencio_min_seg_env(),
+                silencio_max_seg=silencio_max_seg_env(),
+            )
+            payload = res.as_dict()
+            payload["dry_run"] = dry_run
+            log.info("[WATCHDOG-PROMESSA tick dry_run=%s] %s", dry_run, payload)
+            return JSONResponse(payload)
+        except Exception as e:  # noqa: BLE001
+            log.exception("Watchdog promessa tick erro: %s", e)
+            return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
+
+    # Cron interno embutido — chama tick a cada CRON_WATCHDOG_PROMESSA_SEG (default 120s)
+    from voice_agent.watchdog_promessa import esta_habilitado as _wp_habilitado
+
+    if _wp_habilitado():
+        def _wp_tick_once() -> None:
+            try:
+                from voice_agent.watchdog_promessa import (
+                    tick as _wp_tick, silencio_min_seg_env, silencio_max_seg_env,
+                )
+                _dry = os.getenv("WATCHDOG_PROMESSA_DRY_RUN", "0") == "1"
+                _max = int(os.getenv("WATCHDOG_PROMESSA_MAX_LEADS", "30"))
+                _redis = getattr(pipeline, "redis", None)
+                rep = _wp_tick(
+                    kommo_client=pipeline.kommo,
+                    redis_client=_redis,
+                    dry_run=_dry,
+                    max_leads=_max,
+                    silencio_min_seg=silencio_min_seg_env(),
+                    silencio_max_seg=silencio_max_seg_env(),
+                )
+                if rep.candidatos:
+                    log.warning(
+                        "[WATCHDOG-PROMESSA auto] candidatos=%d tratados=%d dedup=%d erros=%d",
+                        rep.candidatos, rep.tratados, rep.ja_dedup, rep.erros,
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning("[WATCHDOG-PROMESSA auto] erro: %s", e)
+
+        def _wp_scheduler() -> None:
+            import time as _t
+            _t.sleep(30)  # espera app subir
+            intervalo = int(os.getenv("CRON_WATCHDOG_PROMESSA_SEG", "120"))
+            while True:
+                try:
+                    threading.Thread(target=_wp_tick_once, daemon=True).start()
+                except Exception as e:  # noqa: BLE001
+                    log.warning("watchdog_promessa scheduler erro: %s", e)
+                _t.sleep(max(60, intervalo))
+
+        threading.Thread(
+            target=_wp_scheduler, daemon=True, name="watchdog_promessa",
+        ).start()
+        log.info("[WATCHDOG-PROMESSA] worker iniciado (cron interno)")
+
     return app
 
 
