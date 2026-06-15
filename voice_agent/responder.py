@@ -20,7 +20,8 @@ from zoneinfo import ZoneInfo
 from anthropic import Anthropic
 
 from .knowledge import KB_DIR, KnowledgeBase
-from .store import ConversationStore
+from .store import ConversationStor
+from .zep_adapter import recuperar_contexto as _zep_recuperar, gravar_turno as _zep_gravar
 
 # Fuso horário oficial da clínica (Brasília) — usado pra cálculo de idade
 # e data de "hoje" injetada no system prompt.
@@ -2306,10 +2307,12 @@ class Responder:
 
         system_field = _montar_system_para_anthropic(bloco_estavel, bloco_variavel)
 
+        # Zep: recupera contexto de longo prazo ANTES do historico Redis
+                _zep_ctx = _zep_recuperar(conversation_key)
         # 3. Monta histórico no formato Anthropic (sem system, só user/assistant)
         history = self._convos.get(conversation_key)
         messages = _sanitize_messages(
-            history + [{"role": "user", "content": user_text}]
+            _zep_ctx + history + [{"role": "user", "content": user_text}]
         )
 
         # 4. Decide modelo
@@ -2483,6 +2486,8 @@ class Responder:
         # 6. Persiste no histórico
         self._convos.append(conversation_key, "user", user_text)
         self._convos.append(conversation_key, "assistant", answer)
+                # Zep: grava turno para memoria de longo prazo
+                _zep_gravar(conversation_key, user_text, answer)
 
         log.info(
             "Claude %s respondeu (%d chars, hist=%d, kb=%d artigos)",
