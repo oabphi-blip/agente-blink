@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 from anthropic import Anthropic
 
 from .knowledge import KB_DIR, KnowledgeBase
-from .store import ConversationStor
+from .store import ConversationStore
 from .zep_adapter import recuperar_contexto as _zep_recuperar, gravar_turno as _zep_gravar
 
 # Fuso horário oficial da clínica (Brasília) — usado pra cálculo de idade
