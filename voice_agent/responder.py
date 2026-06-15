@@ -2308,7 +2308,7 @@ class Responder:
         system_field = _montar_system_para_anthropic(bloco_estavel, bloco_variavel)
 
         # Zep: recupera contexto de longo prazo ANTES do historico Redis
-                _zep_ctx = _zep_recuperar(conversation_key)
+            _zep_ctx = _zep_recuperar(conversation_key)
         # 3. Monta histórico no formato Anthropic (sem system, só user/assistant)
         history = self._convos.get(conversation_key)
         messages = _sanitize_messages(
