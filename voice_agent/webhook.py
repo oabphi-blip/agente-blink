@@ -6958,7 +6958,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             if got != settings.webhook_secret:
                 raise HTTPException(401, "Unauthorized")
 
-        from watchdog_promessa import (
+        from voice_agent.watchdog_promessa import (
             tick as watchdog_promessa_tick,
             silencio_min_seg_env,
             silencio_max_seg_env,
@@ -6997,12 +6997,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
 
     # Cron interno embutido — chama tick a cada CRON_WATCHDOG_PROMESSA_SEG (default 120s)
-    from watchdog_promessa import esta_habilitado as _wp_habilitado
+    from voice_agent.watchdog_promessa import esta_habilitado as _wp_habilitado
 
     if _wp_habilitado():
         def _wp_tick_once() -> None:
             try:
-                from watchdog_promessa import (
+                from voice_agent.watchdog_promessa import (
                     tick as _wp_tick, silencio_min_seg_env, silencio_max_seg_env,
                 )
                 _dry = os.getenv("WATCHDOG_PROMESSA_DRY_RUN", "0") == "1"
