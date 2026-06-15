@@ -1426,6 +1426,51 @@ def _viola_oferta_apos_agendado(
     return any(p.search(text) for p in _OFERTA_POS_AGENDADO_PATTERNS)
 
 
+# ────────────────────────────────────────────────────────────────────────
+# Filtro CONFIRMAÇÃO-FAKE (caso Carolina 24145994 + Carmen 24142996)
+# ────────────────────────────────────────────────────────────────────────
+# Lia envia "✨ Agendamento confirmado!" com dia/hora/médica/unidade SEM ter
+# chamado medware.criar_agendamento. Bug recorrente: paciente recebe
+# confirmação de algo que não existe; depois Lia entra em loop "vou
+# reconsultar". Detecta padrão "Agendamento confirmado" + "Dia/Hora" no
+# texto e bloqueia se ctx.medware_grava_ok != True.
+_FRASES_CONFIRMACAO_RGX = re.compile(
+    r"(?:✨|✅|\bagendamento\b)\s*(?:confirmad[oa]|"
+    r"finalizad[oa]|conclu[íi]d[oa])",
+    re.IGNORECASE,
+)
+_MARCADORES_CONCLUSAO_RGX = re.compile(
+    r"(?:dia/hora|dia\s+da\s+consulta|hor[áa]rio\s+marcado|"
+    r"unidade\s+de\s+atendimento)",
+    re.IGNORECASE,
+)
+
+
+def _viola_confirmacao_sem_gravacao(
+    text: str, ctx: Optional[dict] = None,
+) -> bool:
+    """True se Lia confirmou agendamento sem ter gravado no Medware."""
+    if not text:
+        return False
+    if not _FRASES_CONFIRMACAO_RGX.search(text):
+        return False
+    if not _MARCADORES_CONCLUSAO_RGX.search(text):
+        # frase de confirmação sem detalhes operacionais — provavelmente
+        # acknowledgment genérico, não conclusão real. Não bloqueia.
+        return False
+    if not ctx:
+        # sem ctx pra confirmar gravação, é mais seguro bloquear
+        return True
+    return not bool(ctx.get("medware_grava_ok"))
+
+
+_CONFIRMACAO_FAKE_FALLBACK = (
+    "Deixa eu finalizar a gravação no sistema primeiro — volto em 1 minuto "
+    "com a confirmação oficial. Se em 2 min eu não voltar, me chama "
+    "que escalo pra equipe humana imediatamente."
+)
+
+
 def _gerar_oferta_pos_agendado_fallback(ctx: Optional[dict]) -> str:
     """Fallback informa data marcada (se conhecida) + agradece doc/contato."""
     if not ctx:
@@ -1837,6 +1882,18 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             len(ctx.get("agenda", [])), text[:200],
         )
         return _FAKE_AGENDA_LOOKUP_FALLBACK
+
+    # 0a. ANTI-CONFIRMAÇÃO-FAKE (caso Carolina/Heloísa 24145994 + Carmen 24142996)
+    # Lia envia "✨ Agendamento confirmado!" SEM ter gravado no Medware. Padrão
+    # destrutivo: paciente recebe confirmação de algo que não existe. Detecta
+    # frase de conclusão e bloqueia se ctx.medware_grava_ok != True.
+    if _viola_confirmacao_sem_gravacao(text, ctx):
+        log.error(
+            "[FILTRO] CONFIRMACAO-FAKE bloqueada — Lia confirmou agendamento "
+            "SEM ter gravado no Medware. ctx.medware_grava_ok=%s. Texto: %r",
+            (ctx or {}).get("medware_grava_ok"), text[:200],
+        )
+        return _CONFIRMACAO_FAKE_FALLBACK
 
     # 0-bis. PERGUNTA TURNO/PERÍODO COM AGENDA (lead 21256807 Alice, 03/06/2026)
     # Tudo já preenchido + agenda real disponível → Lia perguntou
