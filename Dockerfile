@@ -3,8 +3,8 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1 PORT=8000
 WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install -r /app/requirements.txt
-# cache-bust 30/05/2026 16:08 BRT — fix(kommo) ATENDENTE multiselect
-ARG BUILD_REVISION=2026-05-30T16-08
+# cache-bust 15/06/2026 13:42 BRT — fix(zep): corrige IndentationError linha 2311
+ARG BUILD_REVISION=2026-06-15T13-42
 RUN echo "Build $BUILD_REVISION"
 COPY voice_agent /app/voice_agent
 EXPOSE 8000
