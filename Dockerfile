@@ -7,5 +7,6 @@ RUN pip install -r /app/requirements.txt
 ARG BUILD_REVISION=2026-06-15T16-00-fix-import
 RUN echo "Build $BUILD_REVISION"
 COPY voice_agent /app/voice_agent
+COPY voice_agent/watchdog_promessa.py /app/watchdog_promessa.py
 EXPOSE 8000
 CMD ["uvicorn","voice_agent.webhook:app","--host","0.0.0.0","--port","8000"]
