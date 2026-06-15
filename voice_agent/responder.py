@@ -2486,8 +2486,8 @@ class Responder:
         # 6. Persiste no histórico
         self._convos.append(conversation_key, "user", user_text)
         self._convos.append(conversation_key, "assistant", answer)
-                # Zep: grava turno para memoria de longo prazo
-                _zep_gravar(conversation_key, user_text, answer)
+        # Zep: grava turno para memoria de longo prazo
+        _zep_gravar(conversation_key, user_text, answer)
 
         log.info(
             "Claude %s respondeu (%d chars, hist=%d, kb=%d artigos)",
