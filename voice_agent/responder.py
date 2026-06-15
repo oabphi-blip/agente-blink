@@ -1751,6 +1751,57 @@ _FILTROS_LEGACY_ATIVOS = os.getenv("FILTROS_LEGACY", "0") == "1"
 # Reativar: setar FILTROS_LEGACY=1 no Easypanel.
 
 
+
+# ===== FILTROS E-SERIES (lead 24154908, 15/06/2026) =====
+
+# Filtro #14
+def _viola_primeira_mensagem_longa(text: str, ctx: dict) -> bool:
+    """Primeira mensagem de sessao nova nao pode passar de 80 palavras."""
+    if (ctx or {}).get("turno_numero", 0) > 1:
+        return False
+    palavras = len(text.split())
+    return palavras > 80
+
+
+# Filtro #15
+def _viola_markdown_whatsapp(text: str) -> bool:
+    """Detecta ## headers, --- separadores, *** triple asterisk."""
+    padroes = [
+        r"^##\s",
+        r"^---\s*$",
+        r"\*\*\*",
+        r"___",
+    ]
+    return any(re.search(p, text, re.MULTILINE) for p in padroes)
+
+
+# Filtro #16
+_DICAS_BANIDAS_PATTERNS = [
+    r"\b\d{1,3}\s*(a|a|ate)\s*\d{1,3}\s*minutos\b",
+    r"\b\d{1,2}\s*(a|a|ate)\s*\d{1,2}\s*horas\b",
+    r"\bvisao\s+(fica\s+)?embacada\b",
+    r"\bevitar\s+(voltar\s+)?(pra|para)\s+(a\s+)?escola\b",
+    r"\b\d{1,2}\s*anos?\s+de\s+experi[ee]ncia\b",
+    r"\btrazer\s+brinquedo\b",
+    r"\bjejum\b",
+]
+
+
+def _viola_dicas_banidas(text: str) -> bool:
+    """Detecta dicas banidas da lista negra E2.X."""
+    return any(re.search(p, text, re.IGNORECASE) for p in _DICAS_BANIDAS_PATTERNS)
+
+
+# Filtro #17
+def _viola_inicio_noite(text: str) -> bool:
+    """Aguas Claras e Asa Norte NAO tem turno Noite ofertado."""
+    return bool(re.search(
+        r"\bin[ii]cio\s+(da\s+)?noite\b|\bturno\s+(da\s+)?noite\b",
+        text, re.IGNORECASE
+    ))
+
+
+
 def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
 
@@ -1770,6 +1821,39 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     has_agenda = bool((ctx or {}).get("agenda"))
 
     # 0-INAS. Bug C-16 (lead 24117314 Maria Agostini, 08/06/2026 11:41 BRT).
+
+    # === FILTROS E-SERIES (lead 24154908, 15/06/2026) ===
+    _FALLBACK_CURTO_E = "Boa tarde! Pra eu ver os horarios disponiveis, qual e o nome do paciente?"
+
+    # Filtro #14 - Primeira mensagem longa
+    if _viola_primeira_mensagem_longa(text, ctx or {}):
+        log.error(
+            "[FILTRO E-14] PRIMEIRA MENSAGEM LONGA bloqueada - %d palavras. Texto: %r",
+            len(text.split()), text[:200],
+        )
+        return _FALLBACK_CURTO_E
+
+    # Filtro #15 - Markdown incompativel com WhatsApp
+    if _viola_markdown_whatsapp(text):
+        log.error(
+            "[FILTRO E-15] MARKDOWN WHATSAPP bloqueado. Texto: %r", text[:200]
+        )
+        return _FALLBACK_CURTO_E
+
+    # Filtro #16 - Dicas banidas lista negra E2.X
+    if _viola_dicas_banidas(text):
+        log.error(
+            "[FILTRO E-16] DICA BANIDA detectada. Texto: %r", text[:200]
+        )
+        return _FALLBACK_CURTO_E
+
+    # Filtro #17 - Turno Noite banido
+    if _viola_inicio_noite(text):
+        log.error(
+            "[FILTRO E-17] TURNO NOITE banido detectado. Texto: %r", text[:200]
+        )
+        return _FALLBACK_CURTO_E
+
     # Lia disse "Perfeito! Atendemos o INAS GDF" violando KB 18 (Inas é
     # NÃO-aceito sem exceção). Filtro sempre-ON: detecta afirmação positiva
     # sobre qualquer convênio listado em KB 18 e substitui pelo script de
