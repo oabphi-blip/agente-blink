@@ -166,7 +166,23 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 **Lição pessoal do Claude/Cowork:** task #242 está pending como URGENTE desde 09/06 e eu continuei agindo como se não fosse causa-raiz. Fechar 2 bugs antigos (#242 KOMMO_TOKEN + #150 Mapa CHAT_ID) resolve 60% do que Fábio sente hoje. Disciplinar prioridade > caçar bugs novos.
 
-### 0. (11/06/2026) Bug C-24 — Dois fixes: auto-desativar IA em etapas inativas + Fabrício 50+ (não "exclusivamente catarata")
+### ### 0. (14/06/2026) Bug C-28 — Script RENOVAR_KOMMO_TOKEN gera token DEF502 em vez de JWT eyJ...
+
+Script `/Users/fabiophilipecostamartins/Documents/Claude/Projects/AGENTE IA BLINK/RENOVAR_KOMMO_TOKEN.command` usa Playwright pra renovar o token Kommo automaticamente. Em 14/06/2026, o script reportou sucesso ("3011 chars, COPIADO via pbcopy") mas ao injetar o token no Easypanel ficou na versão anterior (1083 chars JWT).
+
+**Dois tipos de token Kommo:**
+- ✅ **JWT correto** (access_token): começa com `eyJ0eXAiOiJKV1Qi`, ~3011 chars. Válido pra API Kommo.
+- ❌ **Refresh token** (errado): começa com `def502`, ~1046 chars. HTTP 401/403 na API Kommo.
+
+**Causa raiz:** clipboard do Mac pode ser sobrescrito pelo chat se o usuário digitar mensagem após o script terminar. O token de 3011 chars fica no clipboard por poucos segundos antes de ser substituído.
+
+**Regra:**
+- NUNCA usar Cmd+V depois do script — verificar primeiro via JS: `startsCorrect = token.startsWith('eyJ0eXAiOiJKV1Qi')` + `length >= 2000`.
+- Injetar SEMPRE via CodeMirror JS API: `view.dispatch({changes:{from, to, insert:'KOMMO_TOKEN='+token}})`
+- Se o token atual (1083 chars JWT com exp 2027) mantiver `kommo:true` no healthz — é válido. Não precisa reforçar.
+- O token de 1083 chars gerado em 14/06/2026 é JWT válido (exp: 1821052800 ≈ 2027) — não expirado.
+
+0. (11/06/2026) Bug C-24 — Dois fixes: auto-desativar IA em etapas inativas + Fabrício 50+ (não "exclusivamente catarata")
 
 **Bug C-24a — Auto-desativar IA:** equipe humana reclamou que quando movia lead pra etapas operacionais, Lia continuava respondendo. **Lista RESTRITA (Fábio 11/06 13:40):** `_STATUS_INATIVOS_IA = {106563343 ATENDIMENTO HUMANO, 106157139 CIRURGIAS, 106484343 LENTES, 106484347 FORNECEDORES}` — só essas 4. As demais (8-REALIZADO, 09-PRÓXIMA, Closed-won, Closed-lost) MANTÊM IA ativa porque Lia faz follow-up / NPS / reativação nelas. Endpoint `/admin/kommo-trigger-status-change` força `ATIVADO IA = Desativado` quando entra nas 4, e `ATIVADO IA = Ativado` em todas as outras etapas operacionais.
 
