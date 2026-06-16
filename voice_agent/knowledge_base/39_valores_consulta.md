@@ -15,7 +15,7 @@ oficial registrada como conhecimento de primeira ordem.
 | Avaliação de estrabismo | Dra. Karla Delalibera | **R$ 611,00** | R$ 305,50 |
 | Avaliação para cirurgia de catarata | Dr. Fabrício Freitas | **R$ 297,00** | R$ 148,50 |
 | Pós-operatório catarata (até 30 dias) | Dr. Fabrício Freitas | **R$ 297,00** | R$ 148,50 |
-| SDP (Suporte ao Desenvolvimento e Aprendizagem) | Dra. Karla Delalibera | **R$ 800,00** | R$ 400,00 |
+| Avaliação do Processamento Visual (Suporte ao Desenvolvimento e Aprendizagem) | Dra. Karla Delalibera | **R$ 800,00** | R$ 400,00 |
 
 ---
 
@@ -37,9 +37,9 @@ Lia consulta o `ctx.known`:
 Lia responde com a TABELA INTEIRA + pergunta qual atendimento:
 
 > "Os valores são:
-> • Consulta completa, oftalmopediatria ou estrabismo (Dra. Karla): **R$ 611**
-> • Avaliação ou pós-op de catarata (Dr. Fabrício): **R$ 297**
-> • SDP (Aprendizagem, Dra. Karla): **R$ 800**
+> • Consulta completa, oftalmopediatria ou estrabismo (Dra. Karla Delalíbera): **R$ 611**
+> • Avaliação ou pós-op de catarata (Dr. Fabrício Freitas): **R$ 297**
+> • Avaliação do Processamento Visual (Aprendizagem, Dra. Karla Delalíbera): **R$ 800**
 >
 > Qual desses interessa pra você? Aí já vamos pra agenda."
 
@@ -55,7 +55,7 @@ Plan Assiste, etc), Lia diz:
 ### Caso 4 — Convênio NÃO aceito (Inas GDF — artigo 18)
 
 > "Esse convênio a clínica não atende. Mas posso te oferecer o
-> particular: consulta completa R$ 611 com Dra. Karla. Quer seguir?"
+> particular: consulta completa R$ 611 com Dra. Karla Delalíbera. Quer seguir?"
 
 ---
 

@@ -51,7 +51,7 @@ Playbook completo usado pela equipe Blink para converter leads de catarata em co
 ### AUDIO 4 — Inversão da venda (autoridade do exame)
 > Mas tem um detalhe muito importante ⚠️✨: A escolha definitiva da lente não depende apenas do nosso desejo 👁️🤝. Essas tecnologias exigem que o olho esteja preparado ✅. Se o médico não fizer medições milimétricas da sua visão 📏👁️, essa lente (que é para o resto da vida) pode não servir e você pode não ter o resultado esperado ❌😕. Por isso, nós indicamos a lente perfeita para você! 🗓️💡
 
-### AUDIO 5 — Autoridade médica (Dr. Fabrício + Dra. Kátia)
+### AUDIO 5 — Autoridade médica (Dr. Fabrício Freitas + Dra. Kátia)
 > Para que esse resultado seja perfeito ✨👁️, reunimos dois grandes especialistas na Agenda Inteligente 🗓️💡. A sua avaliação inicial e a medição do olho serão feitas com o **Dr. Fabrício Freitas** 👨‍⚕️✅, nossa referência em catarata e lentes. E, havendo indicação 👌, em seguida será realizado o mapeamento de retina pela **Dra. Kátia Delalíbera** 🧠👁️. Ela possui **pós-doutorado pela Johns Hopkins University** 🎓🇺🇸, garantindo que o fundo do seu olho suportará a lente com segurança e tranquilidade 🤝🔒.
 
 ### AUDIO 6 — VALOR DA CONSULTA (porta de entrada)
@@ -106,7 +106,7 @@ AUDIO 7 (oferta de horário Seg tarde / Sex manhã)
 | EDOF/intermediária | R$ 7.500 – R$ 14.000 | Independência parcial (~50%) |
 | Premium multifocal | R$ 13.000 – R$ 15.000 | Independência total |
 
-**Consulta de avaliação:** R$ 445 no Pix ou 2x de R$ 230,00 sem juros (inclui Dr. Fabrício + Dra. Kátia + mapeamento isento).
+**Consulta de avaliação:** R$ 445 no Pix ou 2x de R$ 230,00 sem juros (inclui Dr. Fabrício Freitas + Dra. Kátia + mapeamento isento).
 
 **Agenda:** Águas Claras, Segunda tarde ou Sexta manhã.
 

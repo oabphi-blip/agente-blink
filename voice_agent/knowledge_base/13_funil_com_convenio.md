@@ -4,7 +4,7 @@
 Verificar SEMPRE o tipo de consulta do paciente para determinar cobertura.
 
 ### ❌ Procedimentos NÃO cobertos pelo convênio (mesmo se o plano for aceito)
-- **SDP (Síndrome de Deficiência Postural)**
+- **Avaliação do Processamento Visual (Avaliação do Processamento Visual)**
 - **Casos de lentes de prisma**
 
 ### ✅ Procedimentos cobertos pelo convênio
@@ -20,7 +20,7 @@ Consultar tabela de convênios (artigos 17 e 18) para confirmar tipos cobertos.
 2. Consultar tabela de convênios
 3. Informar paciente sobre cobertura e opções
 
-**Conclusão:** Apenas SDP e lentes de prisma não são atendidas pelo convênio. Todos os demais tipos de consultas são cobertos, garantindo atendimento para a maioria das situações.
+**Conclusão:** Apenas Avaliação do Processamento Visual e lentes de prisma não são atendidas pelo convênio. Todos os demais tipos de consultas são cobertos, garantindo atendimento para a maioria das situações.
 
 ---
 

@@ -6,7 +6,7 @@ Esta lista possui **autoridade SUPERIOR à lista de convênios aceitos** (artigo
 
 ## 🚨 Política única absoluta
 
-Os convênios listados abaixo NÃO são aceitos por **nenhum** profissional da Blink (Dr. Fabrício, Dra. Karla, Dra. Kátia). Sem exceção, sem variação por médico, sem hipótese.
+Os convênios listados abaixo NÃO são aceitos por **nenhum** profissional da Blink (Dr. Fabrício Freitas, Dra. Karla Delalíbera, Dra. Kátia). Sem exceção, sem variação por médico, sem hipótese.
 
 ## ❌ PROIBIÇÕES ABSOLUTAS DE LINGUAGEM
 

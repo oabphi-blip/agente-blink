@@ -47,7 +47,7 @@
 Dra. Karla Delalibera é uma renomada **oftalmologista** especializada em:
 - **Oftalmopediatria**
 - **Estrabismo**
-- **Síndrome de Deficiência Postural (SDP)**
+- **Avaliação do Processamento Visual**
 
 Com **15 anos de experiência** na área. Reconhecida em Brasília como uma das principais especialistas, oferece atendimento humanizado e personalizado para crianças e adultos, sempre priorizando a excelência no cuidado da saúde ocular e postural.
 
@@ -61,12 +61,12 @@ Com **15 anos de experiência** na área. Reconhecida em Brasília como uma das 
    - Diagnóstico e correção cirúrgica de desvios oculares (estrabismo).
    - Para crianças e adultos.
 
-3. **Síndrome de Deficiência Postural (SDP)**
+3. **Avaliação do Processamento Visual**
    - Avaliação multidisciplinar da relação entre visão e postura.
    - Atendimento exclusivamente sem convênio (não passa por convênio — ver artigos 17 e 18).
 
 ### Unidade onde atende
-Dra. Karla atende **exclusivamente na unidade ASA NORTE**, nos dias Segunda, Quarta e Sexta.
+Dra. Karla Delalíbera atende **exclusivamente na unidade ASA NORTE**, nos dias Segunda, Quarta e Sexta.
 
 ---
 
@@ -85,7 +85,7 @@ Dra. Karla atende **exclusivamente na unidade ASA NORTE**, nos dias Segunda, Qua
 - **Especialidade:** Retina e Vítreo
 - **Pós-doutorado pela Johns Hopkins University** 🎓🇺🇸
 - Atua no mapeamento de retina pré-operatório para cirurgia de catarata
-- Consulta isenta/reembolsada quando paciente fecha cirurgia com Dr. Fabrício (ver artigo 19)
+- Consulta isenta/reembolsada quando paciente fecha cirurgia com Dr. Fabrício Freitas (ver artigo 19)
 
 ---
 
@@ -95,5 +95,5 @@ Dra. Karla atende **exclusivamente na unidade ASA NORTE**, nos dias Segunda, Qua
 2. **NUNCA** confunda os endereços entre unidades.
 3. **NUNCA** cite "Vitrini Shopping" ou "Av. das Araucárias" para Águas Claras.
 4. Sempre que enviar endereço, **copie literal** do bloco acima.
-5. **Dra. Karla = Asa Norte** (Seg/Qua/Sex). Dr. Fabrício = Águas Claras (Seg tarde / Sex manhã, para catarata).
-6. SDP, lentes de Prisma e cirurgia de estrabismo → **NÃO** passam por convênio (ver artigo 17/18).
+5. **Dra. Karla Delalíbera = Asa Norte** (Seg/Qua/Sex). Dr. Fabrício Freitas = Águas Claras (Seg tarde / Sex manhã, para catarata).
+6. Avaliação do Processamento Visual, lentes de Prisma e cirurgia de estrabismo → **NÃO** passam por convênio (ver artigo 17/18).

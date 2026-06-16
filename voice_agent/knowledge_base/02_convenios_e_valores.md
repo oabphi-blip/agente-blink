@@ -18,8 +18,8 @@ NUNCA usar essas palavras em mensagens ao paciente nem em notas Kommo:
 Exemplo correto:
 - ❌ "São os 2 últimos slots de fim de tarde"
 - ✅ "São os 2 últimos **horários** de fim de tarde"
-- ❌ "Tenho 2 slots livres com a Dra. Karla"
-- ✅ "Tenho 2 **horários** livres com a Dra. Karla"
+- ❌ "Tenho 2 slots livres com a Dra. Karla Delalíbera"
+- ✅ "Tenho 2 **horários** livres com a Dra. Karla Delalíbera"
 
 Exceções permitidas:
 - "Fila de Encaixe" — termo oficial Blink, mantém.
@@ -60,7 +60,7 @@ Qual dessas opções funciona melhor pra você?
 
 ### Variante Dr. Fabrício Freitas (avaliação catarata)
 
-Quando o paciente vai com Dr. Fabrício (R$ 297 cheio):
+Quando o paciente vai com Dr. Fabrício Freitas (R$ 297 cheio):
 - Pix à vista: R$ 297
 - Cartão: 2x sem juros de R$ 148,50
 - Sinal 50%: R$ 148,50 + R$ 148,50 na consulta
@@ -102,7 +102,7 @@ Quando o paciente perguntar sobre convênio **antes** de qualquer outra coisa (m
   > "Sua consulta oftalmológica já inclui exame de refração, fundoscopia, tonometria e prescrição. Atendimento humanizado, sem filas."
 - Em seguida o valor + opção de parcelamento.
 - Sempre oferecer Pix OU cartão até **3x sem juros**.
-- Para Dra. Karla, há "agendamento exclusivo/encaixe" com regra própria — ver artigo R$ AGENDAMENTO EXCLUSIVO.
+- Para Dra. Karla Delalíbera, há "agendamento exclusivo/encaixe" com regra própria — ver artigo R$ AGENDAMENTO EXCLUSIVO.
 
 ## Triagem de incentivos (convênio fora da lista)
 Quando o convênio NÃO é aceito, aplicar a frase padrão obrigatória (uma única mensagem com escolha pronta):
@@ -133,11 +133,11 @@ A lista exata é dinâmica e fica no CRM/sistema da clínica. Quando paciente pe
 ## ⚠️ Regra de bloqueio de preço para cirurgia de catarata
 NUNCA informe valor de cirurgia de catarata sem antes:
 1. Coletar dados do paciente (nome, idade, exames anteriores se houver).
-2. Encaminhar para consulta de avaliação com Dr. Fabrício.
+2. Encaminhar para consulta de avaliação com Dr. Fabrício Freitas.
 3. A faixa de investimento só pode ser apresentada APÓS avaliação.
 
 Se paciente insistir em valor antes:
-> "A faixa de investimento depende do tipo de lente intraocular indicada na sua avaliação. Posso já reservar sua consulta de avaliação com o Dr. Fabrício?"
+> "A faixa de investimento depende do tipo de lente intraocular indicada na sua avaliação. Posso já reservar sua consulta de avaliação com o Dr. Fabrício Freitas?"
 
 ## Apresentação de pagamento (padrão da casa)
 Sempre listar de forma visual:

@@ -103,5 +103,5 @@ celular e dirigir, tudo isso sem depender de óculos!
 
 ## ⚠️ Após enviar o perfil
 - Convidar imediatamente para a **Consulta de Avaliação (R$ 445)** — porta de entrada.
-- Lembrar que valor exato depende dos exames feitos pelo Dr. Fabrício.
+- Lembrar que valor exato depende dos exames feitos pelo Dr. Fabrício Freitas.
 - Aplicar o script de transição da avaliação (artigo 21).

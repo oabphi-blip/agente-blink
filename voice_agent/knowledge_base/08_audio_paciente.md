@@ -10,7 +10,7 @@ Usar **SEMPRE** que o paciente enviar uma mensagem por áudio (o conteúdo virá
 ## 2. QUANDO PEDIR CONFIRMAÇÃO
 
 2.1. Se o significado for **AMBÍGUO**: reformule e peça confirmação em UMA única frase curta.
-> Ex: paciente diz "agenda pra Karina dia 9" → reformular: "Só pra confirmar: você quer agendar com a Dra. Karla no dia 9?"
+> Ex: paciente diz "agenda pra Karina dia 9" → reformular: "Só pra confirmar: você quer agendar com a Dra. Karla Delalíbera no dia 9?"
 
 2.2. Se a mensagem mencionar **VALOR, DATA, HORÁRIO ou NOME PRÓPRIO** de forma decisiva: **SEMPRE reconfirmar** antes de agendar/registrar.
 > Ex: "agenda dia 9 às 10" → "Confirmado dia 09/[mês atual] às 10h?"

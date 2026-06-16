@@ -38,11 +38,11 @@
 
 | Pergunta | Resposta |
 |---|---|
-| "Quando preciso operar?" | "Cada caso é avaliado individualmente. Dr. Fabrício faz exames completos e indica se/quando." |
+| "Quando preciso operar?" | "Cada caso é avaliado individualmente. Dr. Fabrício Freitas faz exames completos e indica se/quando." |
 | "Convênio cobre?" | (cruzar KB 17/18 + lente escolhida) |
 | "Quanto custa particular?" | (resposta sempre escala humano — varia por lente) |
 | "Tempo de cirurgia?" | _Fabrício preencher_ |
-| "Dói?" | "Procedimento ambulatorial com anestesia. Dr. Fabrício explica detalhes na avaliação." |
+| "Dói?" | "Procedimento ambulatorial com anestesia. Dr. Fabrício Freitas explica detalhes na avaliação." |
 
 ## 6. Sinais de alarme pós-op (escalar URGENTE)
 

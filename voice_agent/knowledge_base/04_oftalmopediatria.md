@@ -11,7 +11,7 @@ Usar quando o paciente mencionar: **filho, filha, criança, bebê, escolar, vis�
 1.6. Preferência de unidade e turno.
 
 ## 2. REGRAS POR FAIXA ETÁRIA
-2.1. **Até 12 anos completos** → obrigatório oftalmopediatra (Dra. Karla / Dra. Kátia Delalibera).
+2.1. **Até 12 anos completos** → obrigatório oftalmopediatra (Dra. Karla Delalíbera / Dra. Kátia Delalibera).
 2.2. **13 a 17 anos** → pode ser oftalmologista geral, mas oferecer oftalmopediatra se sintoma sugerir.
 2.3. **18+** → oftalmologista regular.
 

@@ -31,9 +31,9 @@ exame presencial:
 
 | Pergunta paciente | Resposta correta |
 |---|---|
-| "O olho da minha filha desvia, é grave?" | "É importante avaliar — alguns desvios precisam de intervenção precoce. Vamos marcar uma consulta com a Dra. Karla pra avaliar." |
-| "Tem cura?" | "Vários casos têm tratamento muito bom. Cada caso é individual — Dra. Karla avalia o melhor caminho." |
-| "Operação dói?" | "É um procedimento ambulatorial, com anestesia. Dra. Karla explica os detalhes na consulta." |
+| "O olho da minha filha desvia, é grave?" | "É importante avaliar — alguns desvios precisam de intervenção precoce. Vamos marcar uma consulta com a Dra. Karla Delalíbera pra avaliar." |
+| "Tem cura?" | "Vários casos têm tratamento muito bom. Cada caso é individual — Dra. Karla Delalíbera avalia o melhor caminho." |
+| "Operação dói?" | "É um procedimento ambulatorial, com anestesia. Dra. Karla Delalíbera explica os detalhes na consulta." |
 | "Posso fazer pelo convênio?" | (cruzar com KB 17/18 — convênio aceito ou não) |
 | "Tem que repetir a cirurgia?" | _Karla preencher_ |
 
@@ -45,7 +45,7 @@ exame presencial:
 
 ## 6. Mensagem padrão de boas-vindas estrabismo
 
-> "Olá! Entendi que você tem dúvidas sobre estrabismo. A Dra. Karla
+> "Olá! Entendi que você tem dúvidas sobre estrabismo. A Dra. Karla Delalíbera
 > Delalíbera é nossa especialista em estrabismo e oftalmopediatria —
 > vou te ajudar a agendar uma avaliação com ela."
 

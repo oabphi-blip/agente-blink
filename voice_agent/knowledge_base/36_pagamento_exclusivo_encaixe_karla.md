@@ -1,7 +1,7 @@
 # TIPO DE PAGAMENTO — AGENDAMENTO EXCLUSIVO / ENCAIXE (EXCLUSIVO DRA. KARLA DELALÍBERA)
 
 ## 🚨 ATENÇÃO
-Este roteiro é **estritamente EXCLUSIVO** e deve ser utilizado **somente** para consultas e procedimentos **sem convênio** (sem convênio, incluindo SDP) com a **Dra. Karla Delalíbera**.
+Este roteiro é **estritamente EXCLUSIVO** e deve ser utilizado **somente** para consultas e procedimentos **sem convênio** (sem convênio, incluindo Avaliação do Processamento Visual) com a **Dra. Karla Delalíbera**.
 
 O Agente deve utilizá-lo na **fase de finalização do agendamento logístico**, enviando **estritamente um passo por vez** e aguardando a resposta antes de avançar para a próxima etapa.
 
@@ -24,7 +24,7 @@ unidades fica mais confortável para você?
 
 ## 🔵 PASSO 2 — RESERVA COM SINAL DE 50% (aguardar o comprovante)
 
-A reserva do horário exclusivo da Dra. Karla sem convênio é garantida com
+A reserva do horário exclusivo da Dra. Karla Delalíbera sem convênio é garantida com
 um **sinal de 50% do valor da consulta**. O Agente apresenta isso de forma
 natural — NÃO oferece "pagar no dia" como opção de autoatendimento:
 
@@ -89,7 +89,7 @@ Pronto, [Nome]! Recebi seu comprovante ✅ Seu horário está garantido.
 📋 Resumo do atendimento:
 👤 Paciente: [Nome]
 🆔 CPF: [CPF]
-🏥 Modalidade: Sem Convênio (Dra. Karla) — sinal de 50% pago
+🏥 Modalidade: Sem Convênio (Dra. Karla Delalíbera) — sinal de 50% pago
 📍 Preferência: [Unidade] — [dia/turno/período escolhidos]
 
 Já te enviamos o detalhamento. Qualquer coisa, é só chamar por aqui. 💙
@@ -102,7 +102,7 @@ Se o comprovante NÃO chegou → não usar este passo: mover para
 
 ## ⚠️ Regras críticas
 
-1. **Apenas Dra. Karla sem convênio** — não usar para Dr. Fabrício ou convênios.
+1. **Apenas Dra. Karla Delalíbera sem convênio** — não usar para Dr. Fabrício Freitas ou convênios.
 2. **Um passo por vez** — esperar resposta a cada passo.
 3. **Sinal de 50%:** chave Pix Asa Norte: `karladelaliberaoftalmo@gmail.com` | Águas Claras: CNPJ `52.303.729/0001-30`. Informar só a chave da unidade escolhida.
 4. **Sem comprovante / resistência ao pagamento → 0-ATENDIMENTO HUMANO.** O Agente nunca confirma o horário sem o comprovante. A fila de encaixe (paga no dia) é alternativa tratada pela equipe humana — não é oferecida pela Lia como autoatendimento.

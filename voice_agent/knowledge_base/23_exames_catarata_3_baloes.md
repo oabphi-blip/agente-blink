@@ -53,7 +53,7 @@ ou múltiplas idas à clínica! 🏥
 ## 🎈 BALÃO 3 — Autoridade Dra. Kátia, Valor e Fechamento
 
 ```
-👩‍⚕️ Caso haja indicação cirúrgica com o Dr. Fabrício, o próximo passo será
+👩‍⚕️ Caso haja indicação cirúrgica com o Dr. Fabrício Freitas, o próximo passo será
 com a Dra. Kátia Delalíbera, nossa especialista em retina com
 Pós-Doutorado pela Johns Hopkins University nos EUA.
 

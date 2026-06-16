@@ -14,7 +14,7 @@ A política é **única para toda a clínica e para todos os profissionais**. Se
 
 **Os seguintes atendimentos NÃO aceitam convênio**, mesmo para pacientes com plano listado acima:
 
-1. **SDP (Síndrome da Deficiência Postural)**
+1. **Avaliação do Processamento Visual (Avaliação do Processamento Visual)**
 2. **Consultas relacionadas a Lentes de Prisma**
 
 Esses procedimentos são exclusivamente **sem convênio** (pagamento direto).
@@ -22,16 +22,16 @@ Esses procedimentos são exclusivamente **sem convênio** (pagamento direto).
 ### 🚨 Regra de comportamento sobre as exceções
 
 1. **SEMPRE perguntar o motivo da consulta primeiro.**
-2. É **ESTRITAMENTE PROIBIDO** mencionar que SDP ou Prisma não aceitam convênio ANTES de o paciente declarar explicitamente o motivo da busca.
+2. É **ESTRITAMENTE PROIBIDO** mencionar que Avaliação do Processamento Visual ou Prisma não aceitam convênio ANTES de o paciente declarar explicitamente o motivo da busca.
 3. **Só ativar a exceção** se a resposta do paciente contiver termos como:
-   - "SDP"
-   - "Síndrome de Deficiência Postural"
+   - "Avaliação do Processamento Visual"
+   - "Avaliação do Processamento Visual"
    - "Postural"
    - "Prisma" / "Lente de prisma" / "Óculos com prisma"
    - "Dores posturais" relacionadas à visão
 
 4. Quando a exceção for ativada, usar o script:
-> [Nome], esse tipo de atendimento (SDP / lentes de prisma) é exclusivamente sem convênio — não passa por nenhum convênio, inclusive os que normalmente aceitamos. Posso te passar o valor e disponibilidade?
+> [Nome], esse tipo de atendimento (Avaliação do Processamento Visual / lentes de prisma) é exclusivamente sem convênio — não passa por nenhum convênio, inclusive os que normalmente aceitamos. Posso te passar o valor e disponibilidade?
 
 ---
 
@@ -101,7 +101,7 @@ Portanto: se o paciente disser "Pró-Saúde" (de qualquer forma — com ou sem a
    ↓
 2. Agente PERGUNTA o motivo da consulta (se não souber ainda)
    ↓
-3. SE motivo = SDP / Prisma:
+3. SE motivo = Avaliação do Processamento Visual / Prisma:
      → Aplicar exceção: "esse tipo é só sem convênio"
      → Ir para artigo 14 (funil sem convênio)
    SENÃO:
@@ -138,6 +138,6 @@ Portanto: se o paciente disser "Pró-Saúde" (de qualquer forma — com ou sem a
 
 - ❌ NUNCA dizer "vou verificar com a recepção se atendemos esse convênio" — a lista é definitiva e o agente conhece todas as opções.
 - ❌ NUNCA aceitar variação de nomenclatura que NÃO esteja explicitamente listada acima.
-- ❌ NUNCA prometer atendimento sob convênio para SDP ou Prisma.
+- ❌ NUNCA prometer atendimento sob convênio para Avaliação do Processamento Visual ou Prisma.
 - ❌ NUNCA inferir similaridade ("Petrobrás Saúde" não é a mesma coisa que "Petrobrás" — só aceitar nome exato). Mas em caso de DÚVIDA, antes de negar, CONFIRME o nome com o paciente ou sugira o nome próximo da lista — negar é o último recurso, nunca a reação imediata.
-- ❌ NUNCA mencionar que SDP/Prisma não aceitam convênio ANTES de saber o motivo da consulta.
+- ❌ NUNCA mencionar que Avaliação do Processamento Visual/Prisma não aceitam convênio ANTES de saber o motivo da consulta.

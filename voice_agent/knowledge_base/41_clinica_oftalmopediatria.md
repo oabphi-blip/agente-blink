@@ -1,6 +1,6 @@
 # Oftalmopediatria — Boas práticas Blink
 
-> ⚠️ **STATUS: ESQUELETO** — preenchimento depende de Dra. Karla.
+> ⚠️ **STATUS: ESQUELETO** — preenchimento depende de Dra. Karla Delalíbera.
 
 ## 1. Protocolo por idade
 

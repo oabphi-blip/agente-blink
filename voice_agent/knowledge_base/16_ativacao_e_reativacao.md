@@ -12,7 +12,7 @@ Funil "Ativar" do CRM. Substitui/complementa o artigo `10_reativacao_leads.md` c
 | Ativar conversa WhatsApp API oficial | 0737 / 1003 ATIVAR CONVERSA | Após 24h da última mensagem (regra Meta) |
 | Ativar 24h sem resposta | 1079 ATIVAR CONVERSA IMEDIATO | 24h sem resposta |
 | Ativar especificamente catarata | ATIVAR CATARATA | Lead de catarata frio |
-| Ativar sem resposta Dr. Fabrício | ATIVAR sem RESPOSTA DR. FABRICIO | Lead de catarata frio que ignorou Fabrício |
+| Ativar sem resposta Dr. Fabrício Freitas | ATIVAR sem RESPOSTA DR. FABRICIO | Lead de catarata frio que ignorou Fabrício |
 | Novo horário disponível | 1056-NOVO HORÁRIO | Quando abre slot novo na agenda |
 | Grau de urgência (escalonamento) | 1039 / 0741 ATIVAR GRAU DE URGÊNCIA | Lead morno que precisa subir prioridade |
 | Aos sábados | 0796 - CAMPANHA SÁBADO | Quando há atendimento sábado |
@@ -87,7 +87,7 @@ Após 24h da última mensagem do paciente, **só é possível enviar mensagem co
 ## Catarata frio (regra especial — ATIVAR CATARATA)
 Lead de catarata que sumiu requer abordagem mais robusta. Sequência:
 1. **Mensagem leve** ("voltando por aqui").
-2. Se não responder em 48h: **Autoridade médica** (recapitula Dr. Fabrício + Dra. Kátia + Johns Hopkins).
+2. Se não responder em 48h: **Autoridade médica** (recapitula Dr. Fabrício Freitas + Dra. Kátia + Johns Hopkins).
 3. Se não responder em 7d: **Novo gancho** (vaga exclusiva, oferta de avaliação a R$ 445).
 4. Se não responder em 15d: pausa.
 

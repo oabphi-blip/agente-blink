@@ -5,10 +5,10 @@
 ## 1. QUANDO COBRAR SINAL
 
 ### 1.1. Casos com sinal opcional (paciente escolhe)
-- **Dra. Karla — Sem convênio (rotina/pediatria/SDP)** — Paciente escolhe entre:
+- **Dra. Karla Delalíbera — Sem convênio (rotina/pediatria/Avaliação do Processamento Visual)** — Paciente escolhe entre:
   - **Reserva Imediata 50%** → adianta metade via Pix, garante o slot exato.
   - **Fila de Encaixe** → sem adiantamento, paga no dia, agenda fica em standby.
-- **Dr. Fabrício — Avaliação Catarata (R$ 297)** — mesmo critério: Reserva Imediata (50% = R$ 148,50) ou Fila de Encaixe.
+- **Dr. Fabrício Freitas — Avaliação Catarata (R$ 297)** — mesmo critério: Reserva Imediata (50% = R$ 148,50) ou Fila de Encaixe.
 
 ### 1.2. Casos SEM sinal (obrigatoriamente)
 - Consulta com convênio aceito (artigo 17) — não há cobrança nenhuma antecipada.
@@ -18,25 +18,25 @@
 ### 1.3. Casos com sinal OBRIGATÓRIO (sem opção de fila)
 - Paciente com **2+ no-shows registrados** no Kommo → exigir Reserva Imediata 50% (não oferecer Fila de Encaixe).
 - Paciente com **3+ no-shows** → exigir **pagamento INTEGRAL antecipado** e escalar para a equipe humana antes de confirmar.
-- SDP (R$ 800 Karla) — pode ter sinal opcional, mas dado o valor alto, sempre apresentar Reserva Imediata como recomendada.
+- Avaliação do Processamento Visual (R$ 800 Karla) — pode ter sinal opcional, mas dado o valor alto, sempre apresentar Reserva Imediata como recomendada.
 
 ## 2. VALORES DE SINAL (50% da consulta)
 
 | Modalidade | Valor cheio | Sinal 50% |
 |---|---|---|
 | Karla — Oftalmologia/Pediatria/Rotina | R$ 611,00 | **R$ 305,50** |
-| Karla — SDP | R$ 800,00 | **R$ 400,00** |
+| Karla — Avaliação do Processamento Visual | R$ 800,00 | **R$ 400,00** |
 | Fabrício — Avaliação Catarata | R$ 297,00 | **R$ 148,50** |
 
 ⚠️ O valor exato é sempre `valor_cheio / 2` arredondado a 2 casas. Nunca improvisar outro valor.
 
 ## 3. DADOS DE COBRANÇA (FONTES OFICIAIS)
 
-### 3.1. Asa Norte (Dra. Karla / Dr. Fabrício)
+### 3.1. Asa Norte (Dra. Karla Delalíbera / Dr. Fabrício Freitas)
 - **Chave Pix:** `karladelaliberaoftalmo@gmail.com`
 - Tipo: e-mail (chave pessoal — verificada e ativa)
 
-### 3.2. Águas Claras (Dra. Karla / Dr. Fabrício)
+### 3.2. Águas Claras (Dra. Karla Delalíbera / Dr. Fabrício Freitas)
 - **Chave Pix:** `52.303.729/0001-30`
 - Tipo: CNPJ da clínica
 
@@ -136,7 +136,7 @@ Use estas frases (ou variações próximas) — testadas para soar firmes mas ac
 
 - "A reserva imediata garante seu horário, e o adiantamento é só metade do valor — o restante você pode pagar no dia."
 - "Se preferir não adiantar, fica na Fila de Encaixe — assim que abrir vaga, te avisamos."
-- "O adiantamento não é devolvido se você cancelar com menos de 24h — é uma forma de respeitar a agenda da Dra. Karla e dos outros pacientes."
+- "O adiantamento não é devolvido se você cancelar com menos de 24h — é uma forma de respeitar a agenda da Dra. Karla Delalíbera e dos outros pacientes."
 - "Como já tivemos uns ajustes antes, hoje a reserva é só com adiantamento."
 
 ---

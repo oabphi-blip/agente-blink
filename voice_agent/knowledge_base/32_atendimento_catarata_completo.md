@@ -53,7 +53,7 @@ Obrigada por compartilhar, [Nome]! Isso nos ajudará a preparar tudo com
 o máximo de cuidado. 🤝
 
 ⏳ Para otimizar seu tempo, preparamos uma Agenda Inteligente: em apenas
-um único planejamento inicial, o Dr. Fabrício e nossa equipe garantirão
+um único planejamento inicial, o Dr. Fabrício Freitas e nossa equipe garantirão
 um cuidado completo para a sua saúde visual. 🏥
 ```
 
@@ -102,7 +102,7 @@ Qual seria sua preferência na nossa unidade Águas Claras?
 ---
 
 ## ⚠️ Regras críticas
-- **Dr. Fabrício atende SOMENTE Águas Claras**, segundas à tarde ou sextas pela manhã.
+- **Dr. Fabrício Freitas atende SOMENTE Águas Claras**, segundas à tarde ou sextas pela manhã.
 - Pulando dados já coletados (não repergunte).
 - 3 balões em sequência sem aguardar resposta.
 - Após coleta de preferências → handoff para Concierge.

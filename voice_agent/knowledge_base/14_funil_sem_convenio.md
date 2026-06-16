@@ -41,11 +41,11 @@ algum médico atenda" — a recusa é definitiva (artigo 18).
 
 Pergunta aberta. Bifurca pela especialidade:
 
-- **Avaliação do Processamento Visual (Dra. Karla)** →
+- **Avaliação do Processamento Visual (Dra. Karla Delalíbera)** →
   > "Combinado. Pra Avaliação do Processamento Visual, o valor é **R$ 800 via Pix**.
   > Posso te oferecer 2 horários em [unidade]?"
-- **Catarata (Dr. Fabrício)** →
-  > "Combinado. A consulta de avaliação com o Dr. Fabrício é **R$ 445 via Pix**.
+- **Catarata (Dr. Fabrício Freitas)** →
+  > "Combinado. A consulta de avaliação com o Dr. Fabrício Freitas é **R$ 445 via Pix**.
   > Posso te oferecer 2 horários?"
 - **Rotina / oftalmopediatria / outro motivo** → avança para **T3**.
 
@@ -208,6 +208,6 @@ HUMANO (ver regra 13.1-A).
 
 ## ⚠️ Regras adicionais
 
-- Esse roteiro de valor (R$ 611 / R$ 670) é para **consulta da Dra. Karla** (oftalmopediatria/rotina) ou **Dra. Kátia** (retina/vítreo). Ver tabela completa em artigo 19.
-- **NÃO** confunda com o valor exclusivo de **R$ 445** que é APENAS para o Dr. Fabrício (catarata).
+- Esse roteiro de valor (R$ 611 / R$ 670) é para **consulta da Dra. Karla Delalíbera** (oftalmopediatria/rotina) ou **Dra. Kátia** (retina/vítreo). Ver tabela completa em artigo 19.
+- **NÃO** confunda com o valor exclusivo de **R$ 445** que é APENAS para o Dr. Fabrício Freitas (catarata).
 - **NÃO** ofereça parcelamento maior que 2x sem juros — isso é trava da clínica.

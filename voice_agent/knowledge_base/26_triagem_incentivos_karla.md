@@ -4,7 +4,7 @@
 Primeiro contato com paciente cujo motivo já indica acompanhamento com a **Dra. Karla Delalíbera**:
 - Oftalmopediatria
 - Estrabismo
-- SDP (Síndrome de Deficiência Postural)
+- Avaliação do Processamento Visual (Avaliação do Processamento Visual)
 - Lentes de prisma
 
 …**antes** de informar o valor da consulta.

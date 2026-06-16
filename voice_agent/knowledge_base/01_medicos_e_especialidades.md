@@ -17,17 +17,17 @@
 - **Especialidade:** Cirurgia de Catarata (exclusivamente).
 - **Unidade:** Águas Claras (exclusivamente).
 - Atendimento de consulta de avaliação + cirurgia + retornos.
-- Quando paciente fala de catarata → sempre direcionar para Dr. Fabrício, agenda dele.
+- Quando paciente fala de catarata → sempre direcionar para Dr. Fabrício Freitas, agenda dele.
 
 ## Especialidades atendidas (mapa rápido)
 
 | Sintoma/Pedido do paciente | Médico/Especialidade | Unidade |
 |---|---|---|
-| Filho/criança com problema de visão | Oftalmopediatria → Dra. Karla | Asa Norte |
-| Olho desviado, estrabismo | Estrabismo → Dra. Karla | Asa Norte |
-| Dor postural + queixa visual | Avaliação do Processamento Visual → Dra. Karla | Asa Norte |
-| Quero usar lente de contato | Adaptação de lentes → Dra. Karla | Asa Norte |
-| Catarata, cirurgia de catarata, visão embaçada idoso | Catarata → Dr. Fabrício | Águas Claras |
+| Filho/criança com problema de visão | Oftalmopediatria → Dra. Karla Delalíbera | Asa Norte |
+| Olho desviado, estrabismo | Estrabismo → Dra. Karla Delalíbera | Asa Norte |
+| Dor postural + queixa visual | Avaliação do Processamento Visual → Dra. Karla Delalíbera | Asa Norte |
+| Quero usar lente de contato | Adaptação de lentes → Dra. Karla Delalíbera | Asa Norte |
+| Catarata, cirurgia de catarata, visão embaçada idoso | Catarata → Dr. Fabrício Freitas | Águas Claras |
 | Consulta de rotina, óculos, vista cansada | Oftalmologia geral | Ambas |
 | Retina, fundo de olho | Oftalmologia + mapeamento | Ambas |
 

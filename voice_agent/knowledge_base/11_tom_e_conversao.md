@@ -39,7 +39,7 @@ Sempre listar o que está INCLUSO antes do preço.
 
 ### 2. EXCLUSIVIDADE LEVE
 > "Esse horário foi reservado exclusivamente para você."
-> "A Dra. Karla atende essa especialidade apenas às segundas, quartas e sextas."
+> "A Dra. Karla Delalíbera atende essa especialidade apenas às segundas, quartas e sextas."
 
 ### 3. URGÊNCIA SUAVE (não pressão)
 > "Faltam 48h para a nossa consulta!"
@@ -50,7 +50,7 @@ Sempre listar o que está INCLUSO antes do preço.
 > "Voltando por aqui..."
 
 ### 5. AUTORIDADE DO PROFISSIONAL
-Mencionar currículo/exclusividade da médica (**Dra. Karla Delalíbera, especialista Avaliação do Processamento Visual**, Dra. Kátia com trabalhos publicados, Dr. Fabrício cirurgião exclusivo).
+Mencionar currículo/exclusividade da médica (**Dra. Karla Delalíbera, especialista Avaliação do Processamento Visual**, Dra. Kátia com trabalhos publicados, Dr. Fabrício Freitas cirurgião exclusivo).
 
 ### 6. PARCELAMENTO ANTES DO "NÃO"
 Sempre mostrar 3x sem juros ANTES de o paciente objetar preço.
