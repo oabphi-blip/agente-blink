@@ -783,6 +783,76 @@ def _viola_oferta_agenda(text: str, has_agenda: bool) -> bool:
     return any(p.search(text) for p in _FAKE_AGENDA_LOOKUP)
 
 
+# Bug C-30A (16/06/2026) — variante do C-30 pra cenário Medware vazio.
+# Caso real: Sofia 24158652, depois das 13:07 BRT — Medware ficou intermitente,
+# Lia ficou em loop "deixa eu reconsultar a agenda real aqui pra você" 4x sem
+# voltar com slots. O filtro C-30 original NÃO age porque `has_agenda=False`
+# (ctx.agenda vazio). C-30A fecha esse buraco.
+
+def _texto_contem_hesitacao_stall(text: str) -> bool:
+    """True se o texto contém QUALQUER padrão de stall — sem gate has_agenda.
+
+    Reusa os mesmos padrões de `_FAKE_AGENDA_LOOKUP` mas independente do
+    contexto ter agenda. Usado pela rede C-30A quando ctx.agenda está vazio
+    mas a Lia escreveu "deixa eu consultar / reconsultar / volto em 1 min".
+    """
+    if not text:
+        return False
+    return any(p.search(text) for p in _FAKE_AGENDA_LOOKUP)
+
+
+def _lia_em_estado_agenda_provavel(ctx: Optional[dict]) -> bool:
+    """True se ctx indica que Lia estava prestes a ofertar slot.
+
+    Heurística — se médico+unidade definidos OU médico+motivo definidos, é
+    provável que estivesse em FSM=AGENDA tentando bater Medware. Evita falso
+    positivo em fases iniciais da conversa (triagem/dados).
+    """
+    if not ctx:
+        return False
+    known = (ctx or {}).get("known") or {}
+    medico = (known.get("medico") or "").strip()
+    unidade = (known.get("unidade") or "").strip()
+    motivo = (known.get("motivo") or "").strip()
+    if medico and unidade:
+        return True
+    if medico and motivo:
+        return True
+    # Aceita também estado FSM explícito
+    estado = (ctx.get("fsm") or ctx.get("estado") or "").upper()
+    if estado in ("AGENDA", "CONFIRMACAO"):
+        return True
+    return False
+
+
+def _sinalizar_escalation_medware_down(ctx: Optional[dict]) -> None:
+    """Grava flag Redis pro watchdog/pipeline escalar lead pra atendimento humano.
+
+    Chave: blink:c30a_medware_down:{lead_id} TTL 30min
+    Watchdog Promessa Não Cumprida pega esse marker e move lead pra
+    1-ATENDIMENTO HUMANO + nota "AÇÃO HUMANA: Medware indisponível, ofertar
+    agenda quando subir".
+
+    Falha silenciosa se Redis não disponível — não pode quebrar resposta.
+    """
+    if not ctx:
+        return
+    lead_id = (ctx or {}).get("lead_id") or ((ctx or {}).get("known") or {}).get("lead_id")
+    if not lead_id:
+        return
+    try:
+        # Import lazy — evita ciclo de import e não quebra teste sem Redis
+        from voice_agent.redis_client import get_redis  # type: ignore
+        r = get_redis()
+        if r is None:
+            return
+        key = f"blink:c30a_medware_down:{lead_id}"
+        r.setex(key, 30 * 60, "1")
+    except Exception:
+        # Best-effort: filtro continua, escalação só não dispara
+        return
+
+
 # ------------------------------------------------------------------
 # Filtro: perguntou turno/período quando tinha agenda real (Alice 21256807)
 # ------------------------------------------------------------------
@@ -1889,6 +1959,36 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
                 len((ctx or {}).get("agenda", [])), text[:200],
             )
             return _gerar_oferta_2_slots(ctx)
+
+    # 0-C30A. ANTI-HESITAÇÃO SEM AGENDA — Medware indisponível (Bug C-30A,
+    # Sofia 24158652 13:07-13:40 BRT, 16/06/2026). Quando Medware está
+    # intermitente/down, ctx.agenda=[] mas Lia já estava em FSM=AGENDA
+    # (médico+unidade definidos no known). Lia continuou hesitando "deixa eu
+    # reconsultar a agenda real" 4x sem voltar. Filtro substitui pela frase
+    # honesta de Medware down E grava flag Redis pra watchdog escalar pra
+    # 1-ATENDIMENTO HUMANO.
+    #
+    # Reaproveita toggle LIA_ANTI_HESITACAO_AGENDA (mesmo controle do C-30).
+    if (
+        not has_agenda
+        and _texto_contem_hesitacao_stall(text)
+        and _lia_em_estado_agenda_provavel(ctx)
+    ):
+        _modo_c30a = os.getenv("LIA_ANTI_HESITACAO_AGENDA", "1").lower()
+        if _modo_c30a == "shadow":
+            log.warning(
+                "[FILTRO C-30A SHADOW] SUBSTITUIRIA hesitacao sem agenda "
+                "(Medware vazio) + sinalizaria escalation. Texto: %r",
+                text[:200],
+            )
+        elif _modo_c30a != "0":
+            log.error(
+                "[FILTRO C-30A] HESITACAO SEM AGENDA — Medware indisponivel. "
+                "Substituindo pela frase honesta + flag escalation Redis. "
+                "Texto: %r", text[:200],
+            )
+            _sinalizar_escalation_medware_down(ctx)
+            return _gerar_resposta_honesta_medware_down(ctx)
 
     # Lia disse "Perfeito! Atendemos o INAS GDF" violando KB 18 (Inas é
     # NÃO-aceito sem exceção). Filtro sempre-ON: detecta afirmação positiva

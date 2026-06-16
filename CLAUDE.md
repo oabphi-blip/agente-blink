@@ -138,6 +138,31 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (16/06/2026) Bug C-30A — Variante "Medware vazio" (Sofia 24158652 13:07-13:40 BRT)
+
+**Caso:** depois do fix C-30 deployado, ainda restava cenário descoberto na própria Sofia: às 13:07 BRT Medware ficou intermitente, ctx.agenda=[] mas Lia entrou em loop de hesitação 4x ("Sofia, deixa eu reconsultar a agenda real aqui pra você — volto em 1 minuto"). Filtro C-30 NÃO age porque `has_agenda=False`.
+
+**Fix C-30A (3 funções novas em `responder.py` + 1 branch em `_scrub_prohibited`):**
+
+1. `_texto_contem_hesitacao_stall(text)` — detecta padrões de stall SEM o gate `has_agenda` (reusa `_FAKE_AGENDA_LOOKUP`).
+2. `_lia_em_estado_agenda_provavel(ctx)` — heurística: médico+unidade OU médico+motivo OU `fsm in {AGENDA, CONFIRMACAO}`. Evita falso positivo em fase inicial.
+3. `_sinalizar_escalation_medware_down(ctx)` — grava `blink:c30a_medware_down:{lead_id}` (TTL 30min) pro watchdog/pipeline escalar.
+
+**Branch em `_scrub_prohibited`** (após C-30, antes do C-19): se `not has_agenda AND _texto_contem_hesitacao_stall(text) AND _lia_em_estado_agenda_provavel(ctx)` → substitui pela frase honesta de Medware down (reusa `_gerar_resposta_honesta_medware_down`) + sinaliza Redis.
+
+**Integração natural com watchdog:** a frase substituída ("deixa eu reconsultar... volto em 1 minuto") já é padrão de promessa que o watchdog promessa detecta. Em 3min ele move lead pra 1-ATENDIMENTO HUMANO automaticamente. Sem necessidade de modificar watchdog.
+
+**Toggle compartilhado:** `LIA_ANTI_HESITACAO_AGENDA` (1/shadow/0) — mesma flag do C-30.
+
+**Pytest novo:** `tests/test_c30a_medware_down.py` — 22 cenários (detecção stall + estado AGENDA + integração com texto Sofia real + toggle off + agenda cheia roteia pra C-30 não C-30A). **22/22 verde + 78/78 verde combinado** (C-30 + C-30A + watchdog).
+
+**5 camadas finais de defesa anti-hesitação:**
+1. Prompt coerente (E7 reescrita)
+2. Tool calling forçado FSM=AGENDA (#183)
+3. Filtro C-30 (agenda cheia + stall → oferta real)
+4. Filtro C-30A (agenda vazia + stall + estado AGENDA → frase honesta + escala)
+5. Watchdog promessa cron 2min (move pra atendimento humano em 3min)
+
 ### 0. (16/06/2026) Bug C-30 — Hesitação "deixa eu consultar" tinha 2 causas vivas (Sofia 24158652)
 
 **Caso (16/06/2026 10:00 BRT):** lead 24158652 Sofia (7a, Bacen, Karla Asa Norte rotina). Lia coletou TUDO certo (nome+data nasc+convênio aceito+médico+motivo+unidade+turno) e ao entrar em FSM=AGENDA escreveu **"Deixa eu consultar a agenda exata para esse período e volto com os horários reais pra você em um instante"** — exatamente o padrão Fernanda/Carolina/Maitê. Fix #183 (tool_choice forçado) marcado como "completed" mas não funcionou.
