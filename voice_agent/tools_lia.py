@@ -224,13 +224,19 @@ ALL_TOOLS = [
 
 
 # ---------------------------------------------------------------------------
-# Toggle global — defaul OFF pra rollout gradual
+# Toggle global — default ON desde Bug C-32 (16/06/2026).
 # ---------------------------------------------------------------------------
+#
+# Bug C-32: env esquecida = code completed mas inerte. Reincidente em C-29,
+# C-30, C-31 — todas com a mesma causa raiz "código existe mas env não foi
+# setada". Inverter padrão pra DEFAULT ON resolve estruturalmente.
+#
+# Pra desligar (rollback emergencial), setar LIA_TOOLS_ENABLED=0 explicitamente.
 
 def tools_habilitadas() -> bool:
-    return (os.environ.get("LIA_TOOLS_ENABLED") or "").lower() in (
-        "1", "true", "yes",
-    )
+    """Default ON. Pra desligar: LIA_TOOLS_ENABLED=0 (ou "false"/"no")."""
+    val = (os.environ.get("LIA_TOOLS_ENABLED") or "1").lower().strip()
+    return val not in ("0", "false", "no", "off", "")
 
 
 # ---------------------------------------------------------------------------

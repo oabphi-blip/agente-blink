@@ -138,6 +138,50 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (16/06/2026) Bug C-32 — Defaults ON em prod (LIA_TOOLS_ENABLED + TRACING_ENABLED)
+
+**Caso (16/06/2026 ~12:30 BRT):** lead 24113652 Fábio Philipe Martins. Após deploy C-30/C-30A/C-31/nomes, Lia AINDA inventou dia errado ("quarta 18/06" sendo quinta). Healthz revelou que `settings` exibia `lia_opus_agenda_enabled: true` mas NÃO mostrava `LIA_TOOLS_ENABLED` nem `TRACING_ENABLED`. Confirmação dura: `/admin/replay/24113652` retornou `total_turnos: 0` com observação literal "Para ativar coleta: TRACING_ENABLED=1".
+
+**Causa raiz arquitetural (reincidente):**
+
+Fix #183 (tool calling forçado FSM=AGENDA) está implementado no código mas estava INERTE em prod porque `LIA_TOOLS_ENABLED=1` nunca foi setado no Easypanel. Mesmo padrão dos bugs C-29 (watchdog erros:6), C-30 (filtro hesitação atrás de gate), C-31 (filtros calendário atrás de FILTROS_LEGACY). **Padrão "default OFF, ligar pra usar" é fonte recorrente de bugs silenciosos.**
+
+**Fix arquitetural — inverter padrão pra DEFAULT ON:**
+
+1. **`voice_agent/tools_lia.py::tools_habilitadas()`** — antes: `(os.environ.get("LIA_TOOLS_ENABLED") or "").lower() in ("1","true","yes")` → default OFF. Depois: `(or "1").lower() not in ("0","false","no","off","")` → default ON.
+
+2. **`voice_agent/tracing.py::esta_habilitado()`** — antes: `os.getenv("TRACING_ENABLED", "0") == "1"` → default OFF. Depois: `(or "1") not in ("0","false","no","off","")` → default ON.
+
+3. **`voice_agent/pipeline.py::PIPELINE_LOCK_ENABLED`** — já era default ON ✅ (sem ação).
+
+**Rollback path:** pra desligar em emergência, setar EXPLICITAMENTE `LIA_TOOLS_ENABLED=0` ou `TRACING_ENABLED=0`.
+
+**Pytest:** `tests/test_c32_defaults_on.py` — 14 cenários cobrindo:
+- Sem env → ligado
+- Env vazia → ligado
+- Env="1"/"true" → ligado
+- Env="0"/"false"/"no"/"off" → desligado
+- Rollback combinado (ambas off)
+
+**14/14 verde local + 121/121 verde combinado** (C-32 + C-31 + nomes + C-30 + C-30A + watchdog).
+
+**Lição arquitetural CRÍTICA pra TODA env nova:**
+
+- **Default OFF em códigos NOVOS é só pra rollout gradual.** Depois de validado, INVERTER pra ON. Senão o `completed` no task list nunca vira realidade.
+- **Tracing OFF cega o diagnóstico.** Sem `replay/{lead_id}`, não dá pra investigar bug em prod. Tracing tem que ser default ON.
+- **Healthz tem que expor TODAS as envs críticas.** Se `LIA_TOOLS_ENABLED` não aparece no `/admin/healthz`, é sinal que ele nem foi lido. Auditoria recorrente: adicionar campo no healthz pra cada env.
+
+**Camadas anti-bug "Lia inventa data" FINAIS (8 redes):**
+
+1. Prompt E7 coerente
+2. **Tool calling forçado FSM=AGENDA (#183) — agora DEFAULT ON via C-32**
+3. Filtro C-30 (agenda cheia + stall → oferta real)
+4. Filtro C-30A (agenda vazia + stall → frase honesta)
+5. Filtro C-31a SEMPRE-ON (dia inventado)
+6. Filtro C-31b SEMPRE-ON (médico/unidade/dia)
+7. Watchdog promessa cron 2min
+8. **Tracing DEFAULT ON via C-32 — replay disponível pra todo lead**
+
 ### 0. (16/06/2026) Bug C-31 — Karla por unidade + dia-da-semana SEMPRE-ON (Fábio Philipe 24113652)
 
 **Caso (16/06/2026 12:14 BRT):** lead 24113652 Fábio Philipe Martins, adulto rotina, Karla Asa Norte. Lia ofereceu:

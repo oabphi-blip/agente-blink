@@ -280,4 +280,11 @@ class TraceBuilder:
 # -----------------------------------------------------------------------
 
 def esta_habilitado() -> bool:
-    return os.getenv("TRACING_ENABLED", "0") == "1"
+    """Default ON desde Bug C-32 (16/06/2026).
+
+    Sem tracing, /admin/replay/{lead_id} retorna vazio e fica impossível
+    investigar bugs em prod. Default ON garante observabilidade básica.
+    Pra desligar: TRACING_ENABLED=0 explicitamente.
+    """
+    val = (os.getenv("TRACING_ENABLED") or "1").lower().strip()
+    return val not in ("0", "false", "no", "off", "")
