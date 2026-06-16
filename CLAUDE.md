@@ -138,6 +138,68 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (16/06/2026) Bug C-31 — Karla por unidade + dia-da-semana SEMPRE-ON (Fábio Philipe 24113652)
+
+**Caso (16/06/2026 12:14 BRT):** lead 24113652 Fábio Philipe Martins, adulto rotina, Karla Asa Norte. Lia ofereceu:
+- "1️⃣ quarta-feira, **18/06** às 08:30" — 18/06/2026 é **quinta**
+- "2️⃣ sexta-feira, **20/06** às 08:00" — 20/06/2026 é **sábado**
+
+Duas violações simultâneas (dia-da-semana errado + Karla não atende fim-de-semana).
+
+**Causa raiz dupla:**
+
+1. **Mapping incompleto.** `_DIAS_ATENDIMENTO_POR_MEDICO = {"karla": {0,1,2,3,4}}` (seg-sex) — inclui QUINTA. Mas Karla Asa Norte só atende seg/qua/sex; quinta seria pra Águas Claras. Faltava dimensão UNIDADE.
+
+2. **Filtros atrás de FILTROS_LEGACY=0.** Os filtros `_viola_dia_semana` e `_viola_oferta_em_dia_nao_atendido` existiam mas estavam atrás do gate `_FILTROS_LEGACY_ATIVOS`. Mesmo problema arquitetural do C-30: gate único derrubou 4 filtros legítimos ao mesmo tempo. Dia-da-semana NÃO é regra subjetiva — é fato calculável.
+
+**Fix arquitetural (responder.py):**
+
+1. **Novo mapping `_DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE`** com chave `(medico, unidade)`:
+   - `("karla", "asa norte")` → {0, 2, 4} (seg/qua/sex)
+   - `("karla", "águas claras")` → {1, 3} (ter/qui)
+   - `("fabricio", "*")` → {1, 3}
+   - Fallback `_DIAS_ATENDIMENTO_POR_MEDICO` mantido (união) pra ctx sem unidade
+
+2. **`_viola_oferta_em_dia_nao_atendido` lê unidade do ctx.known** — se conhecida, usa mapping específico; se ausente, fallback união.
+
+3. **2 filtros SEMPRE-ON** — `_viola_dia_semana` e `_viola_oferta_em_dia_nao_atendido` saíram do gate `_FILTROS_LEGACY_ATIVOS`. Agora rodam invariantes duros (igual ao filtro Pix chave inválida). Renomeados nos logs como `[FILTRO C-31a]` e `[FILTRO C-31b]`.
+
+**Pytest:** `tests/test_bug_c31_dia_medico_unidade.py` — 17 cenários incluindo texto literal do bug Fábio Philipe + Karla Águas Claras quinta OK + Karla Asa Norte quinta violação. **17/17 verde + 107/107 verde combinado** (C-31 + nomes + C-30 + C-30A + watchdog).
+
+**Lição arquitetural CRÍTICA:**
+
+- **Fato objetivo ≠ regra subjetiva.** Filtros que validam fatos calculáveis (dia da semana, médico atende ou não atende, Pix chave válida) são INVARIANTES DUROS — sempre-ON. Filtros que detectam padrões linguísticos contestáveis (hesitação, redundância) podem ter toggle.
+- **Gate único = bomba-relógio (de novo).** `FILTROS_LEGACY=0` já tinha derrubado o filtro `_viola_oferta_agenda` (causa raiz do C-30 Sofia). Agora derrubou os 2 filtros de calendário (C-31 Fábio Philipe). Em ambos os casos, mover pra sempre-ON foi o fix.
+- **KB tem fonte canônica.** `voice_agent/knowledge_base/22_agenda_dra_karla.md` já listava "Asa Norte: seg/qua/sex; Águas Claras: ter/qui". Código tinha mapping incompleto há semanas. Disciplina: regras estruturais no KB têm que casar com o código.
+
+### 0. (16/06/2026) Regra prompt — nome+sobrenome do médico em TODA menção (Fábio 16/06)
+
+**Origem:** "atualizar pronto agente, sempre que referi ao medico, constar nome e sobrenome".
+
+**Estado anterior:** 106 ocorrências em 26 arquivos KB com "Dra. Karla" e "Dr. Fabrício" sem sobrenome. Apresentação parcial enfraquecia autoridade clínica do médico ("pode ser qualquer Karla" — paciente não associava).
+
+**Fix em 3 camadas:**
+
+1. **Substituição em massa nos KB** — 106 substituições automáticas em 26 .md:
+   - `Dra. Karla` (sem `Delal` depois) → `Dra. Karla Delalíbera`
+   - `Dr. Fabrício` / `Dr. Fabricio` (sem `Freitas` depois) → `Dr. Fabrício Freitas`
+   - Regex protegidos: NÃO altera onde sobrenome já está, NÃO altera "Karla 30min" técnico, NÃO toca "Dra. Kátia"
+
+2. **Seção 0AA.5 reforçada (`_MASTER_INSTRUCTION.md`):** regra IMPERATIVA "NOME + SOBRENOME SEMPRE" com:
+   - ✅ exemplos corretos com sobrenome
+   - ❌ anti-exemplos sem sobrenome (incompleto)
+   - Razão explícita (autoridade clínica)
+   - Bump `VERSAO_PROMPT: 2026-06-16-nome-sobrenome-medico-obrigatorio` força re-cache Anthropic
+
+3. **Pytest blindando regressão (`test_nome_sobrenome_medicos_kb.py`):**
+   - Varre TODOS os artigos KB
+   - Falha se aparecer `Dra. Karla` sem `Delal` OU `Dr. Fabrício` sem `Freitas`
+   - Ignora anti-exemplos (linhas com ❌ / "nunca" / "(incompleto)" / "abreviado")
+   - 12 cenários incluindo regex sanity + outros médicos não disparam
+   - 12/12 verde local + 90/90 combinado (regra nomes + C-30 + C-30A + watchdog)
+
+**Lição operacional:** quando Fábio define uma regra de tom/apresentação, aplicar em TODO o KB simultaneamente (não só `_MASTER_INSTRUCTION.md`). KB é fragmentado em 38+ artigos — regra que vive só na Master não chega ao prompt final (RAG injeta o que for relevante).
+
 ### 0. (16/06/2026) Bug C-30A — Variante "Medware vazio" (Sofia 24158652 13:07-13:40 BRT)
 
 **Caso:** depois do fix C-30 deployado, ainda restava cenário descoberto na própria Sofia: às 13:07 BRT Medware ficou intermitente, ctx.agenda=[] mas Lia entrou em loop de hesitação 4x ("Sofia, deixa eu reconsultar a agenda real aqui pra você — volto em 1 minuto"). Filtro C-30 NÃO age porque `has_agenda=False`.

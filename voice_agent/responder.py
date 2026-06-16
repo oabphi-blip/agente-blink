@@ -1119,12 +1119,41 @@ _DIA_SEMANA_FALLBACK = (
 # Mapa weekday() (0=segunda ... 6=domingo) → dias atendidos por médico.
 # Fonte: política operacional Blink + Medware (Karla seg-sex; Fabrício
 # ter/qui; Kátia em pausa).
+# BUG C-31 (16/06/2026, lead 24113652 Fábio Philipe). Mapping antigo
+# `_DIAS_ATENDIMENTO_POR_MEDICO` dava "karla": {0,1,2,3,4} (seg-sex) — inclui
+# QUINTA, mas Karla Asa Norte NÃO atende quinta. Mapeamento real por
+# médico+unidade (fonte: voice_agent/knowledge_base/22_agenda_dra_karla.md):
+#
+# Karla Asa Norte:     segunda, quarta, sexta   (weekday 0, 2, 4)
+# Karla Águas Claras:  terça, quinta             (weekday 1, 3)
+# Karla sábado/dom:    NUNCA
+# Fabrício (qualquer): terça, quinta             (weekday 1, 3)
+# Kátia:               em pausa (set vazio)
+#
+# Sem unidade definida no ctx: usa UNIÃO dos dias (mais permissivo) — só
+# bloqueia se cair em fim-de-semana ou dia que nenhuma unidade atende.
+
+_DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE = {
+    ("karla", "asa norte"):     {0, 2, 4},   # seg, qua, sex
+    ("karla", "águas claras"):  {1, 3},      # ter, qui
+    ("karla", "aguas claras"):  {1, 3},      # variante sem acento
+    ("fabricio", "asa norte"):    {1, 3},
+    ("fabrício", "asa norte"):    {1, 3},
+    ("fabricio", "águas claras"): {1, 3},
+    ("fabrício", "águas claras"): {1, 3},
+    ("fabricio", "aguas claras"): {1, 3},
+    ("fabrício", "aguas claras"): {1, 3},
+    ("katia", "asa norte"):    set(),
+    ("kátia", "asa norte"):    set(),
+}
+
+# Fallback quando unidade desconhecida — usa UNIÃO dos dias possíveis
 _DIAS_ATENDIMENTO_POR_MEDICO = {
-    "karla": {0, 1, 2, 3, 4},      # seg-sex
-    "fabricio": {1, 3},             # ter, qui
+    "karla":    {0, 1, 2, 3, 4},   # união (seg-sex) — só usado se unidade ausente
+    "fabricio": {1, 3},
     "fabrício": {1, 3},
-    "katia": set(),                  # em pausa
-    "kátia": set(),
+    "katia":    set(),
+    "kátia":    set(),
 }
 
 
@@ -1142,11 +1171,17 @@ def _viola_oferta_em_dia_nao_atendido(
 ) -> Optional[tuple[str, str, str]]:
     """Detecta oferta em data que cai em dia que o médico não atende.
 
+    Considera UNIDADE quando presente no ctx (Bug C-31): Karla Asa Norte
+    atende só seg/qua/sex; Karla Águas Claras só ter/qui. Sem unidade,
+    usa união dos dias possíveis.
+
     Retorna (medico_norm, "DD/MM/YYYY", dia_semana_real) ou None.
     """
     if not text:
         return None
-    medico_raw = ((ctx or {}).get("medico") or "").lower()
+    known = ((ctx or {}).get("known") or ctx or {})
+    medico_raw = (known.get("medico") or (ctx or {}).get("medico") or "").lower()
+    unidade_raw = (known.get("unidade") or (ctx or {}).get("unidade") or "").lower().strip()
     # Pega só o primeiro nome — alinha com o mapa
     medico_norm = ""
     for m in _DIAS_ATENDIMENTO_POR_MEDICO:
@@ -1156,7 +1191,17 @@ def _viola_oferta_em_dia_nao_atendido(
     if not medico_norm:
         return None  # médico desconhecido — não bloqueia (evita falso positivo)
 
-    permitidos = _DIAS_ATENDIMENTO_POR_MEDICO[medico_norm]
+    # Bug C-31 — usar mapping médico+unidade quando unidade está no ctx
+    if unidade_raw:
+        chave = (medico_norm, unidade_raw)
+        if chave in _DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE:
+            permitidos = _DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE[chave]
+        else:
+            # Unidade não reconhecida (ex: typo) — fallback pra mapa simples
+            permitidos = _DIAS_ATENDIMENTO_POR_MEDICO[medico_norm]
+    else:
+        permitidos = _DIAS_ATENDIMENTO_POR_MEDICO[medico_norm]
+
     if not permitidos:
         # Médico em pausa — qualquer oferta é violação
         permitidos = set()
@@ -2196,28 +2241,30 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     # Substituir pelo fallback genérico "deixa eu reconferir o calendário"
     # QUEBRA o contexto: paciente respondeu "1" (Tudo Correto) ao template
     # de conclusão, e Lia abriu reconferência. Skip do filtro nesse caso.
-    if _FILTROS_LEGACY_ATIVOS and not (ctx and ctx.get("ja_agendado")):
+    # Bug C-31 (16/06/2026) — _viola_dia_semana e _viola_oferta_em_dia_nao_atendido
+    # SEMPRE-ON (fora do gate FILTROS_LEGACY). Esses são INVARIANTES DUROS, não
+    # regras subjetivas: dia-da-semana é fato calculável, médico atende ou não
+    # atende é fato operacional. Bug Fábio Philipe 24113652: Lia ofereceu
+    # "quarta 18/06" (era quinta) e "sexta 20/06" (era sábado, fim-de-semana,
+    # Karla não atende) porque ambos os filtros estavam atrás de FILTROS_LEGACY=0.
+    if not (ctx and ctx.get("ja_agendado")):
         violacao_dia = _viola_dia_semana(text)
         if violacao_dia:
             dia_falado, data_str, dia_real = violacao_dia
             log.error(
-                "[FILTRO] DIA DA SEMANA INVENTADO — Lia disse '%s' para %s, "
+                "[FILTRO C-31a] DIA DA SEMANA INVENTADO — Lia disse '%s' para %s, "
                 "mas Python calculou '%s'. Texto ORIGINAL completo: %r",
                 dia_falado, data_str, dia_real, text,
             )
             return _DIA_SEMANA_FALLBACK
 
-        # 0b-ter. OFERTA EM DIA QUE O MÉDICO NÃO ATENDE (Priscila lead 24055629)
-        # Lia disse "9h de sexta-feira (06/06)" — 06/06 é SÁBADO e Dra. Karla
-        # não atende sábado. _viola_dia_semana validou que a sexta era da Lia
-        # vs sábado real, mas mesmo se o regex anterior tivesse falhado, este
-        # filtro pega a oferta em sábado/domingo pra Karla diretamente.
+        # OFERTA EM DIA QUE O MÉDICO NÃO ATENDE (considera médico+unidade)
         violacao_dia_med = _viola_oferta_em_dia_nao_atendido(text, ctx)
         if violacao_dia_med:
             medico_norm, data_str, dia_real = violacao_dia_med
             log.error(
-                "[FILTRO] OFERTA EM DIA NAO ATENDIDO — médico=%r data=%s "
-                "cai em %s. Médico não trabalha nesse dia. Texto: %r",
+                "[FILTRO C-31b] OFERTA EM DIA NAO ATENDIDO — médico=%r data=%s "
+                "cai em %s. Médico não trabalha nesse dia/unidade. Texto: %r",
                 medico_norm, data_str, dia_real, text[:300],
             )
             return _DIA_NAO_ATENDIDO_FALLBACK
