@@ -248,21 +248,76 @@ class VoicePipeline:
         # agenda real e a Lia poder oferecer slots concretos com cod_agenda.
         if self.medware is not None and caller_context:
             try:
+                import json as _json
+                import os
+                import time as _time
                 known = caller_context.get("known") or {}
                 medico_param = known.get("medico") or "Dra. Karla Delalibera"
                 unidade_param = known.get("unidade")  # pode ser None
-                slots = self.medware.horarios_para_agente(
-                    medico_param, unidade_param,
-                )
+                # Bug C-30 (Sofia 24158652): transformar a preferência textual
+                # do paciente (campo DIA/TURNO/PERÍODO → known["dia_turno"]) num
+                # request ESPECÍFICO ao Medware. Ex.: "entre 7 e 15 de julho"
+                # → consulta SÓ essa janela em vez do default fixo de 90 dias.
+                # Toggle de rollback: MEDWARE_JANELA_PREFERENCIA=0 desliga.
+                _janela = None
+                _janela_fonte = "default_90d"
+                if os.getenv("MEDWARE_JANELA_PREFERENCIA", "1") != "0":
+                    try:
+                        from voice_agent.janela_preferencia import (
+                            parse_janela_preferencia,
+                        )
+                        _janela = parse_janela_preferencia(
+                            known.get("dia_turno") or ""
+                        )
+                    except Exception:  # noqa: BLE001
+                        _janela = None
+                if _janela:
+                    slots = self.medware.horarios_para_agente(
+                        medico_param, unidade_param,
+                        data_inicio=_janela[0], data_fim=_janela[1],
+                    )
+                    _janela_fonte = "preferencia"
+                    # Fallback seguro: se a janela específica veio vazia, cai
+                    # no default 90d pra NÃO regredir (Lia não fica sem slot).
+                    if not slots:
+                        slots = self.medware.horarios_para_agente(
+                            medico_param, unidade_param,
+                        )
+                        _janela_fonte = "fallback_90d_apos_pref_vazia"
+                else:
+                    slots = self.medware.horarios_para_agente(
+                        medico_param, unidade_param,
+                    )
+                # Persiste o req/resp do Medware em Redis pra auditoria
+                # (blink:medware_req:{lead_id}, TTL 30d). Resolve a lacuna do
+                # tracing, que só guardava agenda_disponivel=bool.
+                try:
+                    _redis = getattr(self, "_redis", None)
+                    _lead = caller_context.get("lead_id")
+                    if _redis is not None and _lead:
+                        _audit = dict(
+                            getattr(self.medware, "ultimo_req_horarios", {}) or {}
+                        )
+                        _audit["pref_texto"] = known.get("dia_turno") or ""
+                        _audit["janela_fonte"] = _janela_fonte
+                        _audit["ts_epoch"] = int(_time.time())
+                        _key = f"blink:medware_req:{_lead}"
+                        _redis.lpush(_key, _json.dumps(_audit, ensure_ascii=False))
+                        _redis.ltrim(_key, 0, 49)
+                        _redis.expire(_key, 30 * 24 * 3600)
+                except Exception:  # noqa: BLE001
+                    pass
                 if slots:
                     caller_context["agenda"] = slots
                     caller_context["agenda_medico_inferido"] = (
                         "default_karla" if not known.get("medico") else "ctx"
                     )
                     log.info(
-                        "Medware: %d horários para %s (fonte_medico=%s)",
+                        "Medware: %d horários para %s (fonte_medico=%s "
+                        "janela=%s)",
                         len(slots), medico_param,
                         "ctx" if known.get("medico") else "default_karla",
+                        _janela_fonte,
                     )
                     # Sucesso: zera contador do circuit breaker
                     try:

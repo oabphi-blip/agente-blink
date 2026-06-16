@@ -758,6 +758,14 @@ _FAKE_AGENDA_LOOKUP = [
     re.compile(r"\bsó um momento\b", re.IGNORECASE),
     re.compile(r"aguarda.{0,15}(momento|instante)", re.IGNORECASE),
     re.compile(r"estou sem acesso.{0,15}agenda", re.IGNORECASE),
+    # Bug C-30 (Sofia 24158652, 16/06/2026) — frases exatas de stall:
+    re.compile(r"reconsultar.{0,30}(agenda|horário|disponibilidade)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"reconferir.{0,30}(agenda|horário|disponibilidade)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"medware n[ãa]o.{0,30}(retorn|devolv|respond|dispon)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"agenda.{0,25}n[ãa]o est[áa].{0,25}(retorn|dispon|respond)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"volto (?:em|com|já com|ja com).{0,25}(minuto|instante|opç|op[çc][õo]es|hor[áa]rio)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?:lentid[ãa]o|inst[áa]vel|fora do ar|indispon[íi]vel).{0,25}(medware|agenda|sistema)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?:puxar|buscar).{0,15}(?:a\s+)?agenda.{0,20}(?:exata|real|aqui)", re.IGNORECASE | re.DOTALL),
 ]
 
 _FAKE_AGENDA_LOOKUP_FALLBACK = (
@@ -1853,6 +1861,34 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             "[FILTRO E-17] TURNO NOITE banido detectado. Texto: %r", text[:200]
         )
         return _FALLBACK_CURTO_E
+
+    # 0-C30. ANTI-HESITAÇÃO COM AGENDA REAL (Bug C-30, lead Sofia 24158652,
+    # 16/06/2026). Quando há slots reais no ctx e a Lia escreve QUALQUER
+    # variação de stall ("deixa eu consultar / reconsultar a agenda", "Medware
+    # não está retornando", "volto em 1 minuto", "vou puxar a agenda exata"),
+    # substitui pela OFERTA REAL de 2 slots — zero hesitação. Antes esse filtro
+    # estava atrás do gate FILTROS_LEGACY (OFF em prod), por isso a Lia hesitou.
+    #
+    # Toggle LIA_ANTI_HESITACAO_AGENDA (default "1" = ativo):
+    #   "1"      → substitui de fato (garantia dura de zero hesitação)
+    #   "shadow" → só LOGA o que substituiria (validação 24h, regra 11-E)
+    #   "0"      → desligado
+    if has_agenda and _viola_oferta_agenda(text, has_agenda):
+        _modo_c30 = os.getenv("LIA_ANTI_HESITACAO_AGENDA", "1").lower()
+        if _modo_c30 == "shadow":
+            log.warning(
+                "[FILTRO C-30 SHADOW] SUBSTITUIRIA hesitacao com %d slots no "
+                "ctx (sem substituir). Texto: %r",
+                len((ctx or {}).get("agenda", [])), text[:200],
+            )
+        elif _modo_c30 != "0":
+            log.error(
+                "[FILTRO C-30] HESITACAO COM AGENDA REAL bloqueada — Lia "
+                "hesitou tendo %d slots no ctx. Substituindo pela oferta real. "
+                "Texto: %r",
+                len((ctx or {}).get("agenda", [])), text[:200],
+            )
+            return _gerar_oferta_2_slots(ctx)
 
     # Lia disse "Perfeito! Atendemos o INAS GDF" violando KB 18 (Inas é
     # NÃO-aceito sem exceção). Filtro sempre-ON: detecta afirmação positiva

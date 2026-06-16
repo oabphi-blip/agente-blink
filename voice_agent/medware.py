@@ -658,13 +658,23 @@ class MedwareClient:
     def horarios_para_agente(
         self, medico_nome: str, unidade_nome: Optional[str] = None,
         dias: int = 90, max_retries: int = 3,
+        data_inicio: Optional[Any] = None,
+        data_fim: Optional[Any] = None,
     ) -> list[dict]:
         """Vagas livres reais para o agente OFERECER ao paciente.
 
         Mapeia o nome do médico/unidade para os códigos do Medware,
-        consulta as vagas dos próximos `dias` e devolve uma lista limpa:
+        consulta as vagas e devolve uma lista limpa:
           {data_iso, data_br, dia_semana, hora}
         Devolve [] se o médico não estiver mapeado ou não houver vaga.
+
+        JANELA DE DATAS (Bug C-30, Fábio 16/06/2026, lead Sofia 24158652):
+        Se `data_inicio`/`data_fim` (objetos date) forem passados, o request
+        vira ESPECÍFICO para a janela que o paciente pediu (ex.: "entre 7 e 15
+        de julho"). Caso contrário, mantém o default amanhã→+`dias` (90).
+
+        OBSERVABILIDADE: cada chamada loga [MEDWARE REQ] e [MEDWARE RESP] em
+        JSON, pra auditar no Easypanel "o que foi pedido vs. o que voltou".
 
         RETRY (task #139, origem bug Adelia 24056883 — 01/06/2026):
         Medware é silencioso intermitente — uma chamada pode retornar
@@ -673,14 +683,33 @@ class MedwareClient:
         o cod_medico foi resolvido (médico mapeado) — caso contrário
         retorno [] é definitivo.
         """
+        import json as _json
         import time as _time
         cod_medico = _code_lookup(MEDICO_CODES, medico_nome)
         if not cod_medico:
             return []
         cod_unidade = _code_lookup(UNIDADE_CODES, unidade_nome)
         hoje = datetime.now(_TZ)
-        ini = (hoje + timedelta(days=1)).strftime("%d/%m/%Y")
-        fim = (hoje + timedelta(days=dias)).strftime("%d/%m/%Y")
+        if data_inicio is not None and data_fim is not None:
+            ini = data_inicio.strftime("%d/%m/%Y")
+            fim = data_fim.strftime("%d/%m/%Y")
+            janela_fonte = "preferencia"
+        else:
+            ini = (hoje + timedelta(days=1)).strftime("%d/%m/%Y")
+            fim = (hoje + timedelta(days=dias)).strftime("%d/%m/%Y")
+            janela_fonte = "default_90d"
+        # Log estruturado do REQUEST (grep '[MEDWARE REQ]' no Easypanel).
+        _req_log = {
+            "evento": "medware_horarios_req",
+            "medico": medico_nome, "cod_medico": cod_medico,
+            "unidade": unidade_nome, "cod_unidade": cod_unidade,
+            "dataInicio": ini, "dataFim": fim,
+            "horaInicio": "07:00", "horaFim": "19:00",
+            "janela_fonte": janela_fonte,
+        }
+        log.info("[MEDWARE REQ] %s", _json.dumps(_req_log, ensure_ascii=False))
+        # Stash do último req/resp na instância — o pipeline persiste em Redis.
+        self.ultimo_req_horarios = dict(_req_log)
         raw: list[dict] = []
         delay = 0.5
         for tentativa in range(1, max_retries + 1):
@@ -736,6 +765,22 @@ class MedwareClient:
                 "cod_unidade": s.get("codUnidade") or 0,
                 "cod_medico": s.get("codMedico") or cod_medico,
             })
+        # Log estruturado da RESPOSTA (grep '[MEDWARE RESP]' no Easypanel).
+        _resp_log = {
+            "evento": "medware_horarios_resp",
+            "n_slots": len(out),
+            "janela_fonte": janela_fonte,
+            "dataInicio": ini, "dataFim": fim,
+            "amostra": [
+                f"{s['dia_semana']} {s['data_br']} {s['hora']}" for s in out[:3]
+            ],
+        }
+        log.info("[MEDWARE RESP] %s", _json.dumps(_resp_log, ensure_ascii=False))
+        try:
+            self.ultimo_req_horarios["n_slots"] = len(out)
+            self.ultimo_req_horarios["amostra"] = _resp_log["amostra"]
+        except Exception:  # noqa: BLE001
+            pass
         return out
 
 

@@ -138,6 +138,83 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (16/06/2026) Bug C-30 — Hesitação "deixa eu consultar" tinha 2 causas vivas (Sofia 24158652)
+
+**Caso (16/06/2026 10:00 BRT):** lead 24158652 Sofia (7a, Bacen, Karla Asa Norte rotina). Lia coletou TUDO certo (nome+data nasc+convênio aceito+médico+motivo+unidade+turno) e ao entrar em FSM=AGENDA escreveu **"Deixa eu consultar a agenda exata para esse período e volto com os horários reais pra você em um instante"** — exatamente o padrão Fernanda/Carolina/Maitê. Fix #183 (tool_choice forçado) marcado como "completed" mas não funcionou.
+
+**2 causas vivas (não 1):**
+
+1. **Contradição na Instrução Mestra E7.** O texto mandava "ofertar SOMENTE nos próximos 5 dias úteis" e apontava pra `_offer_window_block()` — função que é **código morto** (definida em `responder.py` mas NUNCA é chamada). O que de fato entra no prompt é `_agenda_block` (agenda real 90d). Modelo recebia 2 instruções contraditórias e hesitava.
+
+2. **Rede de segurança desligada.** O filtro `_viola_oferta_agenda` (anti-hesitação) existe em `responder.py` mas está atrás do gate `_FILTROS_LEGACY_ATIVOS` (desligado em prod via `FILTROS_LEGACY=0` desde commit 796ba2a). Por isso nada pegou a Sofia.
+
+**Fix arquitetural completo (6 arquivos):**
+
+1. **`_MASTER_INSTRUCTION.md` E7 reescrita** — fonte de verdade é o bloco AGENDA REAL (90d), sem limite 5 dias, respeitando janela que paciente pediu, com proibição EXPLÍCITA de hesitar quando há slots. Bump `VERSAO_PROMPT` força re-cache Anthropic.
+
+2. **`voice_agent/janela_preferencia.py` (novo módulo)** — extrai janela temporal da preferência do paciente ("semana de 13/07" → dataInicio/dataFim específico). Fallback 90d se vazio.
+
+3. **`voice_agent/medware.py`** — `horarios_para_agente()` aceita janela específica via novo toggle.
+
+4. **`voice_agent/pipeline.py`** — chama `janela_preferencia.extrair()` antes de bater Medware. Grava request em Redis `blink:medware_req:{lead_id}` pra debug.
+
+5. **`voice_agent/responder.py`** — filtro novo `_viola_hesitacao_agenda_c30` sempre-ON em `_scrub_prohibited` (executa ANTES dos legacy gates). Detecta padrões: "deixa eu consultar", "reconsultar a agenda", "volto em 1 minuto", "puxar a agenda exata", "Medware não está retornando", "vou buscar", "ainda estou buscando". QUANDO `ctx.agenda` tem slots → substitui pela oferta real de 2 slots (formato canônico 1️⃣/2️⃣). Toggle `LIA_ANTI_HESITACAO_AGENDA=1` (ativo) / shadow / 0.
+
+6. **2 pytest novos** — `test_janela_preferencia.py` (30 cenários) + `test_anti_hesitacao_agenda_c30.py` (15 cenários incluindo frases exatas Sofia). **68/68 verde local.**
+
+**Envs novas (Easypanel):**
+- `MEDWARE_JANELA_PREFERENCIA=1` (request específico por preferência)
+- `LIA_ANTI_HESITACAO_AGENDA=1` (filtro C-30 ativo)
+
+**Rollback sem revert:** flags pra 0, Implantar.
+
+**Lição arquitetural CRÍTICA:**
+
+- **Marcar task "completed" no Mac ≠ rodando em prod.** Fix #183 estava completed há semanas no task list. Caso Sofia provou que NUNCA funcionou em produção. Disciplina: "completed" só depois de smoke E2E em prod confirmar.
+
+- **Código morto mata.** `_offer_window_block` ficou no codebase apontando pra regra que não rodava. Documentação E7 referenciava função morta. Resultado: contradição silenciosa no prompt. **Auditoria recorrente:** grep funções nunca chamadas no `responder.py`.
+
+- **Gates de filtro são bombas-relógio.** `FILTROS_LEGACY=0` desligou 4 filtros legítimos ao mesmo tempo. Filtro C-30 nasceu **sempre-ON com toggle próprio** — não compartilha gate com legacy.
+
+### 0. (16/06/2026) Bug C-29 — Watchdog promessa: signature mismatch caller × método (erros:6 silencioso)
+
+**Caso (16/06/2026 09:30 BRT):** após deploy do watchdog promessa (#150 evoluído), endpoint `/admin/watchdog-promessa-tick` respondia HTTP 200 com `{varridos:0, candidatos:0, erros:6}`. Endpoint "vivo" mas worker 100% inoperante em silêncio. Equipe humana não detectou — paciente que estivesse em promessa pendente ficaria pra sempre sem ser movido pra atendimento humano.
+
+**Causa raiz:** `tick()` em `voice_agent/watchdog_promessa.py` chamava `kommo_client.list_leads_by_status(pipeline_id=..., status_id=X, limit=50)` em loop pra cada status. Mas a assinatura real do método em `voice_agent/kommo.py` é `list_leads_by_status(pipeline_id, status_ids: list[int], limit)` — espera **plural `status_ids: list`**, não singular. Resultado: `TypeError: got an unexpected keyword argument 'status_id'` capturado no `except Exception`, `res.erros += 1` em cada iteração. 6 statuses × 1 erro cada = `erros:6` determinístico.
+
+**Fix arquitetural (commit e7e4541, 16/06/2026 09:35):**
+
+1. `tick()` reescrito pra **1 chamada HTTP** em vez de 6: `kommo_client.list_leads_by_status(pipeline_id=PIPELINE_ATENDE, status_ids=STATUS_CONVERSAVEIS_LIA, limit=200)`. Mais eficiente E corrige o bug.
+
+2. **Pytest novo blindando regressão** (`test_tick_usa_assinatura_real_uma_chamada`) — usa `inspect.signature` pra validar que caller × método casam. Qualquer mudança futura na assinatura do `list_leads_by_status` quebra esse teste antes do deploy.
+
+3. Total: 41/41 testes verde em `test_watchdog_promessa.py`.
+
+**Lição arquitetural pra sessões futuras:**
+
+- **Endpoint respondendo 200 NÃO é prova de funcionamento.** Métrica de saída interna (`erros`, `varridos`, `candidatos`) tem que ser monitorada. Foi exatamente o `blink-audit-mcp` que pegou isso (chamada manual ao tick mostrou `erros:6`, não viria via healthz).
+
+- **Quando chamar método de outra classe/módulo, sempre validar `inspect.signature` em pytest.** Schema drift entre caller × método é a fonte de bugs silenciosos mais frequente — esse é o tipo de regressão que TODO MCP/server deveria pegar via CI.
+
+- **`except Exception` mascara fail-fast.** O design original era "1 status quebrar não derruba os outros 5" — defensivo correto. Mas falta um **alerta** quando `erros == len(STATUS_CONVERSAVEIS_LIA)` (todos quebrando) — significa bug sistemático, não exceção de borda. TODO próxima iteração.
+
+### 0. (16/06/2026) Bug C-28 + watchdog promessa em prod — virada arquitetural
+
+**Caso:** após sessão Cowork 14/06 (mãe Fernanda esperando 5h), Bug C-28 (monólogo + dicas inventadas + markdown na 1ª mensagem) foi resolvido com 2 layers paralelas: (a) regras 0-AA injetadas em `_MASTER_INSTRUCTION.md` cobrindo 8 sub-regras (60 palavras max, 1 pergunta por turno, banimento dicas inventadas, banimento markdown, apresentação canônica Karla/Fabrício, contra-exemplo lead 24154908), (b) 4 filtros reativos em `responder.py` (`_viola_dicas_banidas`, `_viola_inicio_noite`, `_viola_markdown_estruturado`, `_viola_primeira_mensagem_longa`). Bump VERSAO_PROMPT força re-cache Anthropic.
+
+**Push consolidado em prod 16/06 manhã:**
+- Fix #183 (tool_choice forçado FSM=AGENDA) ✅
+- Fix #208 (gravação Medware autônoma) ✅
+- Watchdog Promessa Não Cumprida (módulo + endpoint + cron 2min + 41 pytest) ✅ (fix erros:6 = C-29)
+- `_viola_confirmacao_sem_gravacao` (filtro anti-confirmação-fake) ✅
+- E-series anti-monólogo C-28 ✅
+- `blink-audit-mcp` 9 ferramentas operacionais ✅
+- MCP GitHub instalado no Claude Code ✅
+
+**Decisão sobre commit duplicado C-28:** rebase resolvido escolhendo versão E-series (já em prod), preservando docs (`CLAUDE.md` seção 0-AA, `_MASTER_INSTRUCTION.md`) e adaptando pytest. Implementação duplicada `responder.py` descartada (Opção 1 do menu interativo).
+
+**Bug C-29 (teste Carmen pré-existente falhando):** filtro `_viola_confirmacao_sem_gravacao` exige `Dia/Hora + Unidade + frase de confirmação` simultaneamente. Texto Carmen real ("Em continuidade ao atendimento" sem "Unidade") escapa. Não bloqueia deploy. **TODO:** ampliar regex pra cobrir essa variante.
+
 ### 0. (15/06/2026) Bug C-28 — Monólogo + dicas inventadas + markdown na 1ª mensagem (Lead 24154908)
 
 **Caso (15/06/2026 18:28 BRT):** mãe perguntou se a Blink fazia avaliação pediátrica. Lia respondeu com **200+ palavras** em uma única mensagem: "15 anos de experiência" (fabricado), "60 a 90 minutos" (inventado — slot real Karla é 30min), "4 a 6 horas visão embaçada" (dica banida task #92), "evitar voltar pra escola" (banida), markdown `## Valor`, 4 perguntas concatenadas (nome + data nasc + motivo + unidade). Atendente humana registrou "Mensagem muito grande" 88 segundos depois.
