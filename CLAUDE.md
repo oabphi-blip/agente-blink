@@ -138,6 +138,36 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (15/06/2026) Bug C-28 — Monólogo + dicas inventadas + markdown na 1ª mensagem (Lead 24154908)
+
+**Caso (15/06/2026 18:28 BRT):** mãe perguntou se a Blink fazia avaliação pediátrica. Lia respondeu com **200+ palavras** em uma única mensagem: "15 anos de experiência" (fabricado), "60 a 90 minutos" (inventado — slot real Karla é 30min), "4 a 6 horas visão embaçada" (dica banida task #92), "evitar voltar pra escola" (banida), markdown `## Valor`, 4 perguntas concatenadas (nome + data nasc + motivo + unidade). Atendente humana registrou "Mensagem muito grande" 88 segundos depois.
+
+**Causa raiz arquitetural:** Regras estavam SÓ no CLAUDE.md (que só EU leio), nunca no `voice_agent/knowledge_base/_MASTER_INSTRUCTION.md` (que a Lia em prod carrega). Pipeline de deploy de regras inexistente — 30 dias de bugs corrigidos no CLAUDE.md ficaram "fora do ar".
+
+**Fix arquitetural — 3 camadas:**
+
+1. **Seção 0-AA injetada no topo do `_MASTER_INSTRUCTION.md`** com PRIORIDADE ABSOLUTA. Inclui:
+   - 0AA.1 — Primeira resposta MÁX 60 palavras
+   - 0AA.2 — UMA pergunta por mensagem
+   - 0AA.3 — Banimento textual de dicas inventadas (lista de regex)
+   - 0AA.4 — Banimento de markdown estruturado (## --- ***)
+   - 0AA.5 — Apresentação canônica Karla = APV / Fabrício = 50+
+   - 0AA.6 — Zero info não pedida
+   - 0AA.7 — Contra-exemplo real do lead 24154908
+   - 0AA.8 — Primeiro turno com motivo inferido
+
+2. **4 filtros reativos sempre-ON em `voice_agent/responder.py`** (executam ANTES de qualquer outro filtro em `_scrub_prohibited`):
+   - `_viola_dicas_banidas` — regex blacklist "60-90 min", "4-6 horas", "X anos experiência", "trazer brinquedo", "dilatação da pupila", etc → substitui resposta por fallback curto
+   - `_viola_inicio_noite` — task #223, strip cirúrgico do termo
+   - `_viola_markdown_estruturado` + `_limpar_markdown_banido` — remove ## --- ***
+   - `_viola_primeira_mensagem_longa` — > 80 palavras na 1ª resposta → fallback curto
+
+3. **`tests/test_anti_monologo_lead_24154908.py`** — 25 cenários pytest blindando contra regressão. 5/5 smoke local OK.
+
+**Bump de versão no header do prompt** (`<!-- VERSAO_PROMPT: 2026-06-15-anti-monologo -->`) força Anthropic SDK re-cachear (Prompt Caching).
+
+**Lição pessoal:** quando adiciono regra no CLAUDE.md, **TENHO** que copiar pro `_MASTER_INSTRUCTION.md`. CLAUDE.md é minha memória de operação — `_MASTER_INSTRUCTION.md` é o prompt que vai pra produção. Se não está no segundo, a Lia em prod nunca viu a regra.
+
 ---
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
@@ -436,6 +466,8 @@ Substituem texto da Lia se detectarem violação:
 | 24033913 (Fábio) | "Um momentinho..." sem voltar | `_viola_oferta_agenda` | maio/26 |
 | 23907418 (Aurora) | Retrocesso oferecendo dia tendo agendamento | `ja_agendado` 2 camadas (status_id OR dia_consulta_ts futuro) | 118d643 |
 | 24034205 | Cobrou sinal antes de oferecer slot | `_viola_cobranca_antes_slot` | maio/26 |
+| 23845330 (Sophia) / 24130572 (Tito) | Ofereceu remarcação imediata sem investigar motivo → no-show comportamental | Regra E1.7 reescrita + 7 frases proibidas (ver `bugs-licoes/c26-desmarcacao-investigar-motivo-antes-encaixe.md`) | 3c4e31b |
+| 10275014 (Samuel) / 24142668 (Pryscilla) | Duplicação de lead por telefone + notas vazias (KOMMO_TOKEN 403) + tracing off | endpoint `/admin/dedup-merge-por-telefone/{id}` + pendente renovar token/TRACING (ver `bugs-licoes/c27-duplicacao-lead-notas-vazias-token-403.md`) | db3d681 |
 
 Cenários que devem virar testes automáticos no pytest:
 - "Paciente Aurora: status_id=2-AGENDAR mas dia_consulta_ts=hoje → ja_agendado=True"
@@ -551,6 +583,41 @@ Estão no root do repo:
 
 Todos têm token GitHub embedded. **Token `ghp_7NNf...3H20m8` está comprometido** —
 revogar e gerar novo. Salvar no Keychain do Mac, não no script.
+
+### 11-Y. Regra E6-B — Reserva temporária 10min + NÃO repetir slot ofertado (Fábio 14/06/2026)
+
+**Origem:** Fábio 14/06 16:18 BRT, caso Victor 24147566. Lia ofertou os mesmos slots várias vezes em 24h. Sem mecanismo de "vaga vai pra fila se não confirmar".
+
+**REGRA OPERACIONAL (entra em prompt + Redis):**
+
+1. **Reserva 10 minutos.** Quando Lia oferece slot X pra lead Y, o slot fica reservado por **10 minutos** pra esse paciente. Após 10min sem resposta, slot **volta pra fila** e pode ser oferecido a outro paciente.
+
+2. **Não repetir slot já ofertado ao mesmo lead.** Se slot X foi ofertado pro lead Y (mesmo que tenha expirado os 10min), Lia **NÃO oferece de novo** o mesmo slot X pro lead Y. Próxima oferta tem que ser slot DIFERENTE.
+
+3. **Mensagem-gatilho expiração** (Lia manda automaticamente quando passar 10min sem confirmação):
+
+   > "{Nome}, esse horário foi liberado pra outro paciente da fila. Tenho outros próximos: {SLOT_NOVO_1} ou {SLOT_NOVO_2}. Algum desses fica bom?"
+
+4. **Comunicar a regra na PRIMEIRA oferta** (transparência):
+
+   > "Esses dois horários ficam reservados pra você por 10 minutos. Após esse prazo, eles voltam pra fila de espera. Qual prefere?"
+
+**Implementação técnica (a fazer):**
+
+- Redis: `blink:slot_ofertado:{cod_med}:{cod_unid}:{YYYYMMDDHHMM}:{lead_id}` com TTL **600s**.
+- Redis SET: `blink:slots_ja_ofertados:{lead_id}` — adiciona cada slot ofertado (sem TTL, expira por LRU/manual).
+- Worker periódico (1min): varre Redis procurando reservas expiradas → dispara mensagem-gatilho expiração via Meta Graph 8133.
+- `_selecionar_2_slots_inteligente(agenda, lead_id)` em `responder.py` filtra a agenda: descarta qualquer slot presente em `blink:slots_ja_ofertados:{lead_id}` ANTES de escolher os 2.
+
+**Pytest a criar:** `tests/test_e6b_reserva_10min.py` — 8 cenários:
+- Slot ofertado → 10min sem resposta → mensagem gatilho dispara.
+- Slot já ofertado NÃO aparece em próxima oferta pro mesmo lead.
+- Slot já ofertado a lead A LIBERADO após 10min PODE ser ofertado a lead B.
+- Reserva ativa de lead A bloqueia oferta pra lead B no mesmo slot.
+- Paciente aceita slot dentro dos 10min → reserva vira agendamento (passa pra `gravar_agendamento_medware`).
+- Worker expiração dedup: não manda 2x mensagem se já passou tempo + reservation_id já tratado.
+- ctx.agenda recebida do Medware → 5 slots, 3 já ofertados → função retorna apenas 2 não-ofertados.
+- Lead sem `slots_ja_ofertados` → função roda normal (compatibilidade retroativa).
 
 ### 11-N. Fluxo E6 reinvertido — ofertar 2 slots antes de perguntar turno (caso Alice lead 21256807, 03/06/2026)
 
