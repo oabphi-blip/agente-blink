@@ -138,6 +138,24 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (16/06/2026) Bug C-33 — Pterígio/Córnea = Dr. Fabrício Freitas (lead 24160634)
+
+**Caso:** paciente perguntou sobre pterígio. Lia respondeu **"fazemos catarata (Fabrício) e estrabismo (Karla)"** — omitiu córnea inteira. Quando paciente confirmou pterígio, Lia caiu em **"deixa eu reconsultar a agenda aqui pra te orientar melhor — volto em 1 minuto"** (mesmo padrão das hesitações C-30).
+
+**Causa raiz arquitetural:** **pterígio NÃO existia em NENHUM artigo do KB.** Nem "córnea". Lia não sabia rotear motivo → médico → caiu no fallback hesitação porque o tool calling não tinha base pra escolher médico.
+
+**Fix em 3 camadas:**
+
+1. **`_MASTER_INSTRUCTION.md` seção 5.6 + 5.7-A:** adicionada regra explícita "Córnea (Pterígio, Ceratocone, Transplante) → Dr. Fabrício Freitas, especialista em córnea". Inclui nome popular "carne no olho" também.
+
+2. **`01_medicos_e_especialidades.md`:** cabeçalho do Fabrício atualizado de "(cirurgião de catarata)" pra "(saúde ocular adulto 50+ e especialista em córnea)". Mapa rápido ganhou linha "Pterígio (carne no olho), córnea, ceratocone → Dr. Fabrício Freitas".
+
+3. **Bump VERSAO_PROMPT** → `2026-06-16-pterigio-cornea-fabricio` força re-cache Anthropic.
+
+**Pytest:** `tests/test_bug_c33_pterigio_cornea.py` — 5 cenários (pterígio em 2+ KB, córnea em 2+ KB, pterígio+Fabrício no mesmo bloco, 01_medicos cita córnea, VERSAO_PROMPT bumped). **5/5 verde.**
+
+**Lição arquitetural:** quando paciente menciona condição que o KB NÃO mapeia, Lia cai em hesitação porque modelo não tem como decidir médico. **Sintoma "deixa eu reconsultar" pode esconder "KB incompleto" como causa raiz**, não só Medware vazio. **Auditoria recorrente:** cada nova hesitação real, verificar se motivo do paciente existe no KB ANTES de tratar como bug de filtro.
+
 ### 0. (16/06/2026) Bug C-32 — Defaults ON em prod (LIA_TOOLS_ENABLED + TRACING_ENABLED)
 
 **Caso (16/06/2026 ~12:30 BRT):** lead 24113652 Fábio Philipe Martins. Após deploy C-30/C-30A/C-31/nomes, Lia AINDA inventou dia errado ("quarta 18/06" sendo quinta). Healthz revelou que `settings` exibia `lia_opus_agenda_enabled: true` mas NÃO mostrava `LIA_TOOLS_ENABLED` nem `TRACING_ENABLED`. Confirmação dura: `/admin/replay/24113652` retornou `total_turnos: 0` com observação literal "Para ativar coleta: TRACING_ENABLED=1".

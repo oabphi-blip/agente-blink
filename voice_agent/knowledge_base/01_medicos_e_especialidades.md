@@ -13,11 +13,11 @@
 - Atende casos clínicos amplos.
 - Possui atividades científicas e trabalhos publicados.
 
-## Dr. Fabrício Freitas (cirurgião de catarata)
-- **Especialidade:** Cirurgia de Catarata (exclusivamente).
+## Dr. Fabrício Freitas (saúde ocular adulto 50+ e especialista em córnea)
+- **Especialidades:** Catarata, **Córnea (Pterígio, Ceratocone, Transplante)**, saúde ocular do adulto 50+.
 - **Unidade:** Águas Claras (exclusivamente).
 - Atendimento de consulta de avaliação + cirurgia + retornos.
-- Quando paciente fala de catarata → sempre direcionar para Dr. Fabrício Freitas, agenda dele.
+- Quando paciente fala de **catarata, pterígio, córnea, ceratocone, "carne no olho", olho ardido com vermelho persistente** → sempre direcionar para Dr. Fabrício Freitas, agenda dele.
 
 ## Especialidades atendidas (mapa rápido)
 
@@ -28,6 +28,7 @@
 | Dor postural + queixa visual | Avaliação do Processamento Visual → Dra. Karla Delalíbera | Asa Norte |
 | Quero usar lente de contato | Adaptação de lentes → Dra. Karla Delalíbera | Asa Norte |
 | Catarata, cirurgia de catarata, visão embaçada idoso | Catarata → Dr. Fabrício Freitas | Águas Claras |
+| **Pterígio ("carne no olho"), córnea, ceratocone** | **Córnea → Dr. Fabrício Freitas** | **Águas Claras** |
 | Consulta de rotina, óculos, vista cansada | Oftalmologia geral | Ambas |
 | Retina, fundo de olho | Oftalmologia + mapeamento | Ambas |
 
