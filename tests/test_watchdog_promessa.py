@@ -312,15 +312,34 @@ class TestTratarLead:
 # Tick — integração de varredura
 # ============================================================
 
+class _FakeKommoAssinaturaReal:
+    """Kommo fake com a assinatura REAL de KommoClient.list_leads_by_status.
+
+    MagicMock(**kw) aceita QUALQUER kwarg e mascarou o bug erros:6 (16/06/2026):
+    o caller passava status_id= (singular, inexistente) em vez de
+    status_ids: list[int]. Este fake reproduz a assinatura real, então um
+    caller errado levanta TypeError de verdade — exatamente como em produção.
+    """
+
+    def __init__(self, leads=None):
+        self._leads = leads or []
+        self.calls: list[dict] = []
+
+    def list_leads_by_status(self, pipeline_id, status_ids, limit=200, page=1):
+        self.calls.append({"pipeline_id": pipeline_id, "status_ids": status_ids})
+        return list(self._leads)
+
+    def update_lead_fields(self, *a, **k):
+        return True
+
+    def add_note(self, *a, **k):
+        return {"id": 1}
+
+
 class TestTick:
     def test_tick_dry_run_marca_candidatos(self):
         kommo = MagicMock()
-        # 1 lead em 3-AGENDAR com promessa pendente
-        # 1 lead em 3-AGENDAR sem promessa
-        # 1 lead em 5-AGENDADO (não deve nem ser varrido por estar fora)
-        kommo.list_leads_by_status.side_effect = lambda **kw: (
-            [_make_lead()] if kw["status_id"] == 102560495 else []
-        )
+        kommo.list_leads_by_status.return_value = [_make_lead()]
         res = tick(kommo_client=kommo, dry_run=True)
         assert res.varridos >= 1
         assert res.candidatos == 1
@@ -328,18 +347,27 @@ class TestTick:
         assert res.tratados == 1
         kommo.update_lead_fields.assert_not_called()
 
-    def test_tick_kommo_erro_em_um_status_nao_quebra(self):
+    def test_tick_kommo_erro_nao_quebra(self):
         kommo = MagicMock()
-
-        def list_with_error(**kw):
-            if kw["status_id"] == 102560495:
-                raise RuntimeError("kommo offline")
-            return []
-
-        kommo.list_leads_by_status.side_effect = list_with_error
+        kommo.list_leads_by_status.side_effect = RuntimeError("kommo offline")
         res = tick(kommo_client=kommo, dry_run=True)
         assert res.erros >= 1
         # Não levantou exceção — continuou
+
+    def test_tick_usa_assinatura_real_uma_chamada(self):
+        """Blinda contra o bug erros:6 (16/06/2026).
+
+        Com a assinatura real, o tick TEM que chamar list_leads_by_status com
+        pipeline_id + status_ids=lista UMA única vez, sem TypeError.
+        No código bugado (status_id= num loop) isto daria erros>=1 e calls=0.
+        """
+        fake = _FakeKommoAssinaturaReal(leads=[_make_lead()])
+        res = tick(kommo_client=fake, dry_run=True)
+        assert res.erros == 0
+        assert len(fake.calls) == 1
+        assert fake.calls[0]["status_ids"] == STATUS_CONVERSAVEIS_LIA
+        assert res.varridos >= 1
+        assert res.candidatos == 1
 
 
 # ============================================================

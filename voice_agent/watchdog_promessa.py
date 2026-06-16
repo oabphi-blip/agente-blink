@@ -390,19 +390,23 @@ def tick(
     res = TickResultado()
     agora_ts = int(time.time())
 
+    # FIX 16/06/2026 — bug erros:6. A assinatura é
+    # list_leads_by_status(pipeline_id, status_ids: list[int], ...) e o método
+    # já constrói filter[statuses][i] pra cada id numa única chamada. O caller
+    # antigo passava status_id= (kwarg inexistente) num loop → TypeError em
+    # todas as 6 iterações → erros:6, varridos:0, watchdog inoperante.
     leads_brutos: list[dict] = []
-    for status_id in STATUS_CONVERSAVEIS_LIA:
-        try:
-            chunk = kommo_client.list_leads_by_status(
-                status_id=status_id,
-                pipeline_id=PIPELINE_ATENDE,
-                limit=80,
-            )
-            if isinstance(chunk, list):
-                leads_brutos.extend(chunk)
-        except Exception as e:  # noqa: BLE001
-            log.warning("list_leads_by_status %s erro: %s", status_id, e)
-            res.erros += 1
+    try:
+        chunk = kommo_client.list_leads_by_status(
+            pipeline_id=PIPELINE_ATENDE,
+            status_ids=STATUS_CONVERSAVEIS_LIA,
+            limit=200,
+        )
+        if isinstance(chunk, list):
+            leads_brutos.extend(chunk)
+    except Exception as e:  # noqa: BLE001
+        log.warning("list_leads_by_status erro: %s", e)
+        res.erros += 1
 
     res.varridos = len(leads_brutos)
     candidatos: list[tuple[dict, dict]] = []
