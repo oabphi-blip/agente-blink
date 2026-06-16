@@ -102,27 +102,27 @@ git push origin main 2>&1 | tail -5
 
 echo ""
 echo "Aguardando deploy Easypanel (~3 min)..."
-for i in \$(seq 1 12); do
+for i in $(seq 1 12); do
     sleep 20
-    body=\$(curl -s --max-time 10 "https://blink-agent.6prkfn.easypanel.host/health" 2>/dev/null || echo "")
-    if echo "\$body" | grep -q "\"status\":\"ok\""; then
-        echo "  HEALTHZ OK [\${i}x20s = \$((i*20))s]"
+    body=$(curl -s --max-time 10 "https://blink-agent.6prkfn.easypanel.host/health" 2>/dev/null || echo "")
+    if echo "$body" | grep -q "\"status\":\"ok\""; then
+        echo "  HEALTHZ OK [${i}x20s = $((i*20))s]"
         break
     fi
-    echo "  [\${i}/12] aguardando..."
+    echo "  [${i}/12] aguardando..."
 done
 
 echo ""
 echo "Smoke do endpoint em dry_run..."
-SECRET=\$(grep '^WEBHOOK_SECRET=' lia_engineer/.env.local 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')
-if [ -z "\$SECRET" ]; then
+SECRET=$(grep '^WEBHOOK_SECRET=' lia_engineer/.env.local 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')
+if [ -z "$SECRET" ]; then
     SECRET="blink_a3f9c2e1b8d47f6e905a2b4c8d1e7f3a"
 fi
 
-resp=\$(curl -s --max-time 30 -X POST \\
-  "https://blink-agent.6prkfn.easypanel.host/admin/watchdog-promessa-tick?dry_run=true&max_leads=20&secret=\$SECRET" 2>&1)
+resp=$(curl -s --max-time 30 -X POST \\
+  "https://blink-agent.6prkfn.easypanel.host/admin/watchdog-promessa-tick?dry_run=true&max_leads=20&secret=$SECRET" 2>&1)
 echo "Resposta:"
-echo "\$resp" | head -c 1000
+echo "$resp" | head -c 1000
 echo ""
 echo ""
 echo "==============================================="
