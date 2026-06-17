@@ -6,6 +6,81 @@
 
 ---
 
+## 0-AAA. CALENDÁRIO BLINK (P0 ABSOLUTO — Bug C-35 17/06/2026)
+
+> **REGRA INVIOLÁVEL**: NUNCA escrever "X-feira (DD/MM)" em qualquer texto
+> (nota Kommo, WhatsApp, e-mail, planilha) sem consultar esta tabela OU rodar
+> `python3 voice_agent/calendar_oracle.py validar YYYY-MM-DD karla "Unidade"`.
+>
+> Causa raiz: Claude (eu, LLM) sou notoriamente ruim em aritmética modular
+> de datas (`dia % 7`). Sem tabela visual ou helper Python, erro
+> sistematicamente — Bug C-35 custou 12 notas erradas em uma única sessão.
+
+**Calendário Blink — KARLA × FABRÍCIO (atualizado 17/06/2026):**
+
+| Data | Dia | Karla | Fabrício |
+|---|---|---|---|
+| 17/06/2026 | Quarta-feira | Asa Norte | — |
+| 18/06/2026 | Quinta-feira | Águas Claras | Águas Claras |
+| 19/06/2026 | Sexta-feira | Asa Norte | — |
+| 20/06/2026 | Sábado | — | — |
+| 21/06/2026 | Domingo | — | — |
+| 22/06/2026 | Segunda-feira | Asa Norte | — |
+| 23/06/2026 | Terça-feira | Águas Claras | Águas Claras |
+| 24/06/2026 | Quarta-feira | Asa Norte | — |
+| 25/06/2026 | Quinta-feira | Águas Claras | Águas Claras |
+| 26/06/2026 | Sexta-feira | Asa Norte | — |
+| 27/06/2026 | Sábado | — | — |
+| 28/06/2026 | Domingo | — | — |
+| 29/06/2026 | Segunda-feira | Asa Norte | — |
+| 30/06/2026 | Terça-feira | Águas Claras | Águas Claras |
+| 01/07/2026 | Quarta-feira | Asa Norte | — |
+| 02/07/2026 | Quinta-feira | Águas Claras | Águas Claras |
+| 03/07/2026 | Sexta-feira | Asa Norte | — |
+| 04/07/2026 | Sábado | — | — |
+| 05/07/2026 | Domingo | — | — |
+| 06/07/2026 | Segunda-feira | Asa Norte | — |
+| 07/07/2026 | Terça-feira | Águas Claras | Águas Claras |
+| 08/07/2026 | Quarta-feira | Asa Norte | — |
+| 09/07/2026 | Quinta-feira | Águas Claras | Águas Claras |
+| 10/07/2026 | Sexta-feira | Asa Norte | — |
+| 13/07/2026 | Segunda-feira | Asa Norte | — |
+| 14/07/2026 | Terça-feira | Águas Claras | Águas Claras |
+| 15/07/2026 | Quarta-feira | Asa Norte | — |
+| 16/07/2026 | Quinta-feira | Águas Claras | Águas Claras |
+| 17/07/2026 | Sexta-feira | Asa Norte | — |
+| 20/07/2026 | Segunda-feira | Asa Norte | — |
+| 21/07/2026 | Terça-feira | Águas Claras | Águas Claras |
+| 22/07/2026 | Quarta-feira | Asa Norte | — |
+| 23/07/2026 | Quinta-feira | Águas Claras | Águas Claras |
+| 24/07/2026 | Sexta-feira | Asa Norte | — |
+
+(Calendário completo de 120 dias em `voice_agent/calendar_oracle.py tabela-120`.)
+
+**Helper canônico** — `voice_agent/calendar_oracle.py`:
+
+```bash
+# Validar 1 data
+python3 voice_agent/calendar_oracle.py validar 2026-06-18 karla "Asa Norte"
+# -> {"valido_para_oferta": false, "texto_pronto": "Quinta-feira (18/06) — Karla Águas Claras, NÃO Asa Norte"}
+
+# Próximas 4 datas Karla Asa Norte
+python3 voice_agent/calendar_oracle.py proximas-datas karla asa_norte 4
+
+# Oferta pronta 2 slots
+python3 voice_agent/calendar_oracle.py gerar-oferta karla asa_norte 09:30 14:30
+# -> "1️⃣ Sexta-feira (19/06) às 09:30
+#     2️⃣ Segunda-feira (22/06) às 14:30"
+```
+
+**Regra mecânica de oferta de slot (P0):**
+1. Antes de escrever oferta, rodar `proximas-datas` ou `gerar-oferta`.
+2. Copiar SAÍDA do helper, não digitar manual.
+3. Se tabela acima cobre a data, OK ler diretamente.
+4. **NUNCA misturar dia-da-semana e data sem checar uma das 2 fontes acima.**
+
+---
+
 ## 0-FILOSOFIA. CLAUDE TRABALHA PRA CONVERSÃO — NÃO PRA OCUPAÇÃO (reminder ativo Fábio 05/06/2026)
 
 > Fábio cobrou: "Claude passa o dia inteiro só ocupada, sem ação concreta. Tem que
@@ -137,6 +212,49 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 ---
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
+
+### 0. (17/06/2026) Bug C-35 — Claude inventou dias da semana em 12 notas Kommo estrabismo
+
+**Caso (17/06/2026 ~22h BRT):** após inserir plano de ação em 21 leads de oportunidade estrabismo, Fábio cobrou: lead 24162322 Warley — eu havia escrito "**Quarta (18/06) às 09:30**" sendo que 18/06/2026 é **quinta**, e quinta a Karla atende **Águas Claras**, não Asa Norte (oferta era pra Asa Norte). Auditoria revelou que **12 das 21 notas** tinham datas com dia-da-semana inventado.
+
+**Casos confirmados (todos com erro de calendário humano-meu):**
+
+| Lead | Erro |
+|---|---|
+| 24162322 Warley | "Quarta 18/06" (era quinta) · "Sexta 20/06" (era sábado) |
+| 24135010 Lucineia | "Terça 22/07" (era quarta) · "Quinta 24/07" (era sexta) |
+| 24103830 Laura Ellie | "Quinta 19/06" (era sexta) · "Sábado 21/06" (era domingo) |
+| 24098830 Anna Júlia | "Quarta 18/06" (era quinta) · "Sexta 20/06" (era sábado) |
+| 24047319 Sem nome | "Quarta 19/06" (era sexta) · "Sexta 21/06" (era domingo) |
+| 24102510 Pedro Miguel | 3x "Quinta" em datas que eram sexta |
+| 24003789 Val | 2x "Segunda" em datas que eram terça |
+| 24003917 Luciana | 2x "Sábado" em datas que eram domingo |
+| 23987217 Theo | "Quarta 18/06 Asa Norte" (era quinta Águas Claras) |
+| 24034665 Alaine | "Quarta 19/06" (era sexta) · "Sexta 21/06" (era domingo) |
+| 20915577 Yuri | "Terça 24/06 Águas Claras" (era quarta Asa Norte) |
+| 24047963 Filho Ceará | 2x "Quinta" em datas que eram sexta |
+
+**Causa raiz pessoal-minha (não código Lia):**
+
+- Eu (Claude operando Cowork) **inventei dias-da-semana sem rodar `date(YYYY,MM,DD).weekday()`**. Confiei na intuição visual da data e errei sistematicamente.
+- Foi o MESMO padrão dos bugs C-Priscila (06/06 sexta vs sábado), Maitê (dia mais próximo), C-31 (Karla Asa Norte vs Águas Claras).
+- A Lia em prod tem 2 filtros sempre-on (`_viola_dia_semana` e `_viola_oferta_em_dia_nao_atendido`) que pegam isso — **mas eu redigi notas off-prod sem passar pelos filtros**.
+
+**Fix imediato:**
+
+- 12 notas de **ERRATA** postadas em cada lead afetado (note_ids 28992702-28992730), recalculando data × dia-da-semana × unidade-Karla via Python `datetime`.
+- Calendário-base produzido via bash pra qualquer datas futuras precisarem ser ofertadas (próximos 21 dias + semana específica).
+
+**Regra que vou seguir agora (P0 sempre que eu mencionar data em qualquer texto):**
+
+1. **Antes de escrever "X dia (DD/MM)"**, rodar `python3 -c "from datetime import date; print(date(YYYY,MM,DD).strftime('%A'))"`.
+2. **Antes de ofertar slot Karla**, mapear dia-da-semana → unidade real:
+   - seg/qua/sex → Asa Norte
+   - ter/qui → Águas Claras
+   - sáb/dom → não atende (exceto encaixe especial sábado)
+3. **Auditoria recorrente:** qualquer texto meu com `(DD/MM)` em paralelo a `(dia-da-semana)` precisa ser validado por essa regra antes de ir pra produção (nota Kommo, WhatsApp, e-mail, planilha).
+
+**Lição arquitetural:** **os 2 filtros sempre-on da Lia me salvam em prod, mas off-prod eu redigi 12 notas com data errada sem nenhum filtro**. Toda nota Kommo / e-mail / planilha que produzo OFF-PROD precisa do mesmo rigor que os filtros C-31 aplicam em prod. Decisão: criar helper Python que valida `(data, dia-da-semana, unidade)` ANTES de eu redigir qualquer oferta de slot.
 
 ### 0. (16/06/2026) Bug C-33 — Pterígio/Córnea = Dr. Fabrício Freitas (lead 24160634)
 
