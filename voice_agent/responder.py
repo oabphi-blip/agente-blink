@@ -1924,6 +1924,62 @@ def _viola_inicio_noite(text: str) -> bool:
     ))
 
 
+# ========================================================================
+# FILTRO C-36 (Fabio 17/06/2026, lead 22071351 Karina)
+# Lia disse "consulta esta marcada, comparecer?" sem ja_agendado=True.
+# Causa: campos do historico (paciente antigo + medico + convenio) usados
+# como se fossem agendamento ativo. Filtro sempre-ON.
+# ========================================================================
+
+_AFIRMACAO_CONSULTA_ATIVA_C36 = (
+    re.compile(r"\bconsulta\s+est[áa]\s+marcada\b", re.IGNORECASE),
+    re.compile(r"\bconsulta\s+estava\s+marcada\b", re.IGNORECASE),
+    re.compile(r"\bconsulta\s+est[áa]\s+agendada\b", re.IGNORECASE),
+    re.compile(r"\bestava\s+marcada\s+(?:para|com)\b", re.IGNORECASE),
+    re.compile(r"\btudo\s+certo\s+(?:para\s+|pra\s+)?comparec\w+", re.IGNORECASE),
+    re.compile(r"\bconfirmar\s+sua\s+presen[çc]a\s+na\s+consulta\b", re.IGNORECASE),
+)
+
+
+def _viola_afirmou_consulta_ativa_c36(
+    text: str, ctx: Optional[dict] = None,
+) -> bool:
+    """Detecta Lia afirmando consulta ativa quando ja_agendado=False.
+
+    Sempre-ON. Substitui resposta por saudacao historica.
+    """
+    if not text:
+        return False
+    if (ctx or {}).get("ja_agendado"):
+        return False
+    return any(p.search(text) for p in _AFIRMACAO_CONSULTA_ATIVA_C36)
+
+
+def _gerar_saudacao_historica_c36(ctx: Optional[dict] = None) -> str:
+    """Fallback C-36: reconhece historico SEM afirmar consulta marcada."""
+    known = (ctx or {}).get("known") or {}
+    nome_contato = (ctx or {}).get("name") or ""
+    medico = known.get("medico") or ""
+    convenio = known.get("convenio") or ""
+
+    saudacao = f"Olá, {nome_contato}!" if nome_contato else "Olá!"
+    if medico and "Karla" in medico:
+        med_str = "Dra. Karla"
+    elif medico and ("Fabrício" in medico or "Fabricio" in medico):
+        med_str = "Dr. Fabrício"
+    else:
+        med_str = "nossa equipe"
+
+    if convenio and convenio not in ("Não se aplica", "particular"):
+        return (
+            f"{saudacao} Vi aqui que você já passou pelo nosso atendimento "
+            f"com {med_str} pelo {convenio}. Como posso te ajudar hoje?"
+        )
+    return (
+        f"{saudacao} Vi aqui que você já passou pelo nosso atendimento "
+        f"com {med_str}. Como posso te ajudar hoje?"
+    )
+
 
 def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
@@ -1944,6 +2000,16 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     has_agenda = bool((ctx or {}).get("agenda"))
 
     # 0-INAS. Bug C-16 (lead 24117314 Maria Agostini, 08/06/2026 11:41 BRT).
+
+    # === FILTRO C-36 (lead 22071351 Karina, 17/06/2026) ===
+    # Lia afirmou "consulta esta marcada, comparecer?" com ja_agendado=False.
+    # Roda PRIMEIRO porque a falha eh semantica e cara (paciente confuso).
+    if _viola_afirmou_consulta_ativa_c36(text, ctx):
+        log.error(
+            "[FILTRO C-36] AFIRMOU consulta ativa SEM ja_agendado. ctx.known=%r, texto=%r",
+            ((ctx or {}).get("known") or {}), text[:300],
+        )
+        return _gerar_saudacao_historica_c36(ctx)
 
     # === FILTROS E-SERIES (lead 24154908, 15/06/2026) ===
     _FALLBACK_CURTO_E = "Boa tarde! Pra eu ver os horarios disponiveis, qual e o nome do paciente?"

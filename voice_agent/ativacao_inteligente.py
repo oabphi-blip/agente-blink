@@ -164,12 +164,41 @@ def gerar_saudacao_personalizada(lead: dict) -> dict:
     else:
         primeira = "Olá! 👋"
 
+    # Bug C-36 (Fábio 17/06/2026, lead 22071351 Karina): se 1.DIA CONSULTA
+    # está no PASSADO (paciente já passou pelo atendimento ou faltou),
+    # a saudação NÃO pode dizer "sua consulta era com" — soa como se
+    # houvesse consulta marcada. Trocar pra linguagem de HISTÓRICO claro.
+    dia_consulta_eh_passada = False
+    try:
+        dia_consulta = _extrair_campo(lead, "1.DIA CONSULTA")
+        if dia_consulta:
+            ts = int(dia_consulta)
+            from time import time as _t
+            # Considera "passada" quando data já passou há > 1 dia
+            if ts < (_t() - 86400):
+                dia_consulta_eh_passada = True
+    except (TypeError, ValueError):
+        pass
+
     if ancoras_texto:
         prova = " ".join(ancoras_texto)
-        recapitula = (
-            f"Vi aqui que sua consulta {prova}. "
-            f"Vamos seguir de onde paramos?"
-        )
+        if dia_consulta_eh_passada:
+            # Histórico claro — paciente JÁ esteve, não tem nada marcado.
+            # Tira "era com a/o" pra não duplicar verbo passado depois
+            # de "passou pelo atendimento".
+            prova_pass = prova.replace("era com a ", "com a ")
+            prova_pass = prova_pass.replace("era com o ", "com o ")
+            recapitula = (
+                f"Vi aqui que você já passou pelo nosso atendimento "
+                f"{prova_pass}. Como posso te ajudar hoje?"
+            )
+        else:
+            # Caso original — pode haver consulta ativa (ja_agendado=True
+            # vai aparecer separado no bloco "🚨 ATENÇÃO MÁXIMA")
+            recapitula = (
+                f"Vi aqui que sua consulta {prova}. "
+                f"Vamos seguir de onde paramos?"
+            )
         ancora_principal = ancoras_texto[0]
     else:
         recapitula = "Em que posso te ajudar hoje?"
