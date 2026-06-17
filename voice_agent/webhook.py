@@ -5891,6 +5891,303 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "status_id": status_int, "acao": "ia_reativada",
         })
 
+    # ========================================================================
+    # TRIGGER GOOGLE REVIEW (Fábio 15/06/2026)
+    # ========================================================================
+    # Webhook Kommo Automation: quando lead vai pra 8-REALIZADO CONSULTA
+    # (status_id 91486864) E médico = Dra. Karla Delalíbera, dispara o
+    # template Meta blink_pos_avaliacao_{asa_norte|aguas_claras}_v1 pedindo
+    # avaliação no Google Maps. Dedup Redis 90 dias por lead_id pra não
+    # mandar 2x pro mesmo paciente.
+    # ------------------------------------------------------------------------
+
+    # Status final que sinaliza consulta realizada
+    _STATUS_REALIZADO_CONSULTA = 91486864
+    # Field IDs Kommo
+    _FIELD_UNIDADE = 1245125
+    _FIELD_MEDICOS = 1256257
+    _FIELD_ESPECIALIDADE = 1259130
+    # Templates Meta aprovados
+    _TEMPLATE_GOOGLE_ASA_NORTE = "blink_pos_avaliacao_asa_norte_v1"
+    _TEMPLATE_GOOGLE_AGUAS_CLARAS = "blink_pos_avaliacao_aguas_claras_v1"
+    # Dedup TTL — 90 dias (paciente que faz nova consulta em <3m não recebe 2x)
+    _DEDUP_GOOGLE_REVIEW_TTL = 90 * 24 * 3600
+
+    def _ler_custom_field_values(lead: dict, field_id: int) -> list[str]:
+        """Extrai valores de um custom_field do lead. Retorna [] se ausente."""
+        cfs = (lead or {}).get("custom_fields") or (lead or {}).get(
+            "custom_fields_values"
+        ) or []
+        for cf in cfs:
+            if cf.get("field_id") == field_id:
+                vals = cf.get("values") or []
+                out = []
+                for v in vals:
+                    val = v.get("value")
+                    if val is not None:
+                        out.append(str(val))
+                return out
+        return []
+
+    def _medico_e_karla(lead: dict) -> bool:
+        """True se o campo MEDICOS contém 'Karla' (case-insensitive)."""
+        vals = _ler_custom_field_values(lead, _FIELD_MEDICOS)
+        joined = " ".join(vals).lower()
+        return "karla" in joined
+
+    def _resolver_template_google(lead: dict) -> Optional[str]:
+        """Asa Norte → asa_norte_v1; Águas Claras → aguas_claras_v1; outro → None."""
+        vals = _ler_custom_field_values(lead, _FIELD_UNIDADE)
+        for v in vals:
+            v_norm = v.strip().lower()
+            if v_norm in ("asa norte", "asa-norte"):
+                return _TEMPLATE_GOOGLE_ASA_NORTE
+            if v_norm in ("águas claras", "aguas claras"):
+                return _TEMPLATE_GOOGLE_AGUAS_CLARAS
+        return None
+
+    def _resolver_especialidade(lead: dict) -> str:
+        """Pega 1ª especialidade do campo ESPECIALID. Fallback 'Oftalmologia'."""
+        vals = _ler_custom_field_values(lead, _FIELD_ESPECIALIDADE)
+        if vals:
+            return vals[0]
+        return "Oftalmologia"
+
+    @app.post("/admin/kommo-trigger-google-review")
+    @app.get("/admin/kommo-trigger-google-review")
+    async def admin_kommo_trigger_google_review(
+        request: Request,
+    ) -> JSONResponse:
+        """Webhook Kommo Automation: quando lead vai pra 8-REALIZADO CONSULTA
+        (91486864) E médico = Dra. Karla, dispara template Meta
+        blink_pos_avaliacao_{asa_norte|aguas_claras}_v1 pedindo avaliação
+        no Google Maps.
+
+        Aceita JSON {lead_id, status_id} OU form-urlencoded
+        leads[status][0][id]=N&leads[status][0][status_id]=NN (Kommo nativo).
+
+        Dedup Redis 90 dias por lead_id. Forcar=1 ignora dedup.
+
+        Retorna decisão:
+          - {ok:true, acao:"disparado", template, wamid}
+          - {ok:true, acao:"ignorado", motivo:"..."} (status errado / médico
+            errado / unidade desconhecida / dedup hit)
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got and got != settings.webhook_secret:
+                raise HTTPException(401, "Secret inválido")
+
+        # ----- 1. Extrair lead_id + status_id (JSON ou form Kommo) -----
+        lead_id = None
+        new_status = None
+        try:
+            ct = (request.headers.get("content-type") or "").lower()
+            if "json" in ct:
+                body = await request.json()
+                lead_id = body.get("lead_id") or body.get("id")
+                new_status = body.get("status_id") or body.get("status")
+            else:
+                form = await request.form()
+                lead_id = (
+                    form.get("leads[status][0][id]")
+                    or form.get("leads[update][0][id]")
+                    or form.get("lead_id") or form.get("id")
+                )
+                new_status = (
+                    form.get("leads[status][0][status_id]")
+                    or form.get("leads[update][0][status_id]")
+                    or form.get("status_id")
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        if not lead_id:
+            lead_id = request.query_params.get("lead_id")
+        if not new_status:
+            new_status = request.query_params.get("status_id")
+        forcar = (request.query_params.get("forcar") or "").lower() in (
+            "1", "true", "yes",
+        )
+        dry_run = (request.query_params.get("dry_run") or "").lower() in (
+            "1", "true", "yes",
+        )
+
+        try:
+            lead_id_int = int(lead_id) if lead_id else 0
+            status_int = int(new_status) if new_status else 0
+        except (ValueError, TypeError):
+            lead_id_int, status_int = 0, 0
+
+        if lead_id_int <= 0:
+            return JSONResponse(
+                {"error": "lead_id obrigatório"}, status_code=400,
+            )
+
+        # ----- 2. Validar status_id (só dispara se 8-REALIZADO) -----
+        # status_int=0 (Kommo às vezes não manda) → busca o lead pra confirmar.
+        # Caso contrário, valida direto.
+        if status_int and status_int != _STATUS_REALIZADO_CONSULTA:
+            return JSONResponse({
+                "ok": True, "lead_id": lead_id_int,
+                "status_id": status_int, "acao": "ignorado",
+                "motivo": (
+                    f"status_id {status_int} ≠ 8-REALIZADO "
+                    f"({_STATUS_REALIZADO_CONSULTA})"
+                ),
+            })
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"error": "kommo_client indisponível"}, status_code=500,
+            )
+
+        # ----- 3. Buscar lead pra ler médico + unidade -----
+        try:
+            lead = kommo_client.get_lead(lead_id_int)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"error": f"get_lead falhou: {e}"}, status_code=500,
+            )
+        if not lead:
+            return JSONResponse({
+                "ok": False, "lead_id": lead_id_int,
+                "acao": "erro", "motivo": "lead inexistente no Kommo",
+            }, status_code=404)
+
+        # Confirma status (caso webhook não tenha mandado)
+        lead_status = lead.get("status_id")
+        if (
+            status_int == 0
+            and lead_status
+            and lead_status != _STATUS_REALIZADO_CONSULTA
+        ):
+            return JSONResponse({
+                "ok": True, "lead_id": lead_id_int,
+                "status_id": lead_status, "acao": "ignorado",
+                "motivo": (
+                    f"lead status atual {lead_status} ≠ 8-REALIZADO "
+                    f"(webhook não mandou status_id)"
+                ),
+            })
+
+        # ----- 4. Validar médico = Karla -----
+        if not _medico_e_karla(lead):
+            return JSONResponse({
+                "ok": True, "lead_id": lead_id_int,
+                "acao": "ignorado",
+                "motivo": "médico não é Dra. Karla — trigger só dispara pra ela",
+            })
+
+        # ----- 5. Resolver template por unidade -----
+        template = _resolver_template_google(lead)
+        if not template:
+            return JSONResponse({
+                "ok": True, "lead_id": lead_id_int,
+                "acao": "ignorado",
+                "motivo": (
+                    "unidade não é Asa Norte nem Águas Claras — "
+                    "não tenho template Google pra outra unidade"
+                ),
+            })
+
+        # ----- 6. Dedup Redis (90 dias por lead) -----
+        redis_client = getattr(pipeline, "redis_client", None) or getattr(
+            pipeline, "redis", None
+        )
+        dedup_key = f"blink:google_review:{lead_id_int}"
+        if redis_client and not forcar:
+            try:
+                if redis_client.exists(dedup_key):
+                    return JSONResponse({
+                        "ok": True, "lead_id": lead_id_int,
+                        "acao": "ignorado",
+                        "motivo": "já recebeu avaliação Google nos últimos 90 dias",
+                    })
+            except Exception as e:  # noqa: BLE001
+                log.warning("[GOOGLE-REVIEW] dedup check falhou: %s", e)
+
+        # ----- 7. Buscar contato + montar body_params -----
+        try:
+            contato = kommo_client.get_lead_main_contact(lead_id_int)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({
+                "ok": False, "lead_id": lead_id_int,
+                "acao": "erro", "motivo": f"get_lead_main_contact falhou: {e}",
+            }, status_code=500)
+        if not contato or not contato.get("telefone"):
+            return JSONResponse({
+                "ok": False, "lead_id": lead_id_int,
+                "acao": "erro", "motivo": "lead sem telefone no contato",
+            }, status_code=400)
+
+        nome_contato = (contato.get("nome") or "").strip().split(" ")[0] or "Olá"
+        especialidade = _resolver_especialidade(lead)
+        body_params = [
+            nome_contato,
+            "Dra. Karla Delalibera",
+            especialidade,
+        ]
+
+        # ----- 8. Dry-run early-exit -----
+        if dry_run:
+            return JSONResponse({
+                "ok": True, "lead_id": lead_id_int,
+                "acao": "dry_run",
+                "template": template,
+                "body_params": body_params,
+                "telefone": contato.get("telefone"),
+            })
+
+        # ----- 9. Disparar template via _disparar_template_aprovado_para_lead -----
+        try:
+            res = _disparar_template_aprovado_para_lead(
+                lead_id_int, kommo_client, wa_cloud, dry_run=False,
+                template_override=template,
+                body_params_override=body_params,
+            )
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({
+                "ok": False, "lead_id": lead_id_int,
+                "acao": "erro", "motivo": f"dispatch falhou: {e}",
+            }, status_code=500)
+
+        # ----- 10. Gravar dedup + nota Kommo -----
+        if res.get("ok") and redis_client:
+            try:
+                redis_client.setex(
+                    dedup_key, _DEDUP_GOOGLE_REVIEW_TTL, "1",
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("[GOOGLE-REVIEW] dedup setex falhou: %s", e)
+
+        if res.get("ok"):
+            try:
+                kommo_client.add_note(
+                    lead_id_int,
+                    (
+                        f"[LIA] Template avaliação Google disparado "
+                        f"({template}) — wamid={res.get('wamid','?')}. "
+                        f"Trigger: 8-REALIZADO + Dra. Karla."
+                    ),
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("[GOOGLE-REVIEW] add_note falhou: %s", e)
+
+        return JSONResponse({
+            "ok": bool(res.get("ok")),
+            "lead_id": lead_id_int,
+            "acao": "disparado" if res.get("ok") else "erro",
+            "template": template,
+            "body_params": body_params,
+            "telefone": contato.get("telefone"),
+            "wamid": res.get("wamid"),
+            "motivo": res.get("motivo"),
+        })
+
     @app.post("/admin/reativar-ia-batch")
     @app.get("/admin/reativar-ia-batch")
     def admin_reativar_ia_batch(request: Request) -> JSONResponse:
