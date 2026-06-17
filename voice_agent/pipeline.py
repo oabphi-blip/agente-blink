@@ -723,19 +723,83 @@ class VoicePipeline:
         user_text: str | None = None,
         answer: str | None = None,
         channel: str = "",
+        lead_id_hint: int | None = None,
     ) -> None:
         """Sincroniza o lead do Kommo: grava a nota da conversa e atualiza
         os campos extraídos.
 
         Roda em thread separada — qualquer erro é logado, não propaga.
+
+        Bug C-36 #1 (17/06/2026): leads recém-criados (segundos atrás) não
+        aparecem em /leads?query=PHONE — Kommo demora pra indexar. Resultado:
+        find_lead_id_by_phone retorna None → pipeline ABORTAVA gravação
+        silenciosamente. Lead 24168922 Manuela: chat ativo mas zero notas.
+
+        Fix 3 camadas:
+          1) lead_id_hint — caller (webhook) passa direto se já souber
+          2) Cache Redis blink:chat_to_lead:{conversation_key} — TTL 24h
+          3) Retry 3x com backoff 1s/2s/4s pra dar tempo da indexação
+          4) Quando achar via busca, persiste no cache pros próximos turns
+          5) Log WARNING (não INFO) quando falha total — visibilidade pra
+             monitorar taxa de race condition em prod
         """
+        import time as _time
         if self.kommo is None:
             return
         try:
-            lead_id = self.kommo.find_lead_id_by_phone(phone)
-            if not lead_id:
-                log.info("Kommo sync: lead não encontrado pra %s", phone)
-                return
+            lead_id: int | None = None
+
+            # Camada 1: caller passou direto (webhook Kommo tem no payload)
+            if lead_id_hint:
+                lead_id = int(lead_id_hint)
+                log.debug("[KOMMO SYNC] lead_id via hint=%s", lead_id)
+
+            # Camada 2: cache Redis (turn-by-turn da mesma conversa)
+            cache_key = f"blink:chat_to_lead:{conversation_key}"
+            if lead_id is None and self._redis is not None:
+                try:
+                    cached = self._redis.get(cache_key)
+                    if cached:
+                        lead_id = int(
+                            cached.decode() if isinstance(cached, bytes) else cached
+                        )
+                        log.debug(
+                            "[KOMMO SYNC] lead_id via cache=%s convo=%s",
+                            lead_id, conversation_key,
+                        )
+                except Exception as e:  # noqa: BLE001
+                    log.debug("[KOMMO SYNC] cache read falhou: %s", e)
+
+            # Camada 3: busca por telefone com retry (race condition de
+            # indexação Kommo pra leads recém-criados)
+            if lead_id is None:
+                for tentativa in (0, 1, 2):
+                    lead_id = self.kommo.find_lead_id_by_phone(phone)
+                    if lead_id:
+                        if tentativa > 0:
+                            log.info(
+                                "[KOMMO SYNC] lead achado na retry %d phone=%s",
+                                tentativa, phone,
+                            )
+                        break
+                    if tentativa < 2:
+                        _time.sleep(2 ** tentativa)  # 1s, 2s, 4s
+                if not lead_id:
+                    log.warning(
+                        "[KOMMO SYNC] lead NÃO encontrado após 3 tentativas "
+                        "phone=%s convo=%s — nota Lia será DESCARTADA. "
+                        "Possível causa: telefone não casa formato Kommo, "
+                        "ou lead criado há >60s sem indexar ainda.",
+                        phone, conversation_key,
+                    )
+                    return
+
+            # Persistir no cache pros próximos turns (TTL 24h)
+            if self._redis is not None and lead_id:
+                try:
+                    self._redis.setex(cache_key, 86400, str(lead_id))
+                except Exception as e:  # noqa: BLE001
+                    log.debug("[KOMMO SYNC] cache write falhou: %s", e)
             # Nota da conversa — APENAS resposta da Lia.
             # Decisão Fábio (01/06/2026 17:39): mensagens do paciente
             # NÃO precisam virar nota no Kommo (já aparecem no chat

@@ -660,7 +660,7 @@ class MedwareClient:
 
     def horarios_para_agente(
         self, medico_nome: str, unidade_nome: Optional[str] = None,
-        dias: int = 14, max_retries: int = 1,
+        dias: int = 10, max_retries: int = 1,
         data_inicio: Optional[Any] = None,
         data_fim: Optional[Any] = None,
     ) -> list[dict]:
@@ -671,11 +671,17 @@ class MedwareClient:
           {data_iso, data_br, dia_semana, hora}
         Devolve [] se o médico não estiver mapeado ou não houver vaga.
 
-        JANELA DE DATAS (Bug C-38, 17/06/2026 — diagnóstico Medware 90d
-        causa ReadTimeout na VM Light + diagnóstico_consumo_medware_17_06):
-        - default reduzido de 90 → 21 dias (servidor Medware Light SQL sem
-          índice adequado estoura timeout com janela longa; 7d = ok, 90d =
-          timeout). Override via env MEDWARE_DIAS_DEFAULT (1-90, default 21).
+        JANELA DE DATAS (Bug C-36c, 17/06/2026 — Fábio: reduzir pra 10d).
+        Histórico:
+        - Original: 90d → ReadTimeout VM Light + Lia confunde slots distantes.
+        - C-38 (manhã 17/06): reduzido pra 21d → ainda muito amplo.
+        - C-36c (noite 17/06): reduzido pra 10d → urgência percebida + dia mais
+          próximo PRIMEIRO (regra Pedro Miguel C-17) + menos token cost +
+          modelo decide entre menos opções (menos chute) + 10d cobre
+          1-2 semanas de calendário Karla (suficiente pra 3-5 dias úteis).
+        - Override via env MEDWARE_DIAS_DEFAULT (1-90, default 10).
+        - Se 10d vier vazio (período cheio), pipeline tenta janela maior via
+          janela_preferencia (paciente pediu data específica).
         - `data_inicio`/`data_fim` (objetos date) sobrescrevem dias para
           request ESPECÍFICO (preferência do paciente vinda do C-30, ex.:
           "entre 7 e 15 de julho").

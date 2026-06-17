@@ -213,6 +213,28 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (17/06/2026) Bug C-36 + C-36c — Lia não grava notas Kommo + chuta APV + janela agenda muito ampla (lead 24168922)
+
+**Caso (17/06/2026 23:30 BRT):** lead 24168922 Manuela 7a — Fábio percebeu 3 bugs simultâneos:
+
+**Bug C-36 #1 — Notas Lia NÃO gravam no Kommo:** API retorna lead VAZIO (zero notas) mesmo com chat ativo. Healthz diz kommo:ok, minha nota MCP gravou normal → causa raiz NÃO é KOMMO_TOKEN. Causa raiz em `pipeline.py:735`:
+```python
+lead_id = self.kommo.find_lead_id_by_phone(phone)
+if not lead_id:
+    log.info("Kommo sync: lead não encontrado pra %s", phone)
+    return  # ← DESCARTA NOTA SILENCIOSAMENTE
+```
+Race condition: lead recém-criado, Kommo `/leads?query=PHONE` ainda não indexou → busca vazia → pipeline aborta gravação. **Fix arquitetural pendente:** webhook Kommo envia chat_id → cache Redis `blink:chat_to_lead` → pipeline usa cache primeiro, fallback pra busca por telefone.
+
+**Bug C-36 #2 — Lia chuta "especialista Avaliação do Processamento Visual" sem evidência clínica:** regra antiga "SDP → APV" estava sendo aplicada a TODO paciente Karla. APV é sinônimo de SDP (Síndrome da Deficiência Postural) e só deve ser anunciado quando paciente menciona sintomas característicos: cefaleia, cansaço visual com leitura/telas, tontura, visão dupla intermitente, postura com inclinação de cabeça, dificuldade de concentração escolar, sensibilidade à luz. Sem esses sintomas = chute clínico. **Fix prompt pendente:** branching em `_MASTER_INSTRUCTION.md` seção 0AA.5 — SE sintomas APV → "especialista APV"; SENÃO → especialidade matching motivo (estrabismo / oftalmopediatria / saúde ocular).
+
+**Bug C-36c — Janela agenda muito ampla (FIX APLICADO):** Lia recebia agenda de 14-90 dias do Medware. Modelo escolhia datas distantes em vez de dia mais próximo (regra Pedro Miguel C-17). Reduzido pra **10 dias** em `medware.py:663` (`dias: int = 10`). Histórico: 90d → 21d (C-38 manhã 17/06) → **10d (C-36c noite 17/06)**. Override via env `MEDWARE_DIAS_DEFAULT` (1-90, default 10). Benefícios: urgência percebida + dia mais próximo PRIMEIRO + menos token cost + menos chute do modelo.
+
+**Lição arquitetural CRÍTICA:**
+- **Bugs aparecem aos pares.** Lead 24168922 trouxe 3 problemas independentes (gravação, prompt, janela) — investigação superficial só pegaria o sintoma "Lia não respondeu agenda".
+- **Substituição de termo NÃO é diagnóstico.** Trocar "SDP" por "APV" no prompt NÃO autoriza Lia a anunciar APV pra todo mundo. Termo proibido = censura linguística, não decisão clínica.
+- **Race condition em sync é fail-silent perigoso.** Pipeline aborta gravação sem alerta. **TODO:** logar WARNING (não INFO) quando lead_id não resolve + métrica Slack se taxa subir.
+
 ### 0. (17/06/2026) Bug C-35 — Claude inventou dias da semana em 12 notas Kommo estrabismo
 
 **Caso (17/06/2026 ~22h BRT):** após inserir plano de ação em 21 leads de oportunidade estrabismo, Fábio cobrou: lead 24162322 Warley — eu havia escrito "**Quarta (18/06) às 09:30**" sendo que 18/06/2026 é **quinta**, e quinta a Karla atende **Águas Claras**, não Asa Norte (oferta era pra Asa Norte). Auditoria revelou que **12 das 21 notas** tinham datas com dia-da-semana inventado.
