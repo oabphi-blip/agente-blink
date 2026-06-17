@@ -657,7 +657,7 @@ class MedwareClient:
 
     def horarios_para_agente(
         self, medico_nome: str, unidade_nome: Optional[str] = None,
-        dias: int = 90, max_retries: int = 3,
+        dias: int = 21, max_retries: int = 3,
         data_inicio: Optional[Any] = None,
         data_fim: Optional[Any] = None,
     ) -> list[dict]:
@@ -668,10 +668,14 @@ class MedwareClient:
           {data_iso, data_br, dia_semana, hora}
         Devolve [] se o médico não estiver mapeado ou não houver vaga.
 
-        JANELA DE DATAS (Bug C-30, Fábio 16/06/2026, lead Sofia 24158652):
-        Se `data_inicio`/`data_fim` (objetos date) forem passados, o request
-        vira ESPECÍFICO para a janela que o paciente pediu (ex.: "entre 7 e 15
-        de julho"). Caso contrário, mantém o default amanhã→+`dias` (90).
+        JANELA DE DATAS (Bug C-38, 17/06/2026 — diagnóstico Medware 90d
+        causa ReadTimeout na VM Light + diagnóstico_consumo_medware_17_06):
+        - default reduzido de 90 → 21 dias (servidor Medware Light SQL sem
+          índice adequado estoura timeout com janela longa; 7d = ok, 90d =
+          timeout). Override via env MEDWARE_DIAS_DEFAULT (1-90, default 21).
+        - `data_inicio`/`data_fim` (objetos date) sobrescrevem dias para
+          request ESPECÍFICO (preferência do paciente vinda do C-30, ex.:
+          "entre 7 e 15 de julho").
 
         OBSERVABILIDADE: cada chamada loga [MEDWARE REQ] e [MEDWARE RESP] em
         JSON, pra auditar no Easypanel "o que foi pedido vs. o que voltou".
@@ -684,20 +688,31 @@ class MedwareClient:
         retorno [] é definitivo.
         """
         import json as _json
+        import os as _os
         import time as _time
         cod_medico = _code_lookup(MEDICO_CODES, medico_nome)
         if not cod_medico:
             return []
         cod_unidade = _code_lookup(UNIDADE_CODES, unidade_nome)
         hoje = datetime.now(_TZ)
+        # Bug C-38: env override pro default. Permite voltar pra 90d se
+        # provedor consertar SQL/índices, sem precisar de novo deploy.
+        try:
+            _env_dias = int(_os.getenv("MEDWARE_DIAS_DEFAULT") or "0")
+            if 1 <= _env_dias <= 90:
+                dias_default = _env_dias
+            else:
+                dias_default = dias
+        except (TypeError, ValueError):
+            dias_default = dias
         if data_inicio is not None and data_fim is not None:
             ini = data_inicio.strftime("%d/%m/%Y")
             fim = data_fim.strftime("%d/%m/%Y")
             janela_fonte = "preferencia"
         else:
             ini = (hoje + timedelta(days=1)).strftime("%d/%m/%Y")
-            fim = (hoje + timedelta(days=dias)).strftime("%d/%m/%Y")
-            janela_fonte = "default_90d"
+            fim = (hoje + timedelta(days=dias_default)).strftime("%d/%m/%Y")
+            janela_fonte = f"default_{dias_default}d"
         # Log estruturado do REQUEST (grep '[MEDWARE REQ]' no Easypanel).
         _req_log = {
             "evento": "medware_horarios_req",
