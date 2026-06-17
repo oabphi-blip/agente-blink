@@ -334,7 +334,10 @@ class MedwareClient:
     identificacao: str
     senha: str
     base_url: str = MEDWARE_BASE
-    timeout: float = 12.0
+    # Bug C-38b (17/06/2026): VM Medware Light com SQL sem índice estoura
+    # com timeout curto. 20s dá margem pra a query completar antes do retry
+    # amplificar carga. Override via env MEDWARE_TIMEOUT_S (5-60).
+    timeout: float = 20.0
 
     _token: Optional[str] = field(default=None, init=False)
     _refresh_token: Optional[str] = field(default=None, init=False)
@@ -657,7 +660,7 @@ class MedwareClient:
 
     def horarios_para_agente(
         self, medico_nome: str, unidade_nome: Optional[str] = None,
-        dias: int = 21, max_retries: int = 3,
+        dias: int = 14, max_retries: int = 1,
         data_inicio: Optional[Any] = None,
         data_fim: Optional[Any] = None,
     ) -> list[dict]:
@@ -705,6 +708,23 @@ class MedwareClient:
                 dias_default = dias
         except (TypeError, ValueError):
             dias_default = dias
+        # Bug C-38b: env override pro max_retries. Default fail-fast (1
+        # tentativa) evita amplificar congestionamento quando VM Medware
+        # está lenta. Pra voltar pro retry agressivo, set MEDWARE_MAX_RETRIES=3.
+        try:
+            _env_retries = int(_os.getenv("MEDWARE_MAX_RETRIES") or "0")
+            if 1 <= _env_retries <= 5:
+                max_retries = _env_retries
+        except (TypeError, ValueError):
+            pass
+        # Bug C-38b: env override pro timeout httpx (5-60s).
+        try:
+            _env_to = float(_os.getenv("MEDWARE_TIMEOUT_S") or "0")
+            if 5.0 <= _env_to <= 60.0:
+                # patch in-place do timeout do client pra essa instância
+                self.timeout = _env_to
+        except (TypeError, ValueError):
+            pass
         if data_inicio is not None and data_fim is not None:
             ini = data_inicio.strftime("%d/%m/%Y")
             fim = data_fim.strftime("%d/%m/%Y")
