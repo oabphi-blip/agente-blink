@@ -2982,6 +2982,181 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # SPRINT SRE — 8 pilares de estabilidade (Fabio 18/06/2026)
+    # ================================================================
+    # Helper de auth comum
+    def _check_secret(request: Request) -> None:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+    # -------- PILAR 1: SLO Board --------
+    @app.get("/admin/slo")
+    def admin_slo_html(request: Request):
+        _check_secret(request)
+        try:
+            from voice_agent import slo as _slo
+            rc = pipeline._redis
+            kc = getattr(pipeline, "kommo", None)
+            s24 = _slo.calcular_slos_24h(rc, kc)
+            s7d = _slo.calcular_slos_7d(rc, kc)
+            eb = _slo.error_budget_status(rc, kc, slos=s24)
+            html = _slo.render_html(s24, s7d, eb)
+            return HTMLResponse(content=html, status_code=200)
+        except Exception as e:  # noqa: BLE001
+            log.exception("[admin_slo_html] erro")
+            return HTMLResponse(
+                content=f"<pre>Erro: {e}</pre>", status_code=500,
+            )
+
+    @app.get("/admin/slo.json")
+    def admin_slo_json(request: Request) -> JSONResponse:
+        _check_secret(request)
+        try:
+            from voice_agent import slo as _slo
+            rc = pipeline._redis
+            kc = getattr(pipeline, "kommo", None)
+            s24 = _slo.calcular_slos_24h(rc, kc)
+            s7d = _slo.calcular_slos_7d(rc, kc)
+            eb = _slo.error_budget_status(rc, kc, slos=s24)
+            return JSONResponse({
+                "slo_24h": s24,
+                "slo_7d": s7d,
+                "error_budget": eb,
+            })
+        except Exception as e:  # noqa: BLE001
+            log.exception("[admin_slo_json] erro")
+            return JSONResponse({"erro": str(e)}, status_code=500)
+
+    # -------- PILAR 2: Auditoria diária --------
+    @app.get("/admin/auditoria-diaria")
+    @app.post("/admin/auditoria-diaria")
+    def admin_auditoria_diaria(request: Request) -> JSONResponse:
+        _check_secret(request)
+        try:
+            from voice_agent import auditoria_diaria as _ad
+            rc = pipeline._redis
+            rel = _ad.relatorio_diario(redis_client=rc)
+            return JSONResponse(rel)
+        except Exception as e:  # noqa: BLE001
+            log.exception("[admin_auditoria_diaria] erro")
+            return JSONResponse({"erro": str(e)}, status_code=500)
+
+    # -------- PILAR 4: Synthetic users --------
+    @app.get("/admin/synthetic-tick")
+    @app.post("/admin/synthetic-tick")
+    def admin_synthetic_tick(request: Request) -> JSONResponse:
+        _check_secret(request)
+        try:
+            from voice_agent import synthetic_users as _su
+            mw = request.query_params.get("max_workers", "20")
+            try:
+                max_workers = max(1, min(int(mw), 50))
+            except ValueError:
+                max_workers = 20
+            res = _su.executar_todos_cenarios_paralelo(
+                max_workers=max_workers,
+            )
+            return JSONResponse(res)
+        except Exception as e:  # noqa: BLE001
+            log.exception("[admin_synthetic_tick] erro")
+            return JSONResponse({"erro": str(e)}, status_code=500)
+
+    # -------- PILAR 5: Prompt versioning --------
+    @app.get("/admin/prompt-versions")
+    def admin_prompt_versions(request: Request) -> JSONResponse:
+        _check_secret(request)
+        try:
+            from voice_agent import prompt_versioning as _pv
+            rc = pipeline._redis
+            versoes = _pv.listar_versoes(rc)
+            return JSONResponse({"versoes": versoes, "total": len(versoes)})
+        except Exception as e:  # noqa: BLE001
+            log.exception("[admin_prompt_versions] erro")
+            return JSONResponse({"erro": str(e)}, status_code=500)
+
+    @app.get("/admin/prompt-diff")
+    def admin_prompt_diff(request: Request) -> JSONResponse:
+        _check_secret(request)
+        a = request.query_params.get("a", "")
+        b = request.query_params.get("b", "")
+        if not a or not b:
+            return JSONResponse(
+                {"erro": "Pass ?a=versaoA&b=versaoB"}, status_code=400,
+            )
+        try:
+            from voice_agent import prompt_versioning as _pv
+            rc = pipeline._redis
+            return JSONResponse(_pv.diff_versoes(rc, a, b))
+        except Exception as e:  # noqa: BLE001
+            log.exception("[admin_prompt_diff] erro")
+            return JSONResponse({"erro": str(e)}, status_code=500)
+
+    # -------- PILAR 6: Chaos test --------
+    @app.get("/admin/chaos-tick")
+    @app.post("/admin/chaos-tick")
+    def admin_chaos_tick(request: Request) -> JSONResponse:
+        _check_secret(request)
+        servico = request.query_params.get("servico", "")
+        try:
+            ttl = int(request.query_params.get("ttl", "300"))
+        except ValueError:
+            ttl = 300
+        if not servico:
+            return JSONResponse(
+                {"erro": "Pass ?servico=medware|kommo|anthropic|redis_slow"},
+                status_code=400,
+            )
+        try:
+            from voice_agent import chaos as _ch
+            rc = pipeline._redis
+            ok = _ch.injetar_falha(rc, servico, ttl_seg=ttl)
+            return JSONResponse({
+                "ok": ok, "servico": servico, "ttl_seg": ttl,
+            })
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"erro": str(e)}, status_code=500)
+
+    @app.get("/admin/chaos-stop")
+    @app.post("/admin/chaos-stop")
+    def admin_chaos_stop(request: Request) -> JSONResponse:
+        _check_secret(request)
+        servico = request.query_params.get("servico", None) or None
+        try:
+            from voice_agent import chaos as _ch
+            rc = pipeline._redis
+            n = _ch.parar_chaos(rc, servico)
+            return JSONResponse({"removidos": n, "servico": servico})
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"erro": str(e)}, status_code=500)
+
+    @app.get("/admin/chaos-status")
+    def admin_chaos_status(request: Request) -> JSONResponse:
+        _check_secret(request)
+        try:
+            from voice_agent import chaos as _ch
+            rc = pipeline._redis
+            return JSONResponse(_ch.status_chaos(rc))
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"erro": str(e)}, status_code=500)
+
+    @app.post("/admin/chaos-suite")
+    @app.get("/admin/chaos-suite")
+    def admin_chaos_suite(request: Request) -> JSONResponse:
+        _check_secret(request)
+        try:
+            from voice_agent import chaos as _ch
+            rc = pipeline._redis
+            return JSONResponse(_ch.executar_chaos_suite(rc))
+        except Exception as e:  # noqa: BLE001
+            log.exception("[admin_chaos_suite] erro")
+            return JSONResponse({"erro": str(e)}, status_code=500)
+
+    # ================================================================
     # AUDITORIA: leads em 2.LEADS FRIO com 1.DIA CONSULTA preenchido
     # ================================================================
     # GET /admin/audit/frios-com-agendamento?secret=...&limit=500
