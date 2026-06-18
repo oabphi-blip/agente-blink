@@ -29,6 +29,31 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+
+# Chaos test gate — module-level redis ref set externamente (webhook startup).
+# Quando vazio (default), o gate é inerte e zero overhead.
+_CHAOS_REDIS = None
+
+
+def set_chaos_redis(redis_client) -> None:  # noqa: D401
+    """Setter pra o webhook injetar o redis_client após boot."""
+    global _CHAOS_REDIS
+    _CHAOS_REDIS = redis_client
+
+
+def _chaos_ativo_medware() -> bool:
+    """Retorna True se chaos test estiver ativo pra serviço medware.
+
+    Falha silenciosa em qualquer erro (sem redis, sem chaos.py, import circular).
+    """
+    if _CHAOS_REDIS is None:
+        return False
+    try:
+        from voice_agent import chaos as _chaos  # noqa: WPS433
+        return _chaos.esta_em_chaos(_CHAOS_REDIS, "medware")
+    except Exception:  # noqa: BLE001
+        return False
+
 log = logging.getLogger(__name__)
 
 MEDWARE_BASE = "https://medware.blinkoftalmologia.com.br/api"
@@ -505,6 +530,8 @@ class MedwareClient:
         `data_hora` aceita 'YYYY-MM-DDTHH:MM' ou 'DD/MM/YYYY HH:MM'.
         Retorna {ok, cod_agendamento?, plano, procedimento, motivo?, detalhe?}.
         """
+        if _chaos_ativo_medware():
+            raise TimeoutError("chaos_test_active")
         cod_plano = (
             PLANO_PARTICULAR
             if (not convenio or str(convenio).strip().lower()

@@ -23,6 +23,27 @@ from .knowledge import KB_DIR, KnowledgeBase
 from .store import ConversationStore
 from .zep_adapter import recuperar_contexto as _zep_recuperar, gravar_turno as _zep_gravar
 
+
+# Chaos test gate — module-level redis ref set externamente (webhook startup).
+_CHAOS_REDIS = None
+
+
+def set_chaos_redis(redis_client) -> None:  # noqa: D401
+    """Setter pra o webhook injetar o redis_client após boot."""
+    global _CHAOS_REDIS
+    _CHAOS_REDIS = redis_client
+
+
+def _chaos_ativo_anthropic() -> bool:
+    """Retorna True se chaos test estiver ativo pra serviço anthropic."""
+    if _CHAOS_REDIS is None:
+        return False
+    try:
+        from voice_agent import chaos as _chaos  # noqa: WPS433
+        return _chaos.esta_em_chaos(_CHAOS_REDIS, "anthropic")
+    except Exception:  # noqa: BLE001
+        return False
+
 # Fuso horário oficial da clínica (Brasília) — usado pra cálculo de idade
 # e data de "hoje" injetada no system prompt.
 _TZ_BRT = ZoneInfo("America/Sao_Paulo")
@@ -1391,6 +1412,76 @@ _PROMETE_RETORNO_HUMANO_FALLBACK_SEM_AGENDA = (
 
 
 # ------------------------------------------------------------------
+# Bug C-37 (18/06/2026 — lead 21341221 Lívia/Linielle):
+# Lia inventou afirmações sobre comunicação interna ("vou avisar a
+# equipe", "Dra. Karla aguarda", "a recepção foi notificada"). Ela
+# NÃO tem canal pra falar com a recepção física da clínica.
+# Filtro SEMPRE-ON. Substitui por escalation honesta.
+# ------------------------------------------------------------------
+_INVENCAO_COMUNICACAO_INTERNA_PATTERNS = [
+    # "(já) (vou|estou|aviso) (a) equipe/recepção/médica..."
+    re.compile(
+        r"(?:j[aá]\s+)?(?:vou\s+|estou\s+|estamos\s+)?avis(?:ar|ando|o)\s+"
+        r"(?:te\s+|j[aá]\s+|logo\s+)?(?:a\s+|o\s+)?"
+        r"(?:equipe|recep[çc][aã]o|m[eé]dica?|m[eé]dico|dra?\.?|dr\.?)",
+        re.IGNORECASE,
+    ),
+    # "(a) equipe (já) está ciente/avisada/notificada/sabe"
+    re.compile(
+        r"(?:a\s+)?equipe\s+(?:j[aá]\s+)?(?:est[aá]\s+|foi\s+)?"
+        r"(?:ciente|avisada|notificada|sabe|informada)",
+        re.IGNORECASE,
+    ),
+    # "(a) recepção foi/está avisada/notificada/ciente/informada"
+    re.compile(
+        r"(?:a\s+)?recep[çc][aã]o\s+(?:j[aá]\s+)?(?:foi|est[aá])\s+"
+        r"(?:avisada|notificada|ciente|informada)",
+        re.IGNORECASE,
+    ),
+    # "(a) Dr(a). NOME (NOME) aguarda/está aguardando/fará consulta/já sabe..."
+    re.compile(
+        r"(?:a\s+)?dra?\.?\s+(?:\w+\s*){1,4}"
+        r"(?:aguarda|est[aá]\s+aguardando|ir[aá]\s+atend[eê]|"
+        r"far[aá]\s+(?:a\s+|sua\s+)?consulta(?:\s+normalmente)?|"
+        r"j[aá]?\s+sabe|"
+        r"foi\s+(?:avisada|comunicada|notificada))",
+        re.IGNORECASE,
+    ),
+    # "vou comunicar internamente/com a equipe"
+    re.compile(
+        r"vou\s+comunic(?:ar|ando)\s+(?:internamente|com\s+(?:a\s+)?equipe)",
+        re.IGNORECASE,
+    ),
+    # "(já) informei/informo (a) equipe/médica/médico"
+    re.compile(
+        r"(?:j[aá]\s+)?inform(?:ei|ando|amos|o)\s+"
+        r"(?:a\s+|o\s+)?(?:equipe|recep[çc][aã]o|m[eé]dica?|m[eé]dico|dra?\.?|dr\.?)",
+        re.IGNORECASE,
+    ),
+]
+
+
+def _viola_invencao_comunicacao_interna(text: str) -> bool:
+    """True se a Lia afirmou comunicação interna que NÃO tem como fazer.
+
+    Bug C-37 (Lívia 21341221, 18/06/2026): paciente avisou atraso, Lia
+    respondeu 'já aviso a equipe / Dra. Karla aguarda / equipe ciente'.
+    Lia só conversa pelo WhatsApp — não fala com recepção física, nem
+    com o médico em consulta. Toda afirmação assim é INVENÇÃO.
+    """
+    if not text:
+        return False
+    return any(p.search(text) for p in _INVENCAO_COMUNICACAO_INTERNA_PATTERNS)
+
+
+_INVENCAO_COMUNICACAO_INTERNA_FALLBACK = (
+    "Entendido. Vou escalar agora pra equipe humana confirmar com a "
+    "médica se ainda dá pra atender no horário possível. Te aviso "
+    "em poucos minutos."
+)
+
+
+# ------------------------------------------------------------------
 # Filtro PERGUNTA REDUNDANTE DE CONVÊNIO
 # Origem: lead 24063769 Adriana (02/06/2026). Paciente perguntou
 # valor, Lia perguntou 4x: "convênio ou sem?", "quem?", "convênio?",
@@ -2144,7 +2235,11 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
 
     # 0-pre-bis. PERGUNTA REDUNDANTE DE CONVÊNIO (lead 24063769 Adriana,
     # 02/06/2026). Convênio já no ctx mas Lia perguntou de novo.
-    if _FILTROS_LEGACY_ATIVOS and _viola_pergunta_redundante_convenio(text, ctx):
+    # Bug C-37c (Fábio 18/06/2026 — benchmark engenheiro): filtro estava
+    # gateado por FILTROS_LEGACY=0 (off em prod). Por isso bug Adriana
+    # 24063769 continuava acontecendo apesar de filtro existir.
+    # Agora SEMPRE-ON — convênio já no ctx é fato objetivo.
+    if _viola_pergunta_redundante_convenio(text, ctx):
         log.error(
             "[FILTRO] PERGUNTA REDUNDANTE CONVÊNIO bloqueada — ctx já "
             "tem convenio=%r. Texto: %r",
@@ -2196,7 +2291,10 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     # oferecer slot. Filtro pós-geração é a defesa final quando o LLM
     # ignora a TRAVA "🚨 JÁ AGENDADO" do system prompt. Dispara antes
     # de qualquer outro filtro porque, se vale aqui, vale logo.
-    if _FILTROS_LEGACY_ATIVOS and _viola_oferta_apos_agendado(text, ctx):
+    # Bug C-37c (Fábio 18/06/2026 — benchmark engenheiro): filtro estava
+    # gateado por FILTROS_LEGACY=0. Caso Esther 24060221 + Manuela 24165262.
+    # Agora SEMPRE-ON — ja_agendado é fato objetivo.
+    if _viola_oferta_apos_agendado(text, ctx):
         log.error(
             "[FILTRO] OFERTA POS-AGENDADO bloqueada — Lia tentou oferecer "
             "slot novo num lead já com consulta marcada. ja_agendado=True. "
@@ -2206,7 +2304,11 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
 
     # 0. Fingiu consultar agenda — quando JÁ tem horários no contexto.
     # Esse bug deixa a Lia em loop de "deixa eu consultar..." sem nunca voltar.
-    if _FILTROS_LEGACY_ATIVOS and _viola_oferta_agenda(text, has_agenda):
+    # Bug C-37c (Fábio 18/06/2026 — benchmark engenheiro): filtro estava
+    # gateado por FILTROS_LEGACY=0. Loop "deixa eu consultar..." Sabrina,
+    # Sofia, Adelia, Maitê — todos esses casos teriam sido bloqueados.
+    # Agora SEMPRE-ON — has_agenda é fato objetivo (consultou ou não).
+    if _viola_oferta_agenda(text, has_agenda):
         log.error(
             "[FILTRO] FAKE AGENDA LOOKUP bloqueado — Lia disse que ia consultar "
             "agenda quando JÁ tinha %d slots no contexto. Texto: %r",
@@ -2270,6 +2372,18 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     # "retorno em horário comercial seg-sex 8h-18h" (Blink é 24h!).
     # Rollback do rollback: filtro fica obrigatório de novo.
     # (Iara 21344999 silêncio NÃO foi causa do filtro — outro problema.)
+    # Bug C-37 (Lívia 21341221, 18/06/2026): Lia inventou afirmações
+    # sobre comunicação interna ("vou avisar a equipe", "Dra. Karla
+    # aguarda"). Lia NÃO tem como falar com recepção física da clínica.
+    # SEMPRE-ON. Substitui pela escalation honesta.
+    if _viola_invencao_comunicacao_interna(text):
+        log.error(
+            "[FILTRO C-37] INVENÇÃO COMUNICAÇÃO INTERNA BLOQUEADA — "
+            "Lia afirmou comunicação com equipe física. Texto: %r",
+            text[:200],
+        )
+        return _INVENCAO_COMUNICACAO_INTERNA_FALLBACK
+
     if _viola_promete_retorno_humano(text):
         log.error(
             "[FILTRO] PROMESSA RETORNO HUMANO BLOQUEADA — Lia inventou "
@@ -2593,6 +2707,9 @@ class Responder:
         Returns:
             {"answer": str, "model_used": str, "articles_used": list[str]}
         """
+        # Chaos gate — força timeout quando flag Redis ativa (default OFF).
+        if _chaos_ativo_anthropic():
+            raise TimeoutError("chaos_test_active")
         # 1. Seleciona artigos relevantes da KB
         relevant = self._kb.select_relevant(user_text, max_articles=3, max_chars=12000)
 

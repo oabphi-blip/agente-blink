@@ -23,6 +23,28 @@ import httpx
 log = logging.getLogger(__name__)
 
 
+# Chaos test gate — module-level redis ref set externamente (webhook startup).
+# Quando vazio (default), o gate é inerte e zero overhead.
+_CHAOS_REDIS = None
+
+
+def set_chaos_redis(redis_client) -> None:  # noqa: D401
+    """Setter pra o webhook injetar o redis_client após boot."""
+    global _CHAOS_REDIS
+    _CHAOS_REDIS = redis_client
+
+
+def _chaos_ativo_kommo() -> bool:
+    """Retorna True se chaos test estiver ativo pra serviço kommo."""
+    if _CHAOS_REDIS is None:
+        return False
+    try:
+        from voice_agent import chaos as _chaos  # noqa: WPS433
+        return _chaos.esta_em_chaos(_CHAOS_REDIS, "kommo")
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # ============================================================
 # Mapa de campos (univeja.kommo.com)
 # ============================================================
@@ -738,6 +760,8 @@ class KommoClient:
 
         Tenta variações BR (com/sem o 9 extra) automaticamente.
         """
+        if _chaos_ativo_kommo():
+            raise TimeoutError("chaos_test_active")
         candidates: list[str] = []
         normalized = (phone or "").replace("+", "").replace(" ", "").replace("-", "")
         if normalized:
@@ -2213,11 +2237,22 @@ class KommoClient:
           etapa: closed-lost NÃO é ST_AGENT_OFF → IA responde.
           Regra 2 vira temporária (30min), não permanente.
 
-        Retorna o motivo ('etapa-humana' | 'humano-escreveu-recente')
-        ou None.
+        Retorna o motivo ('ia-desativada' | 'etapa-humana'
+        | 'humano-escreveu-recente') ou None.
         """
         if not caller_context or not caller_context.get("found"):
             return None
+
+        # Regra 0 (Bug C-37b, Fábio 18/06/2026 — lead 21341221 Lívia):
+        # Campo custom "ATIVADO IA?" do Kommo = "Desativado" → IA
+        # silenciosa SEMPRE. Antes do fix, agent ignorava esse campo
+        # e Lia respondia mesmo com humano tendo clicado "Desativar".
+        # known["ativado_ia"] vem em UPPERCASE conforme update_lead_fields.
+        ativado_ia = str(
+            (caller_context.get("known") or {}).get("ativado_ia") or ""
+        ).upper().strip()
+        if ativado_ia in ("DESATIVADO", "DESATIVADA", "OFF"):
+            return "ia-desativada"
 
         # Regra 1: etapa do funil é explicitamente operacional/humana
         # (ESTA É A REGRA PRIMÁRIA — Fábio 02/06/2026)

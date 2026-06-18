@@ -13,6 +13,47 @@ on:
     branches: [main]
 
 jobs:
+  golden_suite:
+    name: Golden Suite (bloqueante)
+    runs-on: ubuntu-latest
+    # BLOQUEANTE — se um cenário canônico quebrar, deploy NÃO sai.
+    # Origem: sprint SRE 18/06/2026 (task #362). 50+ cenários cobrindo
+    # bugs C-12 a C-37c, fluxo feliz, edge cases e invariantes.
+    # Execução alvo: < 30s. Sem continue-on-error de propósito.
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instala dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Golden Suite (50+ cenários canônicos)
+        env:
+          ANTHROPIC_API_KEY: sk-ant-fake-pra-mock
+          OPENAI_API_KEY: sk-fake-pra-mock
+          KOMMO_SUBDOMAIN: univeja
+          KOMMO_TOKEN: fake-jwt
+          REDIS_URL: redis://localhost:6379/0
+          WEBHOOK_SECRET: ""
+          EVOLUTION_BASE_URL: http://fake-evolution:8080
+          EVOLUTION_API_KEY: fake-evo-key
+          EVOLUTION_INSTANCE: blink-fake
+          MEDWARE_USER: fake
+          MEDWARE_PASSWORD: fake
+        run: |
+          python -m pytest tests/test_golden_50.py -q --tb=short
+
   pytest:
     name: pytest (cobertura de regressão)
     runs-on: ubuntu-latest

@@ -699,6 +699,226 @@ def _worker_reativar_ia_loop(
             return
 
 
+# ============================================================
+# WORKER AUDITORIA DIÁRIA RETROATIVA (sprint SRE 18/06/2026)
+# Toggle: AUDITORIA_DIARIA_ENABLED=1 (default ON)
+# Quando: 1x/dia entre 7h-8h BRT
+# O que: varre tracing últimas 24h → juiz adversarial → Slack
+# Dedup: blink:auditoria_diaria:{YYYY-MM-DD} TTL 24h
+# ============================================================
+
+def _eh_hora_auditoria_diaria() -> bool:
+    """True se agora é entre 7h e 7h59 BRT."""
+    from datetime import datetime, timedelta, timezone
+    return datetime.now(timezone(timedelta(hours=-3))).hour == 7
+
+
+def _worker_auditoria_diaria_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Roda relatorio_diario 1x/dia 7h BRT e posta no Slack.
+
+    Dedup por dia via Redis. Toggle AUDITORIA_DIARIA_ENABLED=1 (default ON).
+    Slack só se SLACK_WEBHOOK_AUDITORIA_URL existir.
+    """
+    log.info(
+        "[CRON auditoria-diaria] worker iniciado — alvo 7h BRT, "
+        "intervalo de check 30min",
+    )
+    if stop_event.wait(180):
+        return
+    while not stop_event.is_set():
+        try:
+            from . import auditoria_diaria as _ad
+            if not _ad.auditoria_diaria_habilitada():
+                log.debug("[CRON auditoria-diaria] desligado — pulando")
+            elif not _eh_hora_auditoria_diaria():
+                log.debug("[CRON auditoria-diaria] fora janela — pulando")
+            else:
+                redis_cli = getattr(pipeline, "_redis", None)
+                dedup_key = _ad.chave_dedup_dia()
+                ja = False
+                if redis_cli is not None:
+                    try:
+                        ja = bool(redis_cli.get(dedup_key))
+                    except Exception:  # noqa: BLE001
+                        pass
+                if ja:
+                    log.debug(
+                        "[CRON auditoria-diaria] já rodou hoje (%s) — pulando",
+                        dedup_key,
+                    )
+                else:
+                    rel = _ad.relatorio_diario(redis_cli)
+                    msg = _ad.gerar_slack_message(rel)
+                    log.info(
+                        "[CRON auditoria-diaria] turnos=%d risco_alto=%d",
+                        rel.get("total_turnos", 0),
+                        rel.get("total_risco_alto", 0),
+                    )
+                    slack_url = (
+                        os.environ.get("SLACK_WEBHOOK_AUDITORIA_URL") or ""
+                    )
+                    if slack_url:
+                        try:
+                            import httpx
+                            with httpx.Client(timeout=10.0) as cli:
+                                cli.post(slack_url, json={"text": msg})
+                            log.info("[CRON auditoria-diaria] postado Slack")
+                        except Exception as e:  # noqa: BLE001
+                            log.warning(
+                                "[CRON auditoria-diaria] slack falhou: %s", e,
+                            )
+                    if redis_cli is not None:
+                        try:
+                            redis_cli.setex(dedup_key, 86400, "1")
+                        except Exception:  # noqa: BLE001
+                            pass
+        except Exception as e:  # noqa: BLE001
+            log.warning("[CRON auditoria-diaria] crash: %s", e)
+        if stop_event.wait(1800):  # checa a cada 30min
+            return
+
+
+# ============================================================
+# WORKER SYNTHETIC USERS — 100 cenários a cada 6h (sprint SRE)
+# Toggle: SYNTHETIC_USERS_ENABLED=1 (default OFF — só liga após baseline)
+# ============================================================
+
+def _synthetic_users_enabled() -> bool:
+    """SYNTHETIC_USERS_ENABLED=1 liga o worker. Default OFF."""
+    raw = (os.environ.get("SYNTHETIC_USERS_ENABLED") or "0").lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _synthetic_intervalo_seg() -> int:
+    try:
+        return int(os.environ.get("SYNTHETIC_INTERVALO_SEG") or "21600")  # 6h
+    except ValueError:
+        return 21600
+
+
+def _synthetic_max_workers() -> int:
+    try:
+        return max(
+            1, min(int(os.environ.get("SYNTHETIC_MAX_WORKERS") or "20"), 50),
+        )
+    except ValueError:
+        return 20
+
+
+def _worker_synthetic_users_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Roda os 100 cenários sintéticos a cada 6h. Salva taxa em env
+    pra error_budget consumir. Alerta Slack se taxa < 0.95."""
+    log.info(
+        "[CRON synthetic] worker iniciado — intervalo=%ds, max_workers=%d",
+        _synthetic_intervalo_seg(), _synthetic_max_workers(),
+    )
+    if stop_event.wait(240):  # 4min após boot
+        return
+    while not stop_event.is_set():
+        if not _synthetic_users_enabled():
+            log.debug("[CRON synthetic] desligado — pulando ciclo")
+        else:
+            try:
+                from voice_agent import synthetic_users as su
+                rel = su.executar_todos_cenarios_paralelo(
+                    max_workers=_synthetic_max_workers(),
+                )
+                log.info(
+                    "[CRON synthetic] %d/%d OK (taxa=%.2f%%) em %dms",
+                    rel.get("ok", 0), rel.get("total", 0),
+                    (rel.get("taxa", 0.0) * 100), rel.get("duracao_ms", 0),
+                )
+                try:
+                    os.environ["SYNTHETIC_LAST_PASS_RATE"] = str(
+                        rel.get("taxa", 0.0)
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                taxa = float(rel.get("taxa") or 0.0)
+                if taxa < 0.95:
+                    slack_url = (
+                        os.environ.get("SLACK_WEBHOOK_SMOKE_URL") or ""
+                    ).strip()
+                    if slack_url:
+                        try:
+                            import httpx
+                            with httpx.Client(timeout=8.0) as cli:
+                                cli.post(slack_url, json={
+                                    "text": (
+                                        f":warning: *Synthetic users abaixo "
+                                        f"do SLO* — {rel.get('ok')}/"
+                                        f"{rel.get('total')} "
+                                        f"(taxa={taxa:.2%})"
+                                    ),
+                                })
+                        except Exception as e:  # noqa: BLE001
+                            log.warning(
+                                "[CRON synthetic] slack falhou: %s", e,
+                            )
+            except Exception as e:  # noqa: BLE001
+                log.warning("[CRON synthetic] crash: %s", e)
+        if stop_event.wait(_synthetic_intervalo_seg()):
+            return
+
+
+# ============================================================
+# WORKER ERROR BUDGET — alerta SLO a cada 15min (sprint SRE)
+# Toggle: ERROR_BUDGET_ALERTS_ENABLED=1 (default ON)
+# ============================================================
+
+def _error_budget_alerts_enabled() -> bool:
+    raw = (os.environ.get("ERROR_BUDGET_ALERTS_ENABLED") or "1").lower()
+    return raw not in ("0", "false", "no", "off", "")
+
+
+def _error_budget_intervalo_seg() -> int:
+    try:
+        return int(os.environ.get("ERROR_BUDGET_INTERVALO_SEG") or "900")
+    except ValueError:
+        return 900
+
+
+def _worker_error_budget_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Chama disparar_alerta_se_necessario() a cada 15min. Dedup vive
+    dentro do módulo via Redis."""
+    log.info(
+        "[CRON error-budget] worker iniciado — intervalo=%ds",
+        _error_budget_intervalo_seg(),
+    )
+    if stop_event.wait(150):
+        return
+    while not stop_event.is_set():
+        if not _error_budget_alerts_enabled():
+            log.debug("[CRON error-budget] desligado — pulando")
+        else:
+            try:
+                from voice_agent import error_budget as eb
+                redis_cli = getattr(pipeline, "_redis", None)
+                res = eb.disparar_alerta_se_necessario(
+                    redis_client=redis_cli,
+                )
+                if res.get("enviou"):
+                    log.warning(
+                        "[CRON error-budget] alerta postado: %d violations",
+                        len(res.get("violations") or []),
+                    )
+                else:
+                    log.debug(
+                        "[CRON error-budget] sem alerta — motivo=%s",
+                        res.get("motivo"),
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning("[CRON error-budget] crash: %s", e)
+        if stop_event.wait(_error_budget_intervalo_seg()):
+            return
+
+
 def iniciar_cron(pipeline) -> dict:
     """Liga os workers de cron interno. Idempotente — só liga uma vez."""
     global _stop_event_global
@@ -760,11 +980,39 @@ def iniciar_cron(pipeline) -> dict:
     t6.start()
     _threads_iniciadas.append(t6)
 
+    # sprint SRE 18/06: auditoria diária retroativa via juiz adversarial
+    t7 = threading.Thread(
+        target=_worker_auditoria_diaria_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-auditoria-diaria",
+    )
+    t7.start()
+    _threads_iniciadas.append(t7)
+
+    # sprint SRE 18/06: synthetic users (100 cenários a cada 6h)
+    t8 = threading.Thread(
+        target=_worker_synthetic_users_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-synthetic-users",
+    )
+    t8.start()
+    _threads_iniciadas.append(t8)
+
+    # sprint SRE 18/06: error budget (15min, default ON)
+    t9 = threading.Thread(
+        target=_worker_error_budget_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-error-budget",
+    )
+    t9.start()
+    _threads_iniciadas.append(t9)
+
     return {
         "started": True,
         "workers": [
             "classificar", "renovacao", "campanha_semanal",
             "alarmes_horarios", "replay_noturno", "reativar_ia",
+            "auditoria_diaria", "synthetic_users", "error_budget",
         ],
         "dry_run": _dry_run_default(),
         "intervalo_classificar_seg": _intervalo_classificar_seg(),
