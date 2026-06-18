@@ -4225,6 +4225,94 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
+    # CAMADA 2 — Endpoint gerar-oferta-slots (Bug C-38 ponte operacional)
+    # ================================================================
+    @app.post("/admin/gerar-oferta-slots/{lead_id}")
+    @app.get("/admin/gerar-oferta-slots/{lead_id}")
+    def admin_gerar_oferta_slots(lead_id: int, request: Request) -> JSONResponse:
+        """Gera oferta de 2 slots reais Medware pra um lead.
+
+        Substitui o ciclo Cowork manual: lê ctx.known do lead, identifica
+        médico+unidade+preferência, bate Medware com janela curta (7d),
+        retorna 2 slots ordenados + mensagem 1️⃣/2️⃣ canônica pronta.
+
+        Funciona 24h porque vive no agent. Atendente humana cola a mensagem
+        no WhatsApp do paciente sem depender da Lia em prod funcionar.
+
+        Query params:
+          - postar_nota (true/false, default true) — grava oferta como nota Kommo
+          - janela_dias (1-14, default 7)
+          - medico (opcional, força médico específico)
+          - unidade (opcional, força unidade específica)
+
+        Retorna JSON com {ok, paciente, medico, unidade, slots, mensagem_pronta, ...}.
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        from voice_agent.gerar_oferta_slots import gerar_oferta_para_lead
+
+        q = request.query_params
+
+        def _bool(name, default=False):
+            v = (q.get(name) or "").lower()
+            if v in ("1", "true", "yes", "on"):
+                return True
+            if v in ("0", "false", "no", "off"):
+                return False
+            return default
+
+        postar_nota = _bool("postar_nota", default=True)
+        try:
+            janela_dias = int(q.get("janela_dias") or "7")
+        except (TypeError, ValueError):
+            janela_dias = 7
+        override_medico = q.get("medico") or None
+        override_unidade = q.get("unidade") or None
+
+        kommo_client = getattr(pipeline, "kommo", None)
+        medware_client = getattr(pipeline, "medware", None)
+        if not kommo_client:
+            return JSONResponse(
+                {"ok": False, "error": "kommo_client indisponível",
+                 "lead_id": lead_id},
+                status_code=500,
+            )
+        if not medware_client:
+            return JSONResponse(
+                {"ok": False, "error": "medware_client indisponível",
+                 "lead_id": lead_id},
+                status_code=500,
+            )
+
+        try:
+            resultado = gerar_oferta_para_lead(
+                lead_id=lead_id,
+                kommo_client=kommo_client,
+                medware_client=medware_client,
+                postar_nota=postar_nota,
+                janela_dias=janela_dias,
+                override_medico=override_medico,
+                override_unidade=override_unidade,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.exception("[admin_gerar_oferta_slots] exception lead=%s",
+                          lead_id)
+            return JSONResponse(
+                {"ok": False, "error": "exception",
+                 "lead_id": lead_id, "detail": str(e)},
+                status_code=500,
+            )
+
+        status = 200 if resultado.get("ok") else 404
+        return JSONResponse(resultado, status_code=status)
+
+    # ================================================================
     # DISPARO EM BATCH (task #213 — Opção A — 04/06/2026)
     # ================================================================
     def _primeiro_nome_lead(nome: str) -> str:
