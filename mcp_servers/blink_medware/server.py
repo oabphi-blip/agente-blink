@@ -109,7 +109,18 @@ class HorariosInput(BaseModel):
 
 
 class GravarAgendamentoInput(BaseModel):
-    """Input estrito da tool gravar_agendamento."""
+    """Input estrito da tool gravar_agendamento.
+
+    Bug C-41 (20/06/2026 — lead 24182212 Milena): servidor agora exige
+    UMA das duas trilhas de cobertura ANTES de aceitar a gravação. Sem
+    isso, a Lia pode reservar slot sem garantir convênio nem sinal,
+    paciente vira pra clínica e Dra. Karla pode recusar atender.
+
+    Aplicação do livro 4.5 (Servidor como Guardião): a validação não
+    fica na LLM (que pode esquecer), nem no atendente humano (que pode
+    distrair) — fica no servidor MCP, que REJEITA o input antes de
+    chegar no Medware.
+    """
     cod_agenda: int = Field(..., ge=1)
     cod_medico: int = Field(..., ge=1)
     cod_unidade: int = Field(..., ge=1)
@@ -120,6 +131,35 @@ class GravarAgendamentoInput(BaseModel):
     data_nasc_iso: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
     celular_e164: str = Field(..., min_length=10)
     cod_plano: int = Field(default=1, ge=1)
+    # Bug C-41 — trilha A (convênio) OU trilha B (sinal Pix). Sem isso, falha.
+    convenio_validado: bool = Field(
+        default=False,
+        description=(
+            "TRILHA A: True quando convênio nominal está na lista de "
+            "aceitos E paciente enviou foto carteirinha + RG/certidão."
+        ),
+    )
+    sinal_pix_comprovado: bool = Field(
+        default=False,
+        description=(
+            "TRILHA B: True quando paciente decidiu particular E "
+            "enviou comprovante Pix de 50% da consulta."
+        ),
+    )
+
+    @field_validator("sinal_pix_comprovado")
+    @classmethod
+    def _exige_trilha_a_ou_b(cls, v: bool, info) -> bool:
+        """Bug C-41 — bloqueia gravação sem cobertura financeira/convênio."""
+        convenio = info.data.get("convenio_validado", False)
+        if not (convenio or v):
+            raise ValueError(
+                "BUG_C41_RESERVA_SEM_COBERTURA: nem convênio_validado nem "
+                "sinal_pix_comprovado. Lia precisa fechar UMA das duas "
+                "trilhas (convênio + carteirinha OU Pix 50%) antes de "
+                "gravar reserva. Lead 24182212 Milena, 20/06/2026."
+            )
+        return v
 
 
 # ─── TOOLS ──────────────────────────────────────────────────────────

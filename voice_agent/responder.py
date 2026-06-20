@@ -2072,6 +2072,106 @@ def _gerar_saudacao_historica_c36(ctx: Optional[dict] = None) -> str:
     )
 
 
+# ─── FILTRO C-41 (Bug Milena 24182212, 20/06/2026) ──────────────────────────
+# Lia escreveu "Combinado, Henrique! Segunda-feira, 22/06 às 10:00..." e
+# montou Resumo do Atendimento SEM ter convênio definido E SEM sinal Pix
+# recebido. Confirmação de slot != reserva firmada. Reserva exige UMA das 2
+# trilhas:
+#   A) Convênio nominal aceito + foto carteirinha + RG/certidão
+#   B) Sinal Pix 50% comprovado
+# Filtro sempre-ON. Substitui afirmação prematura pela frase canônica
+# pré-reserva 10min.
+
+_AFIRMACAO_RESERVA_PATTERNS = [
+    re.compile(r"\bcombinad[ao]\b[,!.\s]*[A-ZÁÉÍÓÚÂÊÔÃÕÇ][a-záéíóúâêôãõç]+", re.IGNORECASE),
+    re.compile(r"\bagendamento\s+confirmado\b", re.IGNORECASE),
+    re.compile(r"\b(esta|está|fica|ficou)\s+reservad[ao]\b", re.IGNORECASE),
+    re.compile(r"\breserva\s+(firmad[ao]|confirmad[ao])\b", re.IGNORECASE),
+    re.compile(r"horário\s+está?\s+(reservado|garantido|firmado)", re.IGNORECASE),
+    re.compile(r"resumo\s+do\s+atendimento", re.IGNORECASE),
+    re.compile(r"perfeito[,!.]?\s+(seu|sua|o)\s+(agendamento|horário|consulta)", re.IGNORECASE),
+]
+
+
+def _viola_afirmou_reserva_sem_cobertura(
+    text: str, ctx: Optional[dict] = None,
+) -> bool:
+    """Detecta Lia afirmando reserva firmada sem convênio definido nem sinal Pix.
+
+    Retorna True quando:
+    - texto bate algum padrão de afirmação de reserva (Combinado/reservado/Resumo)
+    - E ctx.known.convenio está vazio/indefinido OU
+    - E ctx.known.sinal_recebido != True
+    - E ctx.ja_agendado != True (paciente que JÁ tem consulta gravada não é bug)
+    """
+    if not text:
+        return False
+    if (ctx or {}).get("ja_agendado"):
+        return False
+
+    known = (ctx or {}).get("known") or {}
+    convenio = (known.get("convenio") or "").strip().lower()
+    sinal_recebido = bool(known.get("sinal_recebido"))
+
+    # Convênio "definido" = não vazio, não "a definir", não "indefinido"
+    convenio_definido = bool(convenio) and convenio not in (
+        "", "a definir", "indefinido", "não sei", "nao sei",
+        "ver depois", "vou ver", "?",
+    )
+
+    if convenio_definido or sinal_recebido:
+        return False  # Reserva pode ser firmada — trilha A ou B fechada
+
+    # Sem cobertura — verifica se texto afirma reserva
+    return any(p.search(text) for p in _AFIRMACAO_RESERVA_PATTERNS)
+
+
+def _gerar_pre_reserva_10min(ctx: Optional[dict] = None) -> str:
+    """Fallback C-41: frase canônica de pré-reserva 10min.
+
+    Substitui afirmação prematura de reserva por solicitação clara das 2
+    trilhas (convênio ou Pix 50%). Usa dados do ctx quando disponível.
+    """
+    known = (ctx or {}).get("known") or {}
+    nome_contato = (ctx or {}).get("name") or ""
+    medico = known.get("medico") or ""
+    unidade = (known.get("unidade") or "").strip()
+
+    if medico and "Karla" in medico:
+        med_str = "Dra. Karla Delalíbera"
+        valor_consulta = "R$ 670"
+        valor_sinal = "R$ 335"
+    elif medico and ("Fabrício" in medico or "Fabricio" in medico):
+        med_str = "Dr. Fabrício Freitas"
+        valor_consulta = "R$ 297"
+        valor_sinal = "R$ 148,50"
+    else:
+        med_str = "nossa equipe"
+        valor_consulta = "R$ 670"
+        valor_sinal = "R$ 335"
+
+    # Chave Pix por unidade
+    if "águas claras" in unidade.lower() or "aguas claras" in unidade.lower():
+        chave_pix = "52.303.729/0001-30 (CNPJ Águas Claras)"
+    else:
+        chave_pix = "karladelaliberaoftalmo@gmail.com (e-mail Asa Norte)"
+
+    saudacao = f"{nome_contato}, " if nome_contato else ""
+
+    return (
+        f"{saudacao}posso pré-reservar esse horário por 10 minutos enquanto "
+        f"você me confirma uma coisa: o atendimento vai ser por convênio ou "
+        f"particular?\n\n"
+        f"• Por convênio: me envia a foto da carteirinha + RG (ou certidão se "
+        f"for menor) que eu já autorizo antes da consulta.\n\n"
+        f"• Particular: consulta com {med_str} = {valor_consulta}, e pra "
+        f"firmar a reserva pedimos um sinal de 50% via Pix ({valor_sinal}). "
+        f"Chave Pix: {chave_pix}. Em caso de cancelamento <24h, o sinal não "
+        f"é devolvido.\n\n"
+        f"Qual prefere?"
+    )
+
+
 def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
 
@@ -2101,6 +2201,31 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             ((ctx or {}).get("known") or {}), text[:300],
         )
         return _gerar_saudacao_historica_c36(ctx)
+
+    # === FILTRO C-41 (lead 24182212 Milena, 20/06/2026) ===
+    # Lia escreveu "Combinado, Henrique! Segunda-feira, 22/06 às 10:00..." +
+    # Resumo do Atendimento SEM ter convênio definido E SEM sinal Pix recebido.
+    # Sempre-ON. Toggle LIA_ANTI_RESERVA_SEM_COBERTURA (default "1"):
+    #   "1"      → substitui de fato
+    #   "shadow" → só LOGA (validação 24h, regra 11-E)
+    #   "0"      → desligado
+    if _viola_afirmou_reserva_sem_cobertura(text, ctx):
+        _modo_c41 = os.getenv("LIA_ANTI_RESERVA_SEM_COBERTURA", "1").lower()
+        if _modo_c41 == "shadow":
+            log.warning(
+                "[FILTRO C-41 SHADOW] SUBSTITUIRIA afirmacao de reserva sem "
+                "cobertura. ctx.known.convenio=%r, sinal_recebido=%r, texto=%r",
+                ((ctx or {}).get("known") or {}).get("convenio"),
+                ((ctx or {}).get("known") or {}).get("sinal_recebido"),
+                text[:300],
+            )
+        elif _modo_c41 != "0":
+            log.error(
+                "[FILTRO C-41] AFIRMOU reserva firmada SEM cobertura "
+                "(convenio vazio E sinal nao recebido). ctx.known=%r, texto=%r",
+                ((ctx or {}).get("known") or {}), text[:300],
+            )
+            return _gerar_pre_reserva_10min(ctx)
 
     # === FILTROS E-SERIES (lead 24154908, 15/06/2026) ===
     _FALLBACK_CURTO_E = "Boa tarde! Pra eu ver os horarios disponiveis, qual e o nome do paciente?"

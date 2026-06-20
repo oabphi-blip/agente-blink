@@ -213,6 +213,29 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (20/06/2026) Bug C-41 — Lia firmou reserva sem convênio definido nem sinal Pix (Milena 24182212)
+
+**Caso:** lead 24182212, bebê 7m com trauma ocular (urgência). Henrique (pai) confirmou slot 22/06 10:00 Karla Asa Norte. Lia escreveu **"Combinado, Henrique! Segunda-feira, 22/06 às 10:00..."** + **montou Resumo do Atendimento completo** SEM ter convênio definido E SEM sinal Pix recebido. Só DEPOIS perguntou "o atendimento será por convênio ou sem convênio?". Slot acabou gravado no Medware (via `agendar_encaixe` manual pelo Claude Cowork), MAS sem cobertura financeira — risco real da Dra. Karla recusar no dia.
+
+**Causa raiz arquitetural:** a regra 12.5 do `_MASTER_INSTRUCTION.md` tinha "confirmação = gatilho de gravação" mas NÃO exigia gate financeiro/convênio antes do "Combinado". Lia decidiu sozinha que "confirmar slot = reserva firmada" — não é. Reserva firmada exige UMA das duas trilhas:
+
+- **Trilha A (convênio):** convênio nominal aceito + foto carteirinha + RG/certidão
+- **Trilha B (particular):** sinal Pix 50% comprovado
+
+**Fix em 3 camadas:**
+
+1. **`_MASTER_INSTRUCTION.md` regra 12.10 nova** — exige UMA trilha antes do "Combinado" / "Resumo". Frase canônica pré-reserva 10min substitui o "Combinado" prematuro. Bumpa `VERSAO_PROMPT: 2026-06-20-c41-reserva-requer-convenio-ou-sinal`.
+
+2. **`mcp_servers/blink_medware/server.py` — `GravarAgendamentoInput`** ganha 2 campos novos (`convenio_validado: bool`, `sinal_pix_comprovado: bool`) + `field_validator` que LANÇA `BUG_C41_RESERVA_SEM_COBERTURA` se ambos False. Aplica livro 4.5 (Servidor como Guardião) — anti-alucinação por design.
+
+3. **Filtro reativo `_viola_afirmou_reserva_sem_cobertura`** (a implementar em `responder.py`): detecta padrões "agendamento confirmado", "está reservado", "Combinado, [data]" + "Resumo do Atendimento" QUANDO ctx.known.convenio vazio E ctx.known.sinal_recebido != True → substitui pela frase canônica pré-reserva.
+
+**Lição arquitetural CRÍTICA:**
+
+- **Confirmação de slot ≠ reserva firmada.** Distinção que estava implícita no prompt mas não nas frases banidas. Bug clínico-financeiro: paciente acha que tá agendado, médica acha que tem cobertura, ninguém tem certeza.
+- **Servidor MCP é o lugar certo pra gate financeiro.** Filtro reativo é tampão; validador Pydantic é blindagem real. Mas o MCP server NÃO está em prod ainda (arquitetura paralela commitada 20/06 às 12h) — em prod hoje só vale o filtro do `responder.py`.
+- **Urgência clínica não vale exceção.** Bebê com trauma ocular ainda precisa de cobertura — a recomendação correta é "pré-reserva 10min + vá ao PS agora" e não "agendo direto sem cobertura porque é urgência".
+
 ### 0. (17/06/2026) Bug C-36 + C-36c — Lia não grava notas Kommo + chuta APV + janela agenda muito ampla (lead 24168922)
 
 **Caso (17/06/2026 23:30 BRT):** lead 24168922 Manuela 7a — Fábio percebeu 3 bugs simultâneos:
