@@ -271,8 +271,62 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         # o histórico não se perca quando o WhatsApp alterna @lid/@s.whatsapp.net.
         convo_key = _conversation_key(remote_jid)
 
+        # REDIRECT 0710 (Bug C-40, 20/06/2026) — agente de migração 0710→8133.
+        # Quando REDIRECT_0710_ROTEAR_HANDLER=1, o handler do redirect_0710.py
+        # assume a conversa e retorna EARLY, bypassando o fluxo de atendimento
+        # normal. Isso garante que pacientes no número antigo recebam só o
+        # convite de migração (sem chamar Lia clínica no 0710).
+        if os.getenv("REDIRECT_0710_ROTEAR_HANDLER", "0") == "1" and msg_type in (
+            "audioMessage", "pttMessage", "conversation",
+            "extendedTextMessage", "imageMessage", "documentMessage",
+        ):
+            try:
+                from .redirect_0710 import handle_inbound_0710
+                # Patch do link oficial se env fornecida (corrige link hardcoded
+                # `556181331005` sem 9 → `5561981331005` correto).
+                _link_override = os.getenv("REDIRECT_0710_LINK_8133", "").strip()
+                if _link_override:
+                    try:
+                        import voice_agent.redirect_0710 as _r0710_mod
+                        _r0710_mod._LINK_OFICIAL = _link_override
+                        _r0710_mod._FALLBACK = (
+                            "Oi! Estou neste número antigo só pra te redirecionar. "
+                            "O atendimento da Blink agora é pelo canal oficial — "
+                            "toca aqui: " + _link_override
+                        )
+                    except Exception:  # noqa: BLE001
+                        log.exception("[REDIRECT-0710] patch _LINK_OFICIAL falhou")
+
+                texto_inbound = ""
+                if msg_type in ("conversation", "extendedTextMessage"):
+                    texto_inbound = _extract_text(message) or ""
+                elif msg_type in ("audioMessage", "pttMessage"):
+                    texto_inbound = "[audio recebido]"
+                elif msg_type in ("imageMessage", "documentMessage"):
+                    texto_inbound = "[imagem/documento recebido]"
+
+                res = handle_inbound_0710(
+                    phone=remote_jid,
+                    texto=texto_inbound,
+                    redis_client=getattr(conversation_store, "_redis", None),
+                    kommo_client=None,  # sem etapa-inativa check pra MVP
+                    evolution_client=evolution,
+                    anthropic_client=None,  # usa _FALLBACK fixo (sem custo LLM)
+                    enabled=os.getenv("REDIRECT_0710_ENABLED", "0") == "1",
+                )
+                log.info(
+                    "[REDIRECT-0710 webhook] phone=%s sent=%s motivo_silencio=%s",
+                    remote_jid, res.get("sent"), res.get("motivo_silencio"),
+                )
+                return JSONResponse({"redirect_0710": res})
+            except Exception:  # noqa: BLE001
+                log.exception(
+                    "[REDIRECT-0710] handler falhou — fluxo velho assume"
+                )
+
         # UNIFICAÇÃO — lead novo no 0710 recebe o aviso do número único
         # ANTES da resposta normal. Roda só para tipos de mensagem reais.
+        # (Mantido como fallback se REDIRECT_0710_ROTEAR_HANDLER != 1.)
         if msg_type in (
             "audioMessage", "pttMessage", "conversation",
             "extendedTextMessage", "imageMessage", "documentMessage",
