@@ -6106,6 +6106,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         106157139,  # 10-CIRURGIAS ANDAMENTO
         106484343,  # 11-LENTES ANDAMENTO
         106484347,  # 12-FORNECEDORES
+        101507507,  # 5-AGENDADO (Bug C-42, 26/06/2026 — Thamilla 23811372)
+        101109455,  # 6-CONFIRMAR (mesma lógica — pós-agendamento)
+        106653499,  # 7.CONFIRMADO (mesma lógica)
     }
 
     @app.post("/admin/kommo-trigger-status-change")

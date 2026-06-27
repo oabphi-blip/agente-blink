@@ -213,6 +213,40 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (26/06/2026) Bug C-42 — Lia escreve contradições em lead já AGENDADO (Thamilla 23811372)
+
+**Caso:** lead 23811372 Thamilla Torres de Freitas. Status 5-AGENDADO, CONVÊNIO=Saúde Caixa (aceito), 1.DIA CONSULTA=02/07/2026 16:30, UNIDADE=Águas Claras. Lia escreveu em 26/06 11:26: *"Sua consulta com a Dra. Karla Delalíbera pelo Saúde Caixa está confirmada para quinta-feira 02/07/2026 às 16:30 na unidade Águas Claras"* ✓. **10 horas depois, às 21:33**, Lia escreveu: *"Thamilla, preciso te corrigir uma informação: o **AMIL** não está credenciado na nossa rede... Como prefere seguir? 1) Seguir sem convênio  2) Somente com convênio (encerro o atendimento aqui)"*. 5 incoerências simultâneas:
+1. Inventou que paciente perguntou sobre AMIL (não perguntou)
+2. Ofereceu "encerrar atendimento" pra paciente já AGENDADA
+3. Contradisse a própria mensagem da manhã
+4. Ignorou CONVENIO=Saúde Caixa ativo
+5. Ignorou 1.DIA CONSULTA futuro válido
+
+**Causa raiz arquitetural (3 falhas combinadas):**
+
+- **A. Campo HISTÓRICO interpretado como ATUAL.** O lead tinha `Ñ ACEITO CONVENIO = Amil` preenchido em sessão antiga. Lia leu como sinal do turn atual.
+- **B. Sem filtro `_viola_contradicao_com_agendado`.** Lia escreveu "encerro atendimento" em lead com status_id=101507507 (5-AGENDADO) E 1.DIA CONSULTA futuro válido — nenhum filtro pegou.
+- **C. Pipeline_lock #183 ainda não confirmado em prod.** 5 mensagens da paciente entre 11:26 e 21:33 podem ter sido processadas em paralelo cada uma com snapshot ctx diferente.
+
+**Fix imediato (commit, sem esperar pipeline_lock):**
+
+1. **`voice_agent/webhook.py::_STATUS_INATIVOS_IA`** — adicionados:
+   - `101507507` (5-AGENDADO)
+   - `101109455` (6-CONFIRMAR)
+   - `106653499` (7.CONFIRMADO)
+
+2. **`voice_agent/ia_status.py::ST_AGENT_OFF`** — mesmos 3 IDs (espelha webhook.py).
+
+3. **`voice_agent/kommo.py::ST_AGENT_OFF`** — adicionado 101507507 (5-AGENDADO já não tinha; 6 e 7 já estavam).
+
+**Efeito em prod:** quando lead entra em 5-AGENDADO/6-CONFIRMAR/7.CONFIRMADO, webhook `/admin/kommo-trigger-status-change` seta `ATIVADO IA=Desativado` automaticamente. Lia para de responder. Humano cuida da confirmação D-1 e dúvidas pré-consulta até pipeline_lock + filtros C-42 estarem confirmados em prod (mes que vem).
+
+**Lição arquitetural CRÍTICA:**
+
+- **Campo Kommo NÃO É contexto temporal.** `Ñ ACEITO CONVENIO = Amil` deve ser entendido como histórico (com timestamp), não como pergunta do turn atual. Refactor maior pendente: separar `ctx.known` (turn atual) de `ctx.history` (campos persistentes) no `caller_context.py`. Lovable Fase 2 (Sprint 1: tabela `events` no Supabase) é o caminho arquitetural pra isso.
+
+- **Lia em pós-agendamento = mais risco que valor.** D-1 / confirmação / dúvida pré-consulta = humano com cartas reais na mão. Lia volta a ativar quando filtros de coerência estiverem prontos (C-42 reativo: detectar "encerro atendimento" + status_id AGENDADO → bloqueia substituindo pela reconfirmação canônica).
+
 ### 0. (20/06/2026) Bug C-41 — Lia firmou reserva sem convênio definido nem sinal Pix (Milena 24182212)
 
 **Caso:** lead 24182212, bebê 7m com trauma ocular (urgência). Henrique (pai) confirmou slot 22/06 10:00 Karla Asa Norte. Lia escreveu **"Combinado, Henrique! Segunda-feira, 22/06 às 10:00..."** + **montou Resumo do Atendimento completo** SEM ter convênio definido E SEM sinal Pix recebido. Só DEPOIS perguntou "o atendimento será por convênio ou sem convênio?". Slot acabou gravado no Medware (via `agendar_encaixe` manual pelo Claude Cowork), MAS sem cobertura financeira — risco real da Dra. Karla recusar no dia.

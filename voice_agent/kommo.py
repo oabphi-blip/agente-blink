@@ -361,13 +361,20 @@ FIELD_EXAMES_PACIENTES: dict[int, tuple[int, dict[str, int]]] = {
 
 # Etapas do funil ATENDE em que o agente fica DESLIGADO — tratamento
 # conduzido por humanos ou contato que não é paciente (fornecedor).
+#
+# Bug C-42 (26/06/2026, Thamilla 23811372): adicionado 5-AGENDADO. Lia
+# escrevia respostas incoerentes em lead já agendado (afirmava AMIL não
+# credenciado mesmo com convênio Saúde Caixa ativo + consulta 02/07 16:30
+# confirmada). Confirmação/lembrete D-1 fica com humano até pipeline_lock
+# (#183) e filtros C-42 estarem confirmados em prod.
 ST_AGENT_OFF = frozenset({
     106563343,  # 0-ATENDIMENTO HUMANO — atendente assumiu de propósito
     106157139,  # 7-CIRURGIAS ANDAMENTO
     106484343,  # 8-LENTES ANDAMENTO
     106484347,  # 9-FORNECEDORES
-    101109455,  # 5-CONFIRMAR — paciente respondendo template de confirmação
-    106653499,  # 6-CONFIRMADO — consulta já confirmada
+    101507507,  # 5-AGENDADO — Bug C-42 (consulta marcada, sem Lia)
+    101109455,  # 6-CONFIRMAR — paciente respondendo template de confirmação
+    106653499,  # 7.CONFIRMADO — consulta já confirmada
 })
 
 # Nomes legíveis das etapas do funil ATENDE (status_id → nome).
