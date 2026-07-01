@@ -241,7 +241,7 @@ def dispatch_renovacao(
             res.razao_skip = "dry_run" if dry_run else "wa_client_ausente"
             return res
         try:
-            wa_client.send_template(
+            _send_resp = wa_client.send_template(
                 to=to_e164,
                 name=TEMPLATE_1039.template_name,
                 body_params=[snap.nome_contato],
@@ -251,6 +251,34 @@ def dispatch_renovacao(
             res.kommo_nota = _gravar_nota_kommo(
                 kommo_note_writer, snap.lead_id, res.nota_preview,
             )
+            # Observabilidade Meta → Kommo (task #379): grava 5 custom
+            # fields + mapping wamid→lead em Redis. Lazy import pra
+            # evitar import circular.
+            try:
+                _wamid = None
+                if isinstance(_send_resp, dict):
+                    _msgs = _send_resp.get("messages") or []
+                    if _msgs and isinstance(_msgs[0], dict):
+                        _wamid = _msgs[0].get("id")
+                from voice_agent.templates_observabilidade import (
+                    gravar_template_disparado,
+                )
+                _kc = kommo_note_writer if hasattr(
+                    kommo_note_writer, "update_lead_fields",
+                ) else None
+                if _kc is not None:
+                    gravar_template_disparado(
+                        kommo_client=_kc,
+                        lead_id=snap.lead_id,
+                        template_name=TEMPLATE_1039.template_name,
+                        wamid=_wamid,
+                        redis_client=redis_client,
+                    )
+            except Exception as _exc:  # noqa: BLE001
+                log.warning(
+                    "[DISPATCHER] templates_obs lead=%s falhou: %s",
+                    snap.lead_id, _exc,
+                )
             # Marca "aguardando resposta" pra o cron classificar-tick.
             try:
                 from voice_agent.classificar import marcar_aguardando_resposta
@@ -279,12 +307,42 @@ def dispatch_renovacao(
             res.razao_skip = "dry_run" if dry_run else "wa_client_ausente"
             return res
         try:
-            wa_client.send_text(to=to_e164, text=texto)
+            _send_resp = wa_client.send_text(to=to_e164, text=texto)
             res.enviado = True
             res.dedup_chave = _marcar_disparo(redis_client, snap.lead_id)
             res.kommo_nota = _gravar_nota_kommo(
                 kommo_note_writer, snap.lead_id, res.nota_preview,
             )
+            # Observabilidade Meta → Kommo (task #379) — free_form não é
+            # template Meta tradicional, mas a gente carimba "free_form"
+            # como NOME do template + categoria "Operacional" pra a equipe
+            # ver no Kommo que houve outbound. Best-effort.
+            try:
+                _wamid = None
+                if isinstance(_send_resp, dict):
+                    _msgs = _send_resp.get("messages") or []
+                    if _msgs and isinstance(_msgs[0], dict):
+                        _wamid = _msgs[0].get("id")
+                from voice_agent.templates_observabilidade import (
+                    gravar_template_disparado,
+                )
+                _kc = kommo_note_writer if hasattr(
+                    kommo_note_writer, "update_lead_fields",
+                ) else None
+                if _kc is not None:
+                    gravar_template_disparado(
+                        kommo_client=_kc,
+                        lead_id=snap.lead_id,
+                        template_name="free_form_renovacao_24h",
+                        categoria="Operacional",
+                        wamid=_wamid,
+                        redis_client=redis_client,
+                    )
+            except Exception as _exc:  # noqa: BLE001
+                log.warning(
+                    "[DISPATCHER] templates_obs free_form lead=%s falhou: %s",
+                    snap.lead_id, _exc,
+                )
             try:
                 from voice_agent.classificar import marcar_aguardando_resposta
                 marcar_aguardando_resposta(

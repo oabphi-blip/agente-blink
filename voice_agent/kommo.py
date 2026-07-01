@@ -1024,6 +1024,72 @@ class KommoClient:
             except (TypeError, ValueError):
                 log.warning("cod_agendamento nao numerico: %s", cod_ag)
 
+        # ── Observabilidade de templates Meta (task #379) ───────────────
+        # Field_ids descobertos via list_custom_fields() na 1ª chamada
+        # (cache em templates_observabilidade). Campos: ULTIMO TEMPLATE META,
+        # TEMPLATES JÁ RECEBIDOS, CATEGORIA TEMPLATE, DATA ÚLTIMO DISPARO META,
+        # STATUS ÚLTIMO DISPARO.
+        _tobs_keys = (
+            "ultimo_template_meta", "templates_ja_recebidos",
+            "categoria_template", "data_ultimo_disparo_meta_ts",
+            "status_ultimo_disparo",
+        )
+        if any(fields.get(k) is not None for k in _tobs_keys):
+            try:
+                from voice_agent.templates_observabilidade import (
+                    descobrir_field_ids as _tobs_descobrir,
+                    CAMPO_TO_KOMMO_KEY as _TOBS_MAP,
+                )
+                _tobs_fids = _tobs_descobrir(self)
+                # ULTIMO TEMPLATE META (select por NOME do template)
+                if (_v := fields.get("ultimo_template_meta")):
+                    fid = _tobs_fids.get("ULTIMO TEMPLATE META")
+                    if fid:
+                        cfs.append({
+                            "field_id": fid,
+                            "values": [{"value": str(_v)}],
+                        })
+                # TEMPLATES JÁ RECEBIDOS (multiselect — best-effort 1 valor)
+                if (_v := fields.get("templates_ja_recebidos")):
+                    fid = _tobs_fids.get("TEMPLATES JÁ RECEBIDOS")
+                    if fid:
+                        cfs.append({
+                            "field_id": fid,
+                            "values": [{"value": str(_v)}],
+                        })
+                # CATEGORIA TEMPLATE (select)
+                if (_v := fields.get("categoria_template")):
+                    fid = _tobs_fids.get("CATEGORIA TEMPLATE")
+                    if fid:
+                        cfs.append({
+                            "field_id": fid,
+                            "values": [{"value": str(_v)}],
+                        })
+                # DATA ÚLTIMO DISPARO META (date_time)
+                if (_v := fields.get("data_ultimo_disparo_meta_ts")):
+                    fid = _tobs_fids.get("DATA ÚLTIMO DISPARO META")
+                    if fid:
+                        try:
+                            cfs.append({
+                                "field_id": fid,
+                                "values": [{"value": int(_v)}],
+                            })
+                        except (TypeError, ValueError):
+                            log.warning(
+                                "templates_obs: data_ultimo_disparo_meta_ts"
+                                " nao numerico: %r", _v,
+                            )
+                # STATUS ÚLTIMO DISPARO (select)
+                if (_v := fields.get("status_ultimo_disparo")):
+                    fid = _tobs_fids.get("STATUS ÚLTIMO DISPARO")
+                    if fid:
+                        cfs.append({
+                            "field_id": fid,
+                            "values": [{"value": str(_v)}],
+                        })
+            except Exception as _exc:  # noqa: BLE001
+                log.warning("templates_obs: %s", _exc)
+
         # Auto-skip campos que o Kommo já rejeitou anteriormente neste runtime.
         cfs = [c for c in cfs if c.get("field_id") not in _KOMMO_DEAD_FIELD_IDS]
 

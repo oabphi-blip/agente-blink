@@ -239,7 +239,7 @@ class BroadcastEngine:
 
             # ---- LIVE: envia o template pelo 8133
             try:
-                self.wa_cloud.send_template(
+                _send_resp = self.wa_cloud.send_template(
                     to=phone,
                     name=s.broadcast_template_name,
                     language=s.broadcast_template_lang,
@@ -257,6 +257,29 @@ class BroadcastEngine:
             details.append(
                 {"lead_id": lead_id, "name": name, "result": "enviado"}
             )
+
+            # Observabilidade Meta → Kommo (task #379) — best-effort.
+            try:
+                _wamid = None
+                if isinstance(_send_resp, dict):
+                    _msgs = _send_resp.get("messages") or []
+                    if _msgs and isinstance(_msgs[0], dict):
+                        _wamid = _msgs[0].get("id")
+                from voice_agent.templates_observabilidade import (
+                    gravar_template_disparado,
+                )
+                gravar_template_disparado(
+                    kommo_client=self.kommo,
+                    lead_id=lead_id,
+                    template_name=s.broadcast_template_name,
+                    wamid=_wamid,
+                    redis_client=self._redis,
+                )
+            except Exception as _exc:  # noqa: BLE001
+                log.warning(
+                    "[BROADCAST] templates_obs lead=%s falhou: %s",
+                    lead_id, _exc,
+                )
 
         action = "dry_run" if s.broadcast_dry_run else "sent"
         log.info(

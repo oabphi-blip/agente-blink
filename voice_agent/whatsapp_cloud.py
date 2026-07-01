@@ -349,11 +349,40 @@ class WhatsAppCloudClient:
             return r2.content, mime
 
 
+def parse_status_callbacks(payload: dict) -> list[dict]:
+    """Extrai os status callbacks (entregue/lido/falhou) do payload.
+
+    Estrutura: entry[] → changes[] → value → statuses[].
+
+    Retorna lista de dicts:
+      {wamid, status, recipient, timestamp, errors}
+    status normalizado: 'sent' | 'delivered' | 'read' | 'failed' | outros.
+    """
+    out: list[dict] = []
+    if not isinstance(payload, dict):
+        return out
+    for entry in (payload.get("entry") or []):
+        for change in (entry.get("changes") or []):
+            value = change.get("value") or {}
+            for st in (value.get("statuses") or []):
+                if not isinstance(st, dict):
+                    continue
+                out.append({
+                    "wamid": st.get("id") or "",
+                    "status": (st.get("status") or "").lower(),
+                    "recipient": st.get("recipient_id") or "",
+                    "timestamp": st.get("timestamp") or "",
+                    "errors": st.get("errors") or [],
+                })
+    return out
+
+
 def parse_webhook(payload: dict) -> list[dict]:
     """Extrai as mensagens RECEBIDAS do payload de webhook da Meta.
 
     Estrutura: entry[] → changes[] → value → messages[].
-    Eventos de status (entregue/lido), em value.statuses, são ignorados.
+    Eventos de status (entregue/lido), em value.statuses, são ignorados
+    aqui — use :func:`parse_status_callbacks` para isso.
 
     Retorna lista de dicts:
       {id, from, type, name, text, media_id, mime, caption}

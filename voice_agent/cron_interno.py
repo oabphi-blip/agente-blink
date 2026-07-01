@@ -919,6 +919,66 @@ def _worker_error_budget_loop(
             return
 
 
+# ============================================================
+# WORKER SYNC META → KOMMO (task #379)
+# ============================================================
+
+def _sync_templates_meta_enabled() -> bool:
+    """SYNC_TEMPLATES_META_ENABLED=1 (default ON) liga o worker."""
+    raw = (os.environ.get("SYNC_TEMPLATES_META_ENABLED") or "1").lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _intervalo_sync_templates_seg() -> int:
+    """Default 1h. Override via SYNC_TEMPLATES_META_INTERVALO_SEG."""
+    raw = (os.environ.get("SYNC_TEMPLATES_META_INTERVALO_SEG") or "3600")
+    try:
+        return max(int(float(raw)), 300)  # mínimo 5min
+    except ValueError:
+        return 3600
+
+
+def _worker_sync_templates_meta_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Worker que sincroniza templates aprovados Meta → enums Kommo.
+
+    Roda a cada SYNC_TEMPLATES_META_INTERVALO_SEG (default 1h). Lazy
+    import pra não custar boot. Default ON — desativar via
+    SYNC_TEMPLATES_META_ENABLED=0.
+    """
+    intervalo = _intervalo_sync_templates_seg()
+    log.info(
+        "[CRON sync-templates-meta] worker iniciado intervalo=%ds enabled=%s",
+        intervalo, _sync_templates_meta_enabled(),
+    )
+    # Espera 90s pra deixar o app boot estabilizar antes da 1ª rodada.
+    if stop_event.wait(90):
+        return
+    while not stop_event.is_set():
+        if not _sync_templates_meta_enabled():
+            log.debug("[CRON sync-templates-meta] desligado — pulando")
+        else:
+            try:
+                from voice_agent.scripts.sync_meta_to_kommo import sincronizar
+                res = sincronizar()
+                log.info(
+                    "[CRON sync-templates-meta] ok=%s total=%s "
+                    "adicionados=%s obsoletos=%s erro=%s",
+                    res.get("ok"),
+                    res.get("total_aprovados"),
+                    len(res.get("adicionados") or []),
+                    len(res.get("obsoletos") or []),
+                    res.get("erro"),
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.exception(
+                    "[CRON sync-templates-meta] falhou: %s", exc,
+                )
+        if stop_event.wait(intervalo):
+            return
+
+
 def iniciar_cron(pipeline) -> dict:
     """Liga os workers de cron interno. Idempotente — só liga uma vez."""
     global _stop_event_global
@@ -1007,12 +1067,22 @@ def iniciar_cron(pipeline) -> dict:
     t9.start()
     _threads_iniciadas.append(t9)
 
+    # task #379: sync Meta templates → Kommo enums (1h, default ON)
+    t10 = threading.Thread(
+        target=_worker_sync_templates_meta_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-sync-templates-meta",
+    )
+    t10.start()
+    _threads_iniciadas.append(t10)
+
     return {
         "started": True,
         "workers": [
             "classificar", "renovacao", "campanha_semanal",
             "alarmes_horarios", "replay_noturno", "reativar_ia",
             "auditoria_diaria", "synthetic_users", "error_budget",
+            "sync_templates_meta",
         ],
         "dry_run": _dry_run_default(),
         "intervalo_classificar_seg": _intervalo_classificar_seg(),

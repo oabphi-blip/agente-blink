@@ -1135,6 +1135,35 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             log.warning("/whatsapp recebido, mas WhatsApp Cloud não configurado")
             return JSONResponse({"ignored": "cloud não configurado"})
 
+        # task #379: status callbacks (delivered/read/failed) — atualiza
+        # STATUS ÚLTIMO DISPARO no lead via lookup wamid→lead em Redis.
+        try:
+            from voice_agent.whatsapp_cloud import (
+                parse_status_callbacks as _wa_parse_statuses,
+            )
+            from voice_agent.templates_observabilidade import (
+                lookup_lead_por_wamid,
+                atualizar_status_ultimo_disparo,
+            )
+            for st in _wa_parse_statuses(payload):
+                _wamid = st.get("wamid") or ""
+                _status = (st.get("status") or "").lower()
+                if not _wamid or not _status:
+                    continue
+                _lead_id = lookup_lead_por_wamid(pipeline._redis, _wamid)
+                if not _lead_id:
+                    log.info(
+                        "[WA_STATUS] wamid=%s status=%s sem lead em Redis",
+                        _wamid, _status,
+                    )
+                    continue
+                _kc = getattr(pipeline, "kommo", None)
+                if _kc is None:
+                    continue
+                atualizar_status_ultimo_disparo(_kc, _lead_id, _status)
+        except Exception as _exc:  # noqa: BLE001
+            log.warning("[WA_STATUS] processamento falhou: %s", _exc)
+
         for m in _wa_parse(payload):
             mid = m.get("id") or ""
             phone = m.get("from") or ""
@@ -3098,6 +3127,28 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return JSONResponse(rel)
         except Exception as e:  # noqa: BLE001
             log.exception("[admin_auditoria_diaria] erro")
+            return JSONResponse({"erro": str(e)}, status_code=500)
+
+    # -------- task #379: Sync Meta templates → Kommo enums --------
+    # Dispara manualmente o sync_meta_to_kommo.sincronizar() — o worker
+    # cron já roda 1h em 1h via cron_interno._worker_sync_templates_meta_loop.
+    # Use isso quando quiser forçar uma rodada (ex: depois de aprovar
+    # template novo no Meta Business Manager).
+    @app.get("/admin/sync-meta-templates-to-kommo")
+    @app.post("/admin/sync-meta-templates-to-kommo")
+    def admin_sync_meta_templates_to_kommo(
+        request: Request,
+    ) -> JSONResponse:
+        _check_secret(request)
+        try:
+            from voice_agent.scripts.sync_meta_to_kommo import (
+                sincronizar as _sync_sincronizar,
+            )
+            res = _sync_sincronizar()
+            status_code = 200 if res.get("ok") else 500
+            return JSONResponse(res, status_code=status_code)
+        except Exception as e:  # noqa: BLE001
+            log.exception("[admin_sync_meta_templates] erro")
             return JSONResponse({"erro": str(e)}, status_code=500)
 
     # -------- PILAR 4: Synthetic users --------
