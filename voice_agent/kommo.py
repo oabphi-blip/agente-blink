@@ -367,14 +367,11 @@ FIELD_EXAMES_PACIENTES: dict[int, tuple[int, dict[str, int]]] = {
 # credenciado mesmo com convênio Saúde Caixa ativo + consulta 02/07 16:30
 # confirmada). Confirmação/lembrete D-1 fica com humano até pipeline_lock
 # (#183) e filtros C-42 estarem confirmados em prod.
+# ATUALIZADO 30/06/2026 22:30 (Fábio) — política simplificada:
+# IA desligada APENAS em 1-ATENDIMENTO HUMANO. Revoga Bug C-42 + C-24a.
+# Segurança em runtime é dos filtros ja_agendado (5 camadas) + regras prompt.
 ST_AGENT_OFF = frozenset({
-    106563343,  # 0-ATENDIMENTO HUMANO — atendente assumiu de propósito
-    106157139,  # 7-CIRURGIAS ANDAMENTO
-    106484343,  # 8-LENTES ANDAMENTO
-    106484347,  # 9-FORNECEDORES
-    101507507,  # 5-AGENDADO — Bug C-42 (consulta marcada, sem Lia)
-    101109455,  # 6-CONFIRMAR — paciente respondendo template de confirmação
-    106653499,  # 7.CONFIRMADO — consulta já confirmada
+    106563343,  # 1-ATENDIMENTO HUMANO — atendente assumiu de propósito
 })
 
 # Nomes legíveis das etapas do funil ATENDE (status_id → nome).
@@ -1992,6 +1989,27 @@ class KommoClient:
             dia_consulta_ts: Optional[int] = None
             for cf in (data.get("custom_fields_values") or []):
                 fid = cf.get("field_id")
+                # Fallback agenda (02/07/2026) — campos "1./2. DIA COM CONVÊNIO"
+                # (date_time epoch). São 2 slots já pré-calculados pela equipe/Lia
+                # e gravados no lead. Quando o Medware ao vivo cai (timeout/vazio),
+                # a Lia lê esses campos como FONTE B pra ofertar agenda sem depender
+                # do servidor de agenda. Só valem se apontam pra futuro (> agora).
+                # Caso Carolina 21225483: Medware fora → Lia entrou em loop de
+                # hesitação 4x mesmo com 14/07 14:00 e 23/07 14:30 gravados aqui.
+                if fid in (1259930, 1259932):
+                    vals = cf.get("values") or []
+                    if vals and vals[0].get("value"):
+                        try:
+                            ts = int(vals[0]["value"])
+                            if ts > time.time():
+                                _key = (
+                                    "dia_conv_1_ts" if fid == 1259930
+                                    else "dia_conv_2_ts"
+                                )
+                                out["known"][_key] = ts
+                        except (ValueError, TypeError):
+                            pass
+                    continue
                 # 1.DIA CONSULTA (date_time) → ja_agendado se >= ontem
                 if fid == FIELD_DIA_CONSULTA_1:
                     vals = cf.get("values") or []

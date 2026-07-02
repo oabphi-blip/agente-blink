@@ -6123,44 +6123,80 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         })
 
     # ================================================================
-    # WEBHOOK Kommo — reativa IA quando humano move lead pra etapa ativa
-    # (task #233, 05/06/2026). Sugestão Fábio: humano move pra
-    # AGENDAR/FRIO/AGENDADO → IA volta automaticamente.
+    # WEBHOOK Kommo — política FINAL (Fábio 30/06/2026 22:45)
     # ================================================================
-    # Etapas onde IA deve estar SEMPRE ativa.
-    # Revisado 11/06/2026 (Fábio): incluir REALIZADO, PRÓXIMA, Closed-won/lost
-    # — Lia faz follow-up / NPS / reativação nessas etapas.
-    _STATUS_ATIVOS_IA = {
-        96441724,   # 0-ETAPA ENTRADA
-        106919911,  # 0-a classificar
-        101508307,  # 2.LEADS FRIO
-        102560495,  # 3-AGENDAR
-        106184631,  # 4.REAGENDAR
-        101507507,  # 5-AGENDADO
-        101109455,  # 6-CONFIRMAR
-        106653499,  # 7.CONFIRMADO
-        106184983,  # 7.1-NO-SHOW
-        91486864,   # 8-REALIZADO CONSULTA
-        106157327,  # 09-PRÓXIMA CONSULTA
-        142,        # Closed - won
-        143,        # Closed - lost
-    }
+    # REGRAS:
+    # 1) Lia opera SOMENTE no funil ATENDE (id 8601819).
+    #    Se o webhook receber lead de outro funil, IGNORA silenciosamente.
+    # 2) Dentro do ATENDE:
+    #    - IA DESATIVADA em: 1-ATENDIMENTO HUMANO
+    #    - IA ATIVA em: todas as outras 12 etapas
+    #
+    # Segurança em runtime dos filtros ja_agendado (5 camadas em pipeline.py)
+    # + regras pós-agendamento do prompt.
 
-    # Etapas onde IA deve ser AUTO-DESATIVADA quando lead entra
-    # (Bug C-24a, Fábio 11/06/2026 revisado 13:40 BRT): lista RESTRITA
-    # a 4 etapas — humano queixou que mesmo movendo pra essas etapas
-    # operacionais, Lia continuava respondendo. Outras etapas (8-REALIZADO,
-    # 09-PRÓXIMA, Closed-won/lost) MANTÊM IA ativada porque Lia faz
-    # follow-up / NPS / reativação nesses estados.
-    _STATUS_INATIVOS_IA = {
-        106563343,  # 1-ATENDIMENTO HUMANO
-        106157139,  # 10-CIRURGIAS ANDAMENTO
-        106484343,  # 11-LENTES ANDAMENTO
-        106484347,  # 12-FORNECEDORES
-        101507507,  # 5-AGENDADO (Bug C-42, 26/06/2026 — Thamilla 23811372)
-        101109455,  # 6-CONFIRMAR (mesma lógica — pós-agendamento)
-        106653499,  # 7.CONFIRMADO (mesma lógica)
-    }
+    # Pipeline exclusivo da Lia. Mudanças em outros pipelines são ignoradas.
+    _PIPELINE_ATENDE_ID = 8601819
+
+    # ================================================================
+    # CAMADA D — env LIA_POLITICA_SIMPLIFICADA (Fábio 30/06/2026 22:50)
+    # ================================================================
+    # Toggle rápido pra rollback SEM redeploy:
+    # - LIA_POLITICA_SIMPLIFICADA=1 (DEFAULT) → política NOVA: IA ativa
+    #   em todas as etapas do ATENDE exceto 1-ATENDIMENTO HUMANO.
+    # - LIA_POLITICA_SIMPLIFICADA=0 → volta pra política ANTIGA
+    #   (Bug C-42) onde AGENDADO/CONFIRMAR/CONFIRMADO desativam IA.
+    #
+    # Setar no Easypanel → Ambiente → LIA_POLITICA_SIMPLIFICADA=0
+    # → Implantar (build usa cache, ~30s). Não precisa git push.
+    # Env vazia ou ausente → default = simplificada. Só desliga com
+    # valores explícitos "0/false/no/off".
+    _POLITICA_SIMPLIFICADA = (
+        os.environ.get("LIA_POLITICA_SIMPLIFICADA", "1").strip().lower()
+        not in ("0", "false", "no", "off")
+    )
+
+    if _POLITICA_SIMPLIFICADA:
+        # POLÍTICA NOVA — todas as etapas ATENDE ativas exceto ATENDIMENTO HUMANO.
+        _STATUS_ATIVOS_IA = {
+            96441724,   # 0-ETAPA ENTRADA
+            106919911,  # 0-a classificar/EXCLUIR DUPLICADO
+            101508307,  # 2.LEADS FRIO
+            102560495,  # 3-AGENDAR
+            107084255,  # 4-APRESENTADO HORÁRIOS
+            106184631,  # 5.REAGENDAR (now show)
+            101507507,  # 6-AGENDADO (reativado 30/06 — revoga C-42)
+            101109455,  # 7-CONFIRMAR (reativado 30/06 — revoga C-42)
+            106653499,  # 8.CONFIRMADO (reativado 30/06 — revoga C-42)
+            91486864,   # 9-REALIZADO CONSULTA
+            106157327,  # 10-PRÓXIMA CONSULTA
+            142,        # Closed - won
+            143,        # Closed - lost
+        }
+        _STATUS_INATIVOS_IA = {
+            106563343,  # 1-ATENDIMENTO HUMANO
+        }
+    else:
+        # POLÍTICA ANTIGA (rollback Bug C-42) — desativa também
+        # AGENDADO/CONFIRMAR/CONFIRMADO.
+        _STATUS_ATIVOS_IA = {
+            96441724,   # 0-ETAPA ENTRADA
+            106919911,  # 0-a classificar/EXCLUIR DUPLICADO
+            101508307,  # 2.LEADS FRIO
+            102560495,  # 3-AGENDAR
+            107084255,  # 4-APRESENTADO HORÁRIOS
+            106184631,  # 5.REAGENDAR (now show)
+            91486864,   # 9-REALIZADO CONSULTA
+            106157327,  # 10-PRÓXIMA CONSULTA
+            142,        # Closed - won
+            143,        # Closed - lost
+        }
+        _STATUS_INATIVOS_IA = {
+            106563343,  # 1-ATENDIMENTO HUMANO
+            101507507,  # 6-AGENDADO (Bug C-42 — rollback)
+            101109455,  # 7-CONFIRMAR (Bug C-42 — rollback)
+            106653499,  # 8.CONFIRMADO (Bug C-42 — rollback)
+        }
 
     @app.post("/admin/kommo-trigger-status-change")
     @app.get("/admin/kommo-trigger-status-change")
@@ -6182,12 +6218,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         lead_id = None
         new_status = None
+        new_pipeline = None
         try:
             ct = (request.headers.get("content-type") or "").lower()
             if "json" in ct:
                 body = await request.json()
                 lead_id = body.get("lead_id") or body.get("id")
                 new_status = body.get("status_id") or body.get("status")
+                new_pipeline = body.get("pipeline_id") or body.get("pipeline")
             else:
                 form = await request.form()
                 lead_id = (
@@ -6200,17 +6238,25 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     or form.get("leads[update][0][status_id]")
                     or form.get("status_id")
                 )
+                new_pipeline = (
+                    form.get("leads[status][0][pipeline_id]")
+                    or form.get("leads[update][0][pipeline_id]")
+                    or form.get("pipeline_id")
+                )
         except Exception:  # noqa: BLE001
             pass
         if not lead_id:
             lead_id = request.query_params.get("lead_id")
         if not new_status:
             new_status = request.query_params.get("status_id")
+        if not new_pipeline:
+            new_pipeline = request.query_params.get("pipeline_id")
         try:
             lead_id_int = int(lead_id) if lead_id else 0
             status_int = int(new_status) if new_status else 0
+            pipeline_int = int(new_pipeline) if new_pipeline else 0
         except (ValueError, TypeError):
-            lead_id_int, status_int = 0, 0
+            lead_id_int, status_int, pipeline_int = 0, 0, 0
         if lead_id_int <= 0:
             return JSONResponse(
                 {"error": "lead_id obrigatório"}, status_code=400,
@@ -6222,10 +6268,32 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 {"error": "kommo_client indisponível"}, status_code=500,
             )
 
-        # Bug C-24a (Fábio 11/06/2026): se nova etapa é INATIVA pra IA,
-        # força ATIVADO IA = Desativado. Cobre 1-ATENDIMENTO HUMANO,
-        # 8-REALIZADO, 09-PRÓX, 10-CIRURGIAS, 11-LENTES, 12-FORNECEDORES,
-        # 142, 143.
+        # ================================================================
+        # GATE POR PIPELINE (Fábio 30/06/2026 22:45):
+        # Lia opera SOMENTE no funil ATENDE (8601819).
+        # Se webhook receber lead de outro funil, ignora silenciosamente.
+        # Se pipeline_id não veio no payload, busca no Kommo pelo lead_id
+        # antes de aceitar.
+        # ================================================================
+        if pipeline_int == 0:
+            try:
+                lead_detail = kommo_client.get_lead(lead_id_int) or {}
+                pipeline_int = int(lead_detail.get("pipeline_id") or 0)
+            except Exception:  # noqa: BLE001
+                pipeline_int = 0
+        if pipeline_int and pipeline_int != _PIPELINE_ATENDE_ID:
+            return JSONResponse({
+                "ok": True, "lead_id": lead_id_int, "status_id": status_int,
+                "pipeline_id": pipeline_int, "acao": "ignorado",
+                "motivo": (
+                    f"lead fora do funil ATENDE (pipeline {pipeline_int}) — "
+                    "Lia opera apenas no funil {} ".format(
+                        _PIPELINE_ATENDE_ID,
+                    )
+                ),
+            })
+
+        # Etapa INATIVA (1-ATENDIMENTO HUMANO) → força Desativado
         if status_int and status_int in _STATUS_INATIVOS_IA:
             try:
                 ok_off = kommo_client.update_lead_fields(
@@ -6238,7 +6306,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return JSONResponse({
                 "ok": bool(ok_off), "lead_id": lead_id_int,
                 "status_id": status_int, "acao": "ia_desativada",
-                "motivo": "etapa inativa pra IA (Bug C-24a)",
+                "motivo": "1-ATENDIMENTO HUMANO — humano assumiu",
             })
 
         # Se nova etapa não é uma das ativas nem inativas conhecidas,

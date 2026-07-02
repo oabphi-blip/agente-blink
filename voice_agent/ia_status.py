@@ -28,21 +28,11 @@ from .kommo import FIELD_ATIVADO_IA
 
 log = logging.getLogger(__name__)
 
-# Etapas do funil ATENDE em que a IA fica DESLIGADA (atendimento humano /
-# contato fornecedor / pós-agendamento). Espelha kommo.ST_AGENT_OFF.
-#
-# Bug C-42 (26/06/2026, Thamilla 23811372): adicionados 5-AGENDADO,
-# 6-CONFIRMAR, 7.CONFIRMADO. Lia continuava respondendo de forma incoerente
-# em leads agendados (lia "AMIL não credenciado" pra paciente com Saúde
-# Caixa + consulta 02/07 16:30 marcada). Confirmação D-1 fica com humano.
+# ATUALIZADO 30/06/2026 22:30 (Fábio) — política simplificada:
+# IA desligada APENAS em 1-ATENDIMENTO HUMANO. Revoga Bug C-42 + C-24a.
+# Segurança em runtime é dos filtros ja_agendado + regras prompt.
 ST_AGENT_OFF = frozenset({
-    106563343,  # 0-ATENDIMENTO HUMANO
-    106157139,  # 7-CIRURGIAS ANDAMENTO
-    106484343,  # 8-LENTES ANDAMENTO
-    106484347,  # 9-FORNECEDORES
-    101507507,  # 5-AGENDADO (Bug C-42)
-    101109455,  # 6-CONFIRMAR (Bug C-42)
-    106653499,  # 7.CONFIRMADO (Bug C-42)
+    106563343,  # 1-ATENDIMENTO HUMANO — humano assumiu de propósito
 })
 
 
