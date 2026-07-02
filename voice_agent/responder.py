@@ -463,6 +463,12 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
         try:
             from datetime import datetime as _dt
             _d = _dt.fromisoformat(dia_consulta_iso)
+            # Bug C-47 — se veio naive (fallback antigo), assume BRT.
+            # Se veio com tz, normaliza pra BRT.
+            if _d.tzinfo is None:
+                _d = _d.replace(tzinfo=_TZ_BRT)
+            else:
+                _d = _d.astimezone(_TZ_BRT)
             dia_consulta_humano = _d.strftime(
                 "%A, %d/%m/%Y às %H:%M"
             ).replace("Monday", "segunda-feira").replace(
@@ -1698,20 +1704,28 @@ def _gerar_oferta_pos_agendado_fallback(ctx: Optional[dict]) -> str:
         try:
             from datetime import datetime as _dt
             _d = _dt.fromisoformat(dia_iso)
+            # Bug C-47 — normalizar tz pra BRT antes de formatar.
+            if _d.tzinfo is None:
+                _d = _d.replace(tzinfo=_TZ_BRT)
+            else:
+                _d = _d.astimezone(_TZ_BRT)
             data_humano = _d.strftime("%d/%m às %H:%M")
         except (ValueError, TypeError):
             data_humano = ""
+    # Bug C-48 (Fábio 02/07/2026) — proibido vazar nome de campo interno
+    # ("1.DIA CONSULTA", "N.DATA NASC" etc) pro paciente. Se não temos data
+    # humana pra mostrar, encaminha pra especialista em remarcação em vez
+    # de escrever texto técnico.
     paciente_str = f" da {nome}" if nome else ""
     if data_humano:
-        marcada = f" já está marcada para **{data_humano}**"
-    else:
-        marcada = " já está marcada (data no campo 1.DIA CONSULTA)"
-    return (
-        f"Recebi, obrigada! A consulta{paciente_str}{marcada}. "
-        "Nossa equipe vai conferir tudo. Se precisar **remarcar** ou "
-        "**cancelar**, é só me avisar — caso contrário, te espero "
-        "no dia marcado!"
-    )
+        return (
+            f"Recebi, obrigada! A consulta{paciente_str} já está "
+            f"marcada para **{data_humano}**. Nossa equipe vai conferir "
+            "tudo. Se precisar **remarcar** ou **cancelar**, é só me "
+            "avisar — caso contrário, te espero no dia marcado!"
+        )
+    # Sem data humana → NÃO improvisa nem cita campo interno.
+    return _gerar_encaminhamento_remarcacao(ctx)
 
 
 # ────────────────────────────────────────────────────────────────────────
@@ -1869,14 +1883,81 @@ def _viola_fallback_equipe_contata(text: str, ctx: Optional[dict] = None) -> boo
     return False
 
 
+_DIAS_SEMANA_PT = [
+    "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+    "sexta-feira", "sábado", "domingo",
+]
+
+
+def _fallback_slots_from_kommo(ctx: Optional[dict]) -> list:
+    """FONTE B de agenda (02/07/2026) — quando o Medware ao vivo cai.
+
+    Lê os campos "1./2. DIA COM CONVÊNIO" (epochs em known['dia_conv_1_ts'] e
+    ['dia_conv_2_ts'], expostos por kommo.get_caller_context_by_lead) e monta
+    slots no MESMO formato que o Medware entrega ({dia_semana, data_br, hora}).
+
+    O dia-da-semana é DERIVADO do epoch via datetime — nunca digitado à mão —
+    então é impossível reincidir no Bug C-35 (dia inventado). Só retorna slots
+    que apontam pro futuro (a captura no kommo.py já filtra ts > agora, aqui
+    reforça). Ordena cronologicamente.
+
+    Caso Carolina 21225483: Medware fora, mas 14/07 14:00 (terça) e 23/07 14:30
+    (quinta) estavam gravados aqui — batendo Águas Claras (Karla ter/qui) e a
+    preferência dela (tarde início). Este helper transforma isso em oferta real.
+    """
+    known = (ctx or {}).get("known") or {}
+    agora = datetime.now(_TZ_BRT)
+    slots: list = []
+    for _key in ("dia_conv_1_ts", "dia_conv_2_ts"):
+        ts = known.get(_key)
+        if not ts:
+            continue
+        try:
+            d = datetime.fromtimestamp(int(ts), _TZ_BRT)
+        except (ValueError, TypeError, OSError):
+            continue
+        if d <= agora:
+            continue
+        slots.append({
+            "dia_semana": _DIAS_SEMANA_PT[d.weekday()],
+            "data_br": d.strftime("%d/%m"),
+            "hora": d.strftime("%H:%M"),
+            "_epoch": int(ts),
+            "_origem": "kommo_fallback",
+        })
+    slots.sort(key=lambda s: s.get("_epoch", 0))
+    return slots
+
+
 def _gerar_resposta_honesta_medware_down(ctx: Optional[dict] = None) -> str:
-    """Substitui fallback 'equipe contata' pela frase honesta de reconsulta."""
+    """Medware down: tenta FONTE B (campos Kommo) antes de admitir espera.
+
+    Ordem (02/07/2026):
+      1. Se ctx.agenda já tem slots (Medware respondeu) → oferta com eles.
+      2. Senão, tenta fallback dos campos "1./2. DIA COM CONVÊNIO" do Kommo.
+         Se houver ao menos 1 slot futuro → oferta real (fim do loop de
+         hesitação que afetou Carolina 21225483).
+      3. Só se NENHUMA fonte tiver slot → frase honesta curta. E, mesmo aqui,
+         a escalação pra humano já foi sinalizada pelo chamador (C-30A).
+    """
+    agenda = (ctx or {}).get("agenda") or []
+    if not agenda:
+        agenda = _fallback_slots_from_kommo(ctx)
+    if agenda:
+        ctx_com_agenda = dict(ctx or {})
+        ctx_com_agenda["agenda"] = agenda
+        return _gerar_oferta_2_slots(ctx_com_agenda)
+
+    # Sem NENHUMA fonte de agenda (nem Medware, nem fallback Kommo): admite
+    # honestamente + garante escalação humana (idempotente/best-effort).
+    _sinalizar_escalation_medware_down(ctx)
     known = (ctx or {}).get("known") or {}
     nome = known.get("nome_contato") or known.get("nome_paciente") or ""
     saudacao = f"{nome.split()[0]}, " if nome else ""
     return (
-        f"{saudacao}deixa eu reconsultar a agenda real aqui pra você — "
-        "volto em 1 minuto com os horários certos."
+        f"{saudacao}nossa agenda está fora do ar neste exato momento. "
+        "Já pedi pra equipe puxar os horários e te retorno com as opções "
+        "concretas em instantes — não vou te deixar sem resposta."
     )
 
 
@@ -2173,6 +2254,75 @@ def _gerar_pre_reserva_10min(ctx: Optional[dict] = None) -> str:
     )
 
 
+# ────────────────────────────────────────────────────────────────────────
+# Bug C-47 (02/07/2026, lead 22838100 Manoela Dantas)
+# ────────────────────────────────────────────────────────────────────────
+# 1. Lia informou "consulta 10/07 às 19:30" — timezone bug já corrigido
+#    em kommo.py (1.DIA CONSULTA fromtimestamp com tz=BRT).
+# 2. Quando paciente pede REMARCAÇÃO, Lia deve:
+#    (a) NÃO mencionar "atendimento humano" ou "equipe humana";
+#    (b) Dizer "vou encaminhar você para nossa especialista em remarcação";
+#    (c) Encerrar a resposta (única frase curta).
+#    Regra Fábio 02/07/2026.
+# ────────────────────────────────────────────────────────────────────────
+import re as _re_c47
+
+# Termos proibidos que a Lia às vezes usa e revelam camada IA/humana ao paciente.
+_C47_TERMOS_PROIBIDOS = (
+    "equipe humana", "equipe manual", "atendimento humano",
+    "vou passar pra equipe", "vou passar para a equipe",
+    "vou passar pra nossa equipe", "vou passar para nossa equipe",
+    "encaminhar para nossa equipe humana", "para nossa equipe humana",
+    "transferir para atendimento humano", "transferir para nossa equipe",
+    "encaminhar para atendimento humano", "para o atendimento humano",
+    "equipe de atendimento humano", "atendente humano",
+    "encaminho para humano", "passo pro humano",
+)
+
+# Termos que sinalizam intenção de REMARCAÇÃO no inbound do paciente.
+_C47_TERMOS_REMARCACAO = (
+    "remarcar", "remarcação", "remarcacao", "reagendar", "reagendamento",
+    "mudar horário", "mudar horario", "trocar horário", "trocar horario",
+    "trocar de horário", "mudar data", "trocar data", "trocar dia",
+    "adiar consulta", "adiar a consulta", "adiar minha consulta",
+    "não vou conseguir na", "nao vou conseguir na",
+    "não consigo mais no", "nao consigo mais no",
+    "queria mudar", "quero mudar",
+    "trocar o dia", "trocar o horário", "trocar o horario",
+    "mudar o dia", "mudar o horário", "mudar o horario",
+    "outro dia", "outro horário", "outro horario",
+    "posso mudar", "posso trocar", "posso remarcar", "posso reagendar",
+)
+
+
+def _paciente_pediu_remarcacao(inbound_text: Optional[str]) -> bool:
+    """True se a última mensagem do paciente indica intenção de remarcar."""
+    if not inbound_text:
+        return False
+    baixo = inbound_text.lower().strip()
+    return any(t in baixo for t in _C47_TERMOS_REMARCACAO)
+
+
+def _texto_menciona_atendimento_humano(text: str) -> bool:
+    """True se a resposta da Lia contém termos que expõem camada humana/IA."""
+    if not text:
+        return False
+    baixo = text.lower()
+    return any(t in baixo for t in _C47_TERMOS_PROIBIDOS)
+
+
+def _gerar_encaminhamento_remarcacao(ctx: Optional[dict] = None) -> str:
+    """Frase canônica pra encaminhar remarcação sem revelar camada humana/IA."""
+    known = (ctx or {}).get("known") or {}
+    nome_contato = (known.get("nome_contato") or "").split()[0] if known.get("nome_contato") else ""
+    saudacao = f"{nome_contato}, entendi! " if nome_contato else "Entendi! "
+    return (
+        f"{saudacao}Vou encaminhar você para nossa "
+        "**especialista em remarcação**, que vai cuidar dessa alteração "
+        "com você. Só um instante."
+    )
+
+
 def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
 
@@ -2188,6 +2338,47 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """
     if not text:
         return text
+
+    # === FILTRO C-48 SEMPRE-ON (Fábio 02/07/2026, lead 21259287 Samuel) ===
+    # Lia vazou "(data no campo 1.DIA CONSULTA)" pro paciente. Proibido
+    # citar nome de campo interno do Kommo em qualquer mensagem outbound.
+    _C48_PADROES_VAZAMENTO = (
+        "1.dia consulta", "n.dia consulta", "campo 1.", "campo n.",
+        "n.data nasc", "1.data nascimento", "n.data nascimento",
+        "n.nome paciente", "1.nome paciente", "campo dia_consulta",
+        "custom_fields", "field_id", "ctx.known", "ctx.agenda",
+        "n.perfil", "n.motivo", "n.exames", "campo unidade",
+        "campo medicos", "campo convenio", "kommo.get_lead",
+        "medware.criar_agendamento", "responder.py",
+    )
+    _texto_baixo = text.lower()
+    if any(p in _texto_baixo for p in _C48_PADROES_VAZAMENTO):
+        log.error(
+            "[FILTRO C-48] VAZAMENTO de campo interno na resposta. "
+            "texto=%r ctx.known=%r",
+            text[:300], ((ctx or {}).get("known") or {}),
+        )
+        # Substitui por frase segura — encaminha remarcação (transparente
+        # sem expor camada interna).
+        return _gerar_encaminhamento_remarcacao(ctx)
+
+    # === FILTRO C-47 SEMPRE-ON (Fábio 02/07/2026, lead 22838100 Manoela) ===
+    # (a) Se Lia mencionou "equipe humana"/"atendimento humano" → troca pela
+    #     frase canônica "especialista em remarcação".
+    # (b) Se inbound do paciente pediu remarcação, força resposta canônica
+    #     e curta (evita Lia inventar horário, escala mais rápido).
+    _inbound_text = (ctx or {}).get("inbound_text") or (ctx or {}).get(
+        "last_inbound_text"
+    ) or ""
+    _pediu_remarcar = _paciente_pediu_remarcacao(_inbound_text)
+    _mencionou_humano = _texto_menciona_atendimento_humano(text)
+    if _pediu_remarcar or _mencionou_humano:
+        log.warning(
+            "[FILTRO C-47] Encaminhamento remarcação forçado. "
+            "pediu_remarcar=%s mencionou_humano=%s texto=%r inbound=%r",
+            _pediu_remarcar, _mencionou_humano, text[:200], _inbound_text[:100],
+        )
+        return _gerar_encaminhamento_remarcacao(ctx)
 
     has_agenda = bool((ctx or {}).get("agenda"))
 

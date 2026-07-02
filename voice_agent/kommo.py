@@ -16,6 +16,13 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+# Bug C-47 (02/07/2026) — timezone BRT pra formatar 1.DIA CONSULTA.
+# Container do Easypanel roda em UTC; datetime.fromtimestamp(ts) sem tz
+# devolvia hora UTC (10/07 19:30 UTC = 16:30 BRT). Lia lia e exibia 19:30.
+# Manoela (lead 22838100) recebeu "consulta 10/07 às 19:30" 5x seguidas.
+_TZ_BR = ZoneInfo("America/Sao_Paulo")
 from typing import Any, Optional
 
 import httpx
@@ -2022,9 +2029,10 @@ class KommoClient:
                                 ja_agendado_by_consulta = True
                                 dia_consulta_ts = ts
                                 out["known"]["dia_consulta_ts"] = ts
-                                # Para o agente saber a data legível
+                                # Para o agente saber a data legível.
+                                # Bug C-47: SEMPRE em BRT (container é UTC).
                                 out["known"]["dia_consulta_iso"] = (
-                                    datetime.fromtimestamp(ts).isoformat()
+                                    datetime.fromtimestamp(ts, tz=_TZ_BR).isoformat()
                                 )
                         except (ValueError, TypeError):
                             pass
