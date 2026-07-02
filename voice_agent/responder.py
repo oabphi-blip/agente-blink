@@ -713,6 +713,7 @@ _PROHIBITED_REPLACEMENTS = [
 # Chaves Pix oficiais (artigo 38 §3) — qualquer outra é alucinação
 _CHAVES_PIX_OFICIAIS = {
     "karladelaliberaoftalmo@gmail.com",   # Asa Norte
+        "sistema.pe@gmail.com",           # Sistema PE
     "52.303.729/0001-30",                  # Águas Claras (CNPJ)
 }
 
