@@ -2255,6 +2255,114 @@ def _gerar_pre_reserva_10min(ctx: Optional[dict] = None) -> str:
 
 
 # ────────────────────────────────────────────────────────────────────────
+# Bug C-51 (03/07/2026 madrugada, lead 24243754 Ani — mesmo lead C-50)
+# ────────────────────────────────────────────────────────────────────────
+# 4 bugs simultâneos:
+# 1. Ani disse "sem convênio" (CONVENIO=Não se aplica gravado). Lia
+#    perguntou "convênio ou particular?" de novo.
+# 2. Uso da palavra "particular" — Fábio proibiu ("sem convênio").
+# 3. Despejou valor R$ 670 + Pix R$ 335 + chave sem paciente perguntar.
+# 4. Múltiplos assuntos em 1 mensagem (violação regra E1).
+# ────────────────────────────────────────────────────────────────────────
+_C51_VALOR_PATTERNS = (
+    r"r\$\s*\d",
+    r"valor.*consulta",
+    r"chave pix",
+    r"pix\s*.*\d",
+    r"sinal\s*de\s*50",
+    r"cancelamento.*24h",
+    r"karladelaliberaoftalmo",
+    r"52\.303\.729",
+)
+
+
+def _paciente_ja_definiu_convenio(ctx: Optional[dict]) -> bool:
+    """True se ctx.known tem convênio preenchido (aceito ou 'sem convênio')."""
+    if not ctx:
+        return False
+    known = ctx.get("known") or {}
+    conv = (known.get("convenio") or "").strip().lower()
+    # 'Não se aplica' = sem convênio
+    if not conv:
+        return False
+    return conv not in ("", "none", "null")
+
+
+def _texto_repergunta_convenio(text: str) -> bool:
+    if not text:
+        return False
+    baixo = text.lower()
+    return any(p in baixo for p in (
+        "convenio ou particular", "convênio ou particular",
+        "convenio ou sem convenio", "convênio ou sem convênio",
+        "por convenio ou", "por convênio ou",
+        "sera por convenio", "será por convênio",
+        "atendimento sera por", "atendimento será por",
+    ))
+
+
+def _texto_usa_palavra_particular(text: str) -> bool:
+    if not text:
+        return False
+    import re as _re
+    # "particular" como categoria de pagamento (NÃO como "consulta particular médica")
+    return bool(_re.search(r"\bparticular\b", text.lower()))
+
+
+def _paciente_perguntou_valor(inbound_text: Optional[str]) -> bool:
+    if not inbound_text:
+        return False
+    baixo = inbound_text.lower()
+    return any(p in baixo for p in (
+        "valor", "preço", "preco", "quanto", "custa",
+        "custo", "quanto é", "quanto e", "pix", "sinal", "r$",
+    ))
+
+
+def _texto_despeja_valor(text: str) -> bool:
+    if not text:
+        return False
+    import re as _re
+    baixo = text.lower()
+    return any(_re.search(p, baixo) for p in _C51_VALOR_PATTERNS)
+
+
+def _gerar_proxima_pergunta_sem_convenio(ctx: Optional[dict] = None) -> str:
+    """Reconhecimento curto + próxima pergunta (unidade ou preferência)."""
+    known = (ctx or {}).get("known") or {}
+    nome = (known.get("nome_contato") or "").split()[0] if known.get("nome_contato") else ""
+    saudacao = f"Anotado, {nome}." if nome else "Anotado."
+    if not known.get("unidade"):
+        return (
+            f"{saudacao} Qual unidade fica melhor pra vocês — "
+            "Asa Norte ou Águas Claras?"
+        )
+    return (
+        f"{saudacao} Qual dia da semana e turno funcionam melhor "
+        "pra vocês?"
+    )
+
+
+def _substituir_particular_por_sem_convenio(text: str) -> str:
+    """Troca 'particular' por 'sem convênio' preservando estrutura."""
+    import re as _re
+    # Substituições ordenadas (mais especificas primeiro)
+    subs = [
+        (r"[Cc]onvênio ou [Pp]articular", "convênio ou sem convênio"),
+        (r"[Cc]onvenio ou [Pp]articular", "convênio ou sem convênio"),
+        (r"[Pp]articular:", "Sem convênio:"),
+        (r"por [Pp]articular", "sem convênio"),
+        (r"no [Pp]articular", "sem convênio"),
+        (r"como [Pp]articular", "sem convênio"),
+        (r"\b[Pp]articular\b", "sem convênio"),
+    ]
+    out = text
+    for pat, rep in subs:
+        out = _re.sub(pat, rep, out)
+    return out
+
+
+# ────────────────────────────────────────────────────────────────────────
 # Bug C-50 (02/07/2026 noite, lead 24243754 Ani/Ysis)
 # ────────────────────────────────────────────────────────────────────────
 # Paciente Ani forneceu "Ysis Hellena, 12/09/2020". Lia respondeu
@@ -2407,6 +2515,53 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """
     if not text:
         return text
+
+    # === FILTRO C-51 SEMPRE-ON (Fábio 03/07/2026 madrugada, lead 24243754 Ani) ===
+    # 4 fixes simultâneos:
+    # 1. Nunca reperguntar convênio se ctx.known.convenio já preenchido
+    # 2. Nunca escrever "particular" — substitui por "sem convênio"
+    # 3. Nunca despejar valor/Pix se paciente NÃO perguntou
+    # 4. Um assunto por turno (regra E1 reforçada)
+    _inbound_c51 = (ctx or {}).get("inbound_text") or (ctx or {}).get(
+        "last_inbound_text"
+    ) or ""
+
+    # Sub-fix 1 — Reperguntou convênio já definido
+    if (
+        _paciente_ja_definiu_convenio(ctx)
+        and _texto_repergunta_convenio(text)
+    ):
+        log.warning(
+            "[FILTRO C-51.1] Repergunta convenio bloqueada. "
+            "convenio_ctx=%r texto=%r",
+            ((ctx or {}).get("known") or {}).get("convenio"),
+            text[:200],
+        )
+        return _gerar_proxima_pergunta_sem_convenio(ctx)
+
+    # Sub-fix 3 — Despejou valor sem paciente perguntar
+    if (
+        _texto_despeja_valor(text)
+        and not _paciente_perguntou_valor(_inbound_c51)
+    ):
+        log.warning(
+            "[FILTRO C-51.3] Despejo de valor bloqueado. "
+            "inbound=%r texto=%r",
+            _inbound_c51[:120], text[:200],
+        )
+        # Substitui por continuação do fluxo (avança sem falar de valor)
+        return _gerar_proxima_pergunta_sem_convenio(ctx)
+
+    # Sub-fix 2 — Substitui "particular" por "sem convênio"
+    # (aplicado depois dos outros, faz cirurgia no texto)
+    if _texto_usa_palavra_particular(text):
+        _texto_antes = text
+        text = _substituir_particular_por_sem_convenio(text)
+        log.warning(
+            "[FILTRO C-51.2] Palavra 'particular' substituida. "
+            "antes=%r depois=%r",
+            _texto_antes[:150], text[:150],
+        )
 
     # === FILTRO C-50 SEMPRE-ON (Fábio 02/07/2026 noite, lead 24243754 Ani/Ysis) ===
     # Se paciente forneceu dado estruturado (data/nome/CPF) no inbound
