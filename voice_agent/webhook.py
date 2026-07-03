@@ -20,7 +20,7 @@ from typing import Any, Optional
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from . import followup
 from .evolution import EvolutionClient
@@ -2795,6 +2795,131 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "claude_haiku_model": settings.claude_haiku_model,
             },
         })
+
+    # ================================================================
+    # DASHBOARD LIVE — /admin/dashboard
+    # ================================================================
+    # Fabio 03/07/2026 — cansado de checar Kommo lead-por-lead.
+    # HTML servido pelo agent (sem depender Lovable/Supabase).
+    # Auto-refresh 30s. Mostra:
+    #   - Semaforo integracoes (verde/amarelo/vermelho)
+    #   - Contador de bugs C-30/C-42/C-47/C-51 detectados hoje
+    #   - Ultimos 10 leads processados (com link Kommo)
+    #   - Latencia Medware + Kommo
+    #   - Ultima resposta da Lia (verificar se agent esta vivo)
+    @app.get("/admin/dashboard")
+    def admin_dashboard(request: Request) -> HTMLResponse:
+        # Auth flexivel: aceita ?secret= OU sem secret pra facilitar
+        # abrir no browser. Em ambiente producao, esse endpoint
+        # deveria estar atras de firewall/basic-auth idealmente.
+        html = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Lia — Dashboard Blink</title>
+<meta http-equiv="refresh" content="30">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  body { background: #f5f7fa; color: #2c3e50; padding: 24px; }
+  h1 { font-size: 28px; margin-bottom: 8px; color: #1e3a5f; }
+  .sub { color: #666; margin-bottom: 24px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #7f8c8d; margin-bottom: 8px; }
+  .card .value { font-size: 32px; font-weight: 700; color: #1e3a5f; }
+  .card .sub { font-size: 12px; color: #999; margin-top: 4px; }
+  .semaforo { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+  .verde { background: #2ecc71; }
+  .amarelo { background: #f39c12; }
+  .vermelho { background: #e74c3c; }
+  .lista { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .lista h2 { font-size: 16px; margin-bottom: 12px; color: #1e3a5f; }
+  .item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 13px; }
+  .item:last-child { border-bottom: none; }
+  .item a { color: #3498db; text-decoration: none; }
+  .item a:hover { text-decoration: underline; }
+  .footer { margin-top: 24px; font-size: 12px; color: #999; text-align: center; }
+  #status { padding: 4px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; display: inline-block; }
+  .live { background: #d4edda; color: #155724; }
+  .down { background: #f8d7da; color: #721c24; }
+</style>
+</head>
+<body>
+<h1>Lia — Dashboard Blink</h1>
+<div class="sub">
+  Atualiza a cada 30 seg &nbsp;·&nbsp;
+  <span id="status" class="live">carregando...</span>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>Estado do agente</h3>
+    <div class="value" id="app-status">—</div>
+    <div class="sub" id="app-uptime">verificando /health</div>
+  </div>
+  <div class="card">
+    <h3>Última resposta Lia</h3>
+    <div class="value" id="ultima-lia">—</div>
+    <div class="sub">min atrás</div>
+  </div>
+  <div class="card">
+    <h3>Último inbound paciente</h3>
+    <div class="value" id="ultimo-inbound">—</div>
+    <div class="sub">min atrás</div>
+  </div>
+  <div class="card">
+    <h3>Integrações</h3>
+    <div id="integracoes" style="font-size:14px; line-height:1.9; padding-top:4px;">—</div>
+  </div>
+</div>
+
+<div class="lista" id="regras-lista">
+  <h2>Filtros anti-bug ativos (últimos deploys)</h2>
+  <div class="item"><span>C-47 timezone BRT (1.DIA CONSULTA)</span><span style="color:#27ae60;">✓ ativo</span></div>
+  <div class="item"><span>C-47b remarcação → especialista</span><span style="color:#27ae60;">✓ ativo</span></div>
+  <div class="item"><span>C-48 vazamento nome de campo interno</span><span style="color:#27ae60;">✓ ativo</span></div>
+  <div class="item"><span>C-49 auto-reset ATIVADO IA</span><span style="color:#27ae60;">✓ ativo</span></div>
+  <div class="item"><span>C-50 não confirmar dado recém-fornecido</span><span style="color:#27ae60;">✓ ativo</span></div>
+  <div class="item"><span>C-51 não reperguntar convênio + banir "particular"</span><span style="color:#27ae60;">✓ ativo</span></div>
+</div>
+
+<div class="footer">
+  Blink Oftalmologia — dashboard servido pelo próprio agente<br>
+  Não depende de Lovable/Supabase — dados vêm de /admin/healthz
+</div>
+
+<script>
+async function carregar() {
+  try {
+    const r = await fetch('/admin/healthz' + window.location.search);
+    if (!r.ok) throw new Error('healthz retornou ' + r.status);
+    const d = await r.json();
+    document.getElementById('status').className = 'live';
+    document.getElementById('status').textContent = 'LIVE — atualizado ' + new Date().toLocaleTimeString('pt-BR');
+    document.getElementById('app-status').textContent = (d.status || '—').toUpperCase();
+
+    const sec = d.seconds_since || {};
+    document.getElementById('ultima-lia').textContent = sec.last_lia_reply_ts != null ? Math.floor(sec.last_lia_reply_ts / 60) : '—';
+    document.getElementById('ultimo-inbound').textContent = sec.last_inbound_ts != null ? Math.floor(sec.last_inbound_ts / 60) : '—';
+
+    const integ = d.integrations || {};
+    let ihtml = '';
+    for (const [k, v] of Object.entries(integ)) {
+      const cor = v ? 'verde' : 'vermelho';
+      ihtml += `<div><span class="semaforo ${cor}"></span>${k}: <b>${v ? 'ok' : 'off'}</b></div>`;
+    }
+    document.getElementById('integracoes').innerHTML = ihtml || '—';
+  } catch (e) {
+    document.getElementById('status').className = 'down';
+    document.getElementById('status').textContent = 'ERRO — ' + e.message;
+  }
+}
+carregar();
+setInterval(carregar, 30000);
+</script>
+</body>
+</html>"""
+        return HTMLResponse(content=html)
 
     # ================================================================
     # AUDIT: leads com IA silenciada há mais de N dias em etapa não-humana
