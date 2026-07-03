@@ -2255,6 +2255,75 @@ def _gerar_pre_reserva_10min(ctx: Optional[dict] = None) -> str:
 
 
 # ────────────────────────────────────────────────────────────────────────
+# Bug C-50 (02/07/2026 noite, lead 24243754 Ani/Ysis)
+# ────────────────────────────────────────────────────────────────────────
+# Paciente Ani forneceu "Ysis Hellena, 12/09/2020". Lia respondeu
+# "So pra confirmar — a data e 12 de setembro de 2020, certo?".
+# Redundancia desnecessaria (a Lia ja gravou o dado no campo Kommo).
+# Regra Fabio: NUNCA pedir confirmacao de dado recem-fornecido.
+# ────────────────────────────────────────────────────────────────────────
+_C50_PADROES_CONFIRMACAO_REDUNDANTE = (
+    "so pra confirmar", "só pra confirmar",
+    "so para confirmar", "só para confirmar",
+    "so pra ter certeza", "só pra ter certeza",
+    "so para ter certeza", "só para ter certeza",
+    "confirma que e", "confirma que é",
+    "e isso mesmo", "é isso mesmo",
+    "ficou correto", "esta correto", "está correto",
+    "certo? e", "certo? é",
+    "ta certo", "tá certo",
+    "posso confirmar", "vou confirmar então",
+    "so confirmando", "só confirmando",
+)
+
+# Marcas que sugerem que o dado FOI fornecido no turno anterior.
+# (Se o inbound do paciente tem numero, data ou palavra-chave de dado,
+# a Lia NAO deve repetir confirmacao no proximo turn.)
+_C50_MARCAS_DADO_INBOUND = (
+    # Datas
+    r"\d{1,2}/\d{1,2}/\d{2,4}",
+    r"\d{1,2}\s*(de\s+)?(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)",
+    # CPF, RG, telefone (numeros longos)
+    r"\d{9,11}",
+    # Nome completo (2+ palavras capitalizadas)
+    r"[A-ZÁ-Ú][a-zá-ú]+\s+[A-ZÁ-Ú][a-zá-ú]+",
+)
+
+
+def _paciente_forneceu_dado_no_turno(inbound_text: Optional[str]) -> bool:
+    """True se inbound tem indicios de dado estruturado (data/nome/CPF)."""
+    if not inbound_text or len(inbound_text.strip()) < 3:
+        return False
+    import re as _re
+    for padrao in _C50_MARCAS_DADO_INBOUND:
+        if _re.search(padrao, inbound_text):
+            return True
+    return False
+
+
+def _texto_pede_confirmacao_redundante(text: str) -> bool:
+    if not text:
+        return False
+    baixo = text.lower()
+    return any(p in baixo for p in _C50_PADROES_CONFIRMACAO_REDUNDANTE)
+
+
+def _gerar_reconhecimento_curto_e_avanca(ctx: Optional[dict] = None) -> str:
+    """Frase curta de reconhecimento + prox pergunta contextual do FSM."""
+    known = (ctx or {}).get("known") or {}
+    nome = (known.get("nome_contato") or "").split()[0] if known.get("nome_contato") else ""
+    abertura = f"Anotado{',' if nome else '.'} {nome}." if nome else "Anotado."
+    # Prox pergunta depende do que ja tem
+    if not known.get("convenio"):
+        return f"{abertura} O atendimento sera por convenio ou sem convenio?"
+    if not known.get("unidade"):
+        return f"{abertura} Qual unidade fica melhor — Asa Norte ou Aguas Claras?"
+    if not known.get("preferencia_dia") and not known.get("preferencia_turno"):
+        return f"{abertura} Qual dia da semana e turno funcionam melhor pra voce?"
+    return f"{abertura} Vou verificar os horarios disponiveis."
+
+
+# ────────────────────────────────────────────────────────────────────────
 # Bug C-47 (02/07/2026, lead 22838100 Manoela Dantas)
 # ────────────────────────────────────────────────────────────────────────
 # 1. Lia informou "consulta 10/07 às 19:30" — timezone bug já corrigido
@@ -2338,6 +2407,24 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """
     if not text:
         return text
+
+    # === FILTRO C-50 SEMPRE-ON (Fábio 02/07/2026 noite, lead 24243754 Ani/Ysis) ===
+    # Se paciente forneceu dado estruturado (data/nome/CPF) no inbound
+    # E Lia tenta pedir confirmação redundante → substitui por reconhecimento
+    # curto + próxima pergunta contextual.
+    _inbound_c50 = (ctx or {}).get("inbound_text") or (ctx or {}).get(
+        "last_inbound_text"
+    ) or ""
+    if (
+        _paciente_forneceu_dado_no_turno(_inbound_c50)
+        and _texto_pede_confirmacao_redundante(text)
+    ):
+        log.warning(
+            "[FILTRO C-50] Confirmacao redundante bloqueada. "
+            "inbound=%r texto=%r",
+            _inbound_c50[:120], text[:200],
+        )
+        return _gerar_reconhecimento_curto_e_avanca(ctx)
 
     # === FILTRO C-48 SEMPRE-ON (Fábio 02/07/2026, lead 21259287 Samuel) ===
     # Lia vazou "(data no campo 1.DIA CONSULTA)" pro paciente. Proibido
