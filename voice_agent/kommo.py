@@ -1020,6 +1020,28 @@ class KommoClient:
             add_datetime(
                 _FIELD_TS_HUMANO, fields.get("ts_ultima_msg_humano"),
             )
+        # ── JANELA 24H (observabilidade do prazo WhatsApp, 05/07/2026) ────
+        # ÚLTIMA MENS PACIENTE (date_time) + JANELA 24H (select derivado).
+        # Guardado por id>0: fica inerte até os campos existirem no Kommo.
+        from voice_agent.campos_acompanhamento import (
+            FIELD_TS_ULTIMA_MSG_PACIENTE as _FIELD_TS_PACIENTE,
+            FIELD_JANELA_24H as _FIELD_JANELA_24H,
+        )
+        if _FIELD_TS_PACIENTE:
+            add_datetime(_FIELD_TS_PACIENTE, fields.get("ts_ultima_msg_paciente"))
+        _janela_id, _janela_enums = _FIELD_JANELA_24H
+        _janela_val = fields.get("janela_24h")
+        if _janela_id and _janela_val:
+            _enum = _pick_enum(_janela_enums, _janela_val)
+            if _enum:  # >0 → só grava com enum real (placeholder=0 é ignorado)
+                cfs.append(
+                    {"field_id": _janela_id, "values": [{"enum_id": _enum}]}
+                )
+            else:
+                log.warning(
+                    "Kommo: JANELA 24H valor '%s' sem enum_id configurado",
+                    _janela_val,
+                )
         # COD-AGENDAMENTO — preenchido apos gravar consulta no Medware via API.
         cod_ag = fields.get("cod_agendamento")
         if cod_ag:

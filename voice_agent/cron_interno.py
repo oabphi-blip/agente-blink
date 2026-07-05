@@ -292,6 +292,118 @@ def _worker_renovacao_loop(*, pipeline, stop_event: threading.Event) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Worker: janela_24h_tick (observabilidade do prazo WhatsApp, 05/07/2026)
+# Recalcula o campo JANELA 24H (aberta/expirando/fechada) pra cada lead
+# ativo a partir do último inbound gravado em Redis. Roda 24h (uma janela
+# fecha a qualquer hora), sem gate de horário comercial.
+# Toggle: JANELA24H_TICK_ENABLED (default ON — inerte até os campos Kommo
+# existirem, pois update_lead_fields ignora field_id/enum_id == 0).
+# ---------------------------------------------------------------------------
+
+def _janela24h_tick_enabled() -> bool:
+    raw = (os.environ.get("JANELA24H_TICK_ENABLED") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off", "")
+
+
+def _intervalo_janela24h_seg() -> int:
+    raw = (os.environ.get("JANELA24H_CADA_MIN") or "15").strip()
+    try:
+        return max(int(float(raw) * 60), 60)
+    except ValueError:
+        return 900
+
+
+def _executar_janela_24h_varredura(*, pipeline, dry_run: bool) -> dict:
+    """Itera leads ativos, lê o último inbound em Redis e atualiza o campo
+    JANELA 24H no Kommo (aberta/expirando/fechada).
+
+    Retorna {ok, varridos, atualizados, sem_ts, erros, dry_run}.
+    """
+    from voice_agent import campos_acompanhamento as _ca
+
+    kommo = getattr(pipeline, "kommo", None)
+    if kommo is None:
+        return {"ok": False, "razao": "sem_kommo"}
+    redis_cli = getattr(pipeline, "_redis", None)
+    if redis_cli is None:
+        return {"ok": False, "razao": "sem_redis"}
+
+    limite = int(os.environ.get("JANELA24H_LIMITE_LEADS") or "200")
+    varridos = atualizados = sem_ts = erros = 0
+
+    try:
+        leads = []
+        if hasattr(kommo, "list_active_leads"):
+            leads = kommo.list_active_leads(pipeline_id=8601819, limit=limite) or []
+        elif hasattr(kommo, "list_stale_leads"):
+            leads = kommo.list_stale_leads(pipeline_id=8601819, limit=limite) or []
+        else:
+            return {"ok": False, "razao": "kommo_sem_list_method"}
+
+        for lead in leads:
+            if not isinstance(lead, dict):
+                continue
+            lead_id = lead.get("id")
+            if not lead_id:
+                continue
+            varridos += 1
+            ultima_ts = None
+            try:
+                raw = redis_cli.get(
+                    f"blink:janela:ultima_msg_paciente:{lead_id}"
+                )
+                ultima_ts = float(raw) if raw else None
+            except Exception:  # noqa: BLE001
+                ultima_ts = None
+            if ultima_ts is None:
+                sem_ts += 1
+                continue
+            campos = _ca.campos_janela_24h(ultima_ts)
+            if not campos:
+                sem_ts += 1
+                continue
+            if dry_run:
+                atualizados += 1
+                continue
+            try:
+                kommo.update_lead_fields(int(lead_id), campos)
+                atualizados += 1
+            except Exception as exc:  # noqa: BLE001
+                erros += 1
+                log.warning("[CRON janela24h] update lead=%s falhou: %s",
+                            lead_id, exc)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "razao": "excecao", "erro": str(exc)[:300]}
+
+    return {
+        "ok": True, "dry_run": dry_run, "varridos": varridos,
+        "atualizados": atualizados, "sem_ts": sem_ts, "erros": erros,
+    }
+
+
+def _worker_janela_24h_loop(*, pipeline, stop_event: threading.Event) -> None:
+    intervalo = _intervalo_janela24h_seg()
+    log.info("[CRON janela24h] worker iniciado intervalo=%ss enabled=%s",
+             intervalo, _janela24h_tick_enabled())
+    if stop_event.wait(90):
+        return
+    while not stop_event.is_set():
+        if _janela24h_tick_enabled():
+            try:
+                # Observabilidade não-destrutiva (só carimba status da
+                # janela) → escreve sempre, independente do dry_run global
+                # do cron. Pra silenciar, use JANELA24H_TICK_ENABLED=0.
+                res = _executar_janela_24h_varredura(
+                    pipeline=pipeline, dry_run=False,
+                )
+                log.info("[CRON janela24h] %s", res)
+            except Exception as exc:  # noqa: BLE001
+                log.exception("[CRON janela24h] exceção no loop: %s", exc)
+        if stop_event.wait(intervalo):
+            return
+
+
+# ---------------------------------------------------------------------------
 # Worker: campanha semanal por categoria (task #218 — 04/06/2026)
 # Toggle: CAMPANHA_SEMANAL_ENABLED=1
 # Quando: segunda-feira (BRT) 9h, 1x por semana
@@ -1076,13 +1188,22 @@ def iniciar_cron(pipeline) -> dict:
     t10.start()
     _threads_iniciadas.append(t10)
 
+    # 05/07/2026: observabilidade JANELA 24H (15min, default ON)
+    t11 = threading.Thread(
+        target=_worker_janela_24h_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-janela24h",
+    )
+    t11.start()
+    _threads_iniciadas.append(t11)
+
     return {
         "started": True,
         "workers": [
             "classificar", "renovacao", "campanha_semanal",
             "alarmes_horarios", "replay_noturno", "reativar_ia",
             "auditoria_diaria", "synthetic_users", "error_budget",
-            "sync_templates_meta",
+            "sync_templates_meta", "janela24h",
         ],
         "dry_run": _dry_run_default(),
         "intervalo_classificar_seg": _intervalo_classificar_seg(),

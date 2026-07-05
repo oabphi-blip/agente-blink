@@ -942,6 +942,30 @@ class VoicePipeline:
                     phone, e,
                 )
 
+            # ── JANELA 24H (05/07/2026) ───────────────────────────────
+            # Este sync roda logo após o inbound do paciente, então agora
+            # ≈ timestamp do último inbound = quando a janela de 24h
+            # (re)abre. Carimba ÚLTIMA MENS PACIENTE + JANELA 24H no Kommo
+            # e grava o epoch no Redis (blink:janela:ultima_msg_paciente:*)
+            # — chave que o cron de renovação já lê mas que ninguém escrevia.
+            # A transição aberta→expirando→fechada durante o silêncio é
+            # recalculada pelo cron (janela_24h_tick), não aqui.
+            try:
+                from voice_agent import campos_acompanhamento as _caj
+                _in_ts = int(_time.time())
+                _r_j = getattr(self, "_redis", None)
+                if _r_j is not None:
+                    try:
+                        _r_j.set(
+                            f"blink:janela:ultima_msg_paciente:{lead_id}",
+                            _in_ts,
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                fields.update(_caj.campos_janela_24h(_in_ts))
+            except Exception as e:  # noqa: BLE001
+                log.warning("[JANELA24H] sync fail (%s): %s", phone, e)
+
             if fields:
                 self.kommo.update_lead_fields(lead_id, fields)
                 # Lead perdido por convênio não credenciado → fecha o card

@@ -81,6 +81,136 @@ FIELD_PROXIMA_ACAO = (1260858, {
     "agendar_proxima_consulta": 927100,
 })
 
+# ---------------------------------------------------------------------------
+# JANELA 24H — observabilidade do prazo pra fechar a janela do WhatsApp
+# ---------------------------------------------------------------------------
+# Origem: Fábio 05/07/2026 — pediu campo pra "observar o tempo restante para
+# fechar a janela de 24h" na lista ATENDE. A janela do WhatsApp conta a partir
+# do ÚLTIMO INBOUND do paciente; depois de 24h só template aprovado passa.
+#
+# 2 campos criados no Kommo (funil ATENDE):
+#   - ÚLTIMA MENS PACIENTE (date_time) → timestamp do último inbound.
+#   - JANELA 24H (select) → status derivado (aberta / expirando / fechada),
+#     recalculado periodicamente pelo cron pra transicionar durante o silêncio
+#     do paciente (é aí que a janela vai fechando, sem turno rodando).
+#
+# Field IDs + enum IDs criados via API Kommo em 05/07/2026:
+#   ÚLTIMA MENS PACIENTE (date_time) = 1260984
+#   JANELA 24H (select) = 1260986 → Aberta 927302 / Expirando 927304 /
+#                                    Fechada 927306
+# (Emoji nos labels foi removido pelo Kommo — labels em texto puro.)
+# Override por env pra teste/rollout.
+try:
+    FIELD_TS_ULTIMA_MSG_PACIENTE = int(
+        _os.getenv("BLINK_FIELD_TS_PACIENTE") or "1260984"
+    )
+except ValueError:
+    FIELD_TS_ULTIMA_MSG_PACIENTE = 1260984
+
+# (field_id, {valor_semantico: enum_id})
+try:
+    _FIELD_JANELA_24H_ID = int(
+        _os.getenv("BLINK_FIELD_JANELA_24H") or "1260986"
+    )
+except ValueError:
+    _FIELD_JANELA_24H_ID = 1260986
+FIELD_JANELA_24H = (_FIELD_JANELA_24H_ID, {
+    "aberta": 927302,
+    "expirando": 927304,
+    "fechada": 927306,
+})
+
+# Limiares (segundos). Reutiliza a mesma régua do motor de renovação:
+#   < 22h   → aberta   (🟢) — tem folga
+#   22h-24h → expirando (🟠) — < 2h pra fechar, hora de renovar
+#   >= 24h  → fechada  (🔴) — só template aprovado agora
+_JANELA_TOTAL_SEG = 24 * 60 * 60
+_JANELA_EXPIRANDO_SEG = 22 * 60 * 60
+
+JANELA_ABERTA = "aberta"
+JANELA_EXPIRANDO = "expirando"
+JANELA_FECHADA = "fechada"
+
+
+def classificar_janela_24h(
+    ultima_msg_paciente_ts: int | float | datetime | None,
+    agora: int | float | datetime | None = None,
+    *,
+    total_seg: int = _JANELA_TOTAL_SEG,
+    expirando_seg: int = _JANELA_EXPIRANDO_SEG,
+) -> str | None:
+    """Classifica o estado da janela de 24h a partir do último inbound.
+
+    Retorna "aberta" / "expirando" / "fechada", ou None se não há
+    timestamp de inbound (paciente nunca falou → janela não se aplica).
+    """
+    ultima = _epoch(ultima_msg_paciente_ts)
+    if ultima is None:
+        return None
+    agora_epoch = _epoch(agora)
+    if agora_epoch is None:
+        agora_epoch = datetime.now(timezone.utc).timestamp()
+    delta = agora_epoch - ultima
+    if delta < 0:
+        delta = 0
+    if delta >= total_seg:
+        return JANELA_FECHADA
+    if delta >= expirando_seg:
+        return JANELA_EXPIRANDO
+    return JANELA_ABERTA
+
+
+def segundos_restantes_janela(
+    ultima_msg_paciente_ts: int | float | datetime | None,
+    agora: int | float | datetime | None = None,
+    *,
+    total_seg: int = _JANELA_TOTAL_SEG,
+) -> int | None:
+    """Segundos que faltam pra fechar a janela (0 se já fechou, None se n/a)."""
+    ultima = _epoch(ultima_msg_paciente_ts)
+    if ultima is None:
+        return None
+    agora_epoch = _epoch(agora)
+    if agora_epoch is None:
+        agora_epoch = datetime.now(timezone.utc).timestamp()
+    restante = int(total_seg - (agora_epoch - ultima))
+    return max(restante, 0)
+
+
+def campos_janela_24h(
+    ultima_msg_paciente_ts: int | float | datetime | None,
+    agora: int | float | datetime | None = None,
+) -> dict[str, object]:
+    """Monta as chaves pra `update_lead_fields()` referentes à janela.
+
+    Devolve dict (vazio se sem inbound):
+      - ts_ultima_msg_paciente: int (epoch) — carimba o campo date_time
+      - janela_24h: str ("aberta"/"expirando"/"fechada") — status derivado
+    """
+    ts = _epoch(ultima_msg_paciente_ts)
+    if ts is None:
+        return {}
+    status = classificar_janela_24h(ultima_msg_paciente_ts, agora)
+    out: dict[str, object] = {"ts_ultima_msg_paciente": int(ts)}
+    if status:
+        out["janela_24h"] = status
+    return out
+
+
+def _epoch(ts: int | float | datetime | None) -> float | None:
+    """Converte int/float/datetime → epoch (segundos). None se inválido."""
+    if ts is None:
+        return None
+    if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts.timestamp()
+    try:
+        return float(ts)
+    except (TypeError, ValueError):
+        return None
+
+
 # Fuso horário Brasília (UTC-3)
 _TZ_BR = timezone(timedelta(hours=-3))
 

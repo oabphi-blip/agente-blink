@@ -3102,6 +3102,32 @@ setInterval(carregar, 30000);
         })
 
     # ================================================================
+    # JANELA 24H — recalcula status da janela WhatsApp por lead ativo
+    # ================================================================
+    # Observabilidade do prazo de 24h (05/07/2026). Recalcula o campo
+    # JANELA 24H (aberta/expirando/fechada) a partir do último inbound
+    # gravado em Redis. Mesmo trabalho do worker cron janela24h — exposto
+    # pra trigger manual / cron externo (Easypanel).
+    # GET|POST /admin/janela-24h-tick?secret=...&dry_run=1
+    @app.post("/admin/janela-24h-tick")
+    @app.get("/admin/janela-24h-tick")
+    def admin_janela_24h_tick(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        dry = request.query_params.get("dry_run", "0") == "1"
+        try:
+            from voice_agent.cron_interno import _executar_janela_24h_varredura
+            res = _executar_janela_24h_varredura(pipeline=pipeline, dry_run=dry)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"erro": f"tick falhou: {e}"}, status_code=500)
+        return JSONResponse(res)
+
+    # ================================================================
     # PILAR #5: canary lead diário — fluxo completo ponta-a-ponta
     # ================================================================
     # POST /admin/canary-tick?secret=...&dry_run=1&alertar_sempre=0
