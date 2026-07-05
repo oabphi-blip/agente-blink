@@ -236,3 +236,289 @@ def decidir_estrategia(
         motivo=razao or "razao_desconhecida",
         detalhe=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Templates PROX_CONSULTA aprovados 04/07/2026 — retorno programado por paciente
+# ---------------------------------------------------------------------------
+# Contexto (Fábio 04/07/2026 22h BRT):
+#   - No Kommo, cada lead pode ter até 6 pacientes (1.PACIENTE .. 6.PACIENTE)
+#     replicando os campos 1.DIA CONSULTA, 1.MES PROX CONSULTA, 1.UNIDADE etc.
+#     Isso cobre família (mãe + pai + 4 filhos, por exemplo).
+#
+#   - Cadências de retorno programadas pela Dra. Karla:
+#       6 meses  → pediátrico 0-2 anos, pós-op recente
+#       anual    → pediátrico 3+ anos, adulto rotina
+#
+#   - Meta rejeita templates com body idêntico entre variantes numeradas
+#     01..06 (INVALID_FORMAT). Por isso submetemos UM template genérico por
+#     cadência. O dispatcher itera sobre os 6 pacientes do lead e dispara
+#     N vezes com body_params diferentes.
+#
+# Estrutura do body (7 variáveis, mesma ordem nos 2 templates):
+#   {{1}} nome_contato        — quem responde WhatsApp (mãe/pai/o próprio paciente)
+#   {{2}} nome_paciente       — nome de UM paciente específico do lead
+#   {{3}} data_ultima_consulta — 1.DIA CONSULTA (dd/mm/aaaa)
+#   {{4}} data_prox_prevista  — 1.MES PROX CONSULTA / data-alvo (dd/mm/aaaa)
+#   {{5}} unidade             — "Asa Norte" | "Águas Claras"
+#   {{6}} slot_1              — "12/01/2026 às 09h" (mais próximo)
+#   {{7}} slot_2              — "15/01/2026 às 14h" (alternativa)
+#
+# Aprovação Meta confirmada via Graph API em 04/07/2026 22h:
+#   APPROVED blink_prox_consulta_6m_karla_v3
+#   APPROVED blink_prox_consulta_1ano_karla_v3
+
+TEMPLATE_PROX_CONSULTA_6M_KARLA_NAME = os.environ.get(
+    "WHATSAPP_TEMPLATE_PROX_CONSULTA_6M_KARLA_NAME",
+    "blink_prox_consulta_6m_karla_v3",
+)
+
+TEMPLATE_PROX_CONSULTA_1ANO_KARLA_NAME = os.environ.get(
+    "WHATSAPP_TEMPLATE_PROX_CONSULTA_1ANO_KARLA_NAME",
+    "blink_prox_consulta_1ano_karla_v3",
+)
+
+_PARAMS_PROX_CONSULTA = [
+    "nome_contato",
+    "nome_paciente",
+    "data_ultima_consulta",
+    "data_prox_prevista",
+    "unidade",
+    "slot_1",
+    "slot_2",
+]
+
+TEMPLATE_PROX_CONSULTA_6M_KARLA = TemplateMeta(
+    template_name=TEMPLATE_PROX_CONSULTA_6M_KARLA_NAME,
+    language_code=LANGUAGE_BR,
+    descricao="Retorno programado 6 meses — Dra. Karla (pediátrico 0-2a, pós-op)",
+    parametros_body=list(_PARAMS_PROX_CONSULTA),
+    botoes_quick_reply=[],
+)
+
+TEMPLATE_PROX_CONSULTA_1ANO_KARLA = TemplateMeta(
+    template_name=TEMPLATE_PROX_CONSULTA_1ANO_KARLA_NAME,
+    language_code=LANGUAGE_BR,
+    descricao="Retorno programado anual — Dra. Karla (pediátrico 3+, adulto rotina)",
+    parametros_body=list(_PARAMS_PROX_CONSULTA),
+    botoes_quick_reply=[],
+)
+
+
+def _sanitizar_param(valor: str, max_chars: int = 120) -> str | None:
+    """Normaliza um parâmetro pra Cloud API.
+
+    Cloud API rejeita:
+      - vazio/None
+      - quebras de linha (\\n, \\r, \\t)
+      - tab
+
+    Aceita:
+      - texto plano
+      - emojis
+      - números (converte pra str)
+
+    Trunca em max_chars pra evitar HTTP 400.
+    """
+    if valor is None:
+        return None
+    txt = str(valor).strip()
+    if not txt:
+        return None
+    # Substitui quebras/tabs por espaço; colapsa espaços múltiplos.
+    txt = " ".join(txt.replace("\n", " ").replace("\r", " ").replace("\t", " ").split())
+    if not txt:
+        return None
+    return txt[:max_chars]
+
+
+def build_template_prox_consulta(
+    *,
+    to_telefone: str,
+    cadencia: str,          # "6m" ou "1ano"
+    nome_contato: str,
+    nome_paciente: str,
+    data_ultima_consulta: str,
+    data_prox_prevista: str,
+    unidade: str,
+    slot_1: str,
+    slot_2: str,
+    template_name: str | None = None,
+    language_code: str = LANGUAGE_BR,
+) -> dict | None:
+    """Payload pra POST /v22.0/{phone_number_id}/messages usando os 2 templates aprovados.
+
+    Retorna None se:
+      - telefone inválido
+      - cadência não em {"6m","1ano"}
+      - qualquer parâmetro obrigatório vazio
+
+    Uso típico (dispatcher itera sobre N pacientes do lead):
+        for pac in lead.pacientes_elegiveis(cadencia="6m"):
+            payload = build_template_prox_consulta(
+                to_telefone=lead.contato_telefone,
+                cadencia="6m",
+                nome_contato=lead.nome_contato,
+                nome_paciente=pac.nome,
+                data_ultima_consulta=pac.dia_consulta_fmt,
+                data_prox_prevista=pac.mes_prox_consulta_fmt,
+                unidade=pac.unidade,
+                slot_1=slots[0].fmt,
+                slot_2=slots[1].fmt,
+            )
+            if payload:
+                cloud_api.enviar(payload)
+    """
+    to_e164 = normalizar_telefone_e164(to_telefone)
+    if not to_e164:
+        return None
+
+    cad = (cadencia or "").strip().lower()
+    if cad in ("6m", "6meses", "6_meses", "6-meses"):
+        name = template_name or TEMPLATE_PROX_CONSULTA_6M_KARLA.template_name
+    elif cad in ("1ano", "anual", "1_ano", "1-ano", "12m"):
+        name = template_name or TEMPLATE_PROX_CONSULTA_1ANO_KARLA.template_name
+    else:
+        return None
+
+    valores = [
+        _sanitizar_param(nome_contato, max_chars=60),
+        _sanitizar_param(nome_paciente, max_chars=60),
+        _sanitizar_param(data_ultima_consulta, max_chars=20),
+        _sanitizar_param(data_prox_prevista, max_chars=20),
+        _sanitizar_param(unidade, max_chars=40),
+        _sanitizar_param(slot_1, max_chars=40),
+        _sanitizar_param(slot_2, max_chars=40),
+    ]
+    if any(v is None for v in valores):
+        return None
+
+    return {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_e164,
+        "type": "template",
+        "template": {
+            "name": name,
+            "language": {"code": language_code},
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": v} for v in valores],
+                }
+            ],
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Roteador: dado um lead com N pacientes, decidir quais têm retorno vencendo
+# ---------------------------------------------------------------------------
+
+from dataclasses import field
+from datetime import date, datetime, timedelta
+
+
+@dataclass
+class PacienteDoLead:
+    """Um dos até 6 pacientes de um lead Kommo."""
+    indice: int                              # 1..6 (1.PACIENTE, 2.PACIENTE, ...)
+    nome: str
+    dia_consulta: date | None                # 1.DIA CONSULTA (última realizada)
+    mes_prox_consulta: date | None           # 1.MES PROX CONSULTA (data-alvo)
+    unidade: str | None                      # "Asa Norte" | "Águas Claras"
+    cadencia: str | None = None              # "6m" | "1ano" | None (indefinido)
+
+
+@dataclass
+class DecisaoRetornoProgramado:
+    """Saída do roteador — 1 registro por paciente que precisa disparo agora."""
+    paciente: PacienteDoLead
+    cadencia_normalizada: str                # "6m" | "1ano"
+    template_name: str
+    dias_ate_prox: int                       # negativo = já venceu
+    motivo: str
+
+
+def _formatar_data_br(d: date | None) -> str:
+    if d is None:
+        return "-"
+    return d.strftime("%d/%m/%Y")
+
+
+def normalizar_cadencia(cadencia: str | None) -> str | None:
+    """Aceita variantes ('6 meses', '6m', 'anual', '1 ano', '12m') → '6m' | '1ano'."""
+    if not cadencia:
+        return None
+    c = str(cadencia).strip().lower().replace(" ", "").replace("-", "").replace("_", "")
+    if c in ("6m", "6meses", "6mes", "seis meses".replace(" ", ""), "seismeses"):
+        return "6m"
+    if c in ("1ano", "12m", "12meses", "anual", "umano"):
+        return "1ano"
+    return None
+
+
+def rotear_pacientes_para_disparo(
+    pacientes: list[PacienteDoLead],
+    *,
+    hoje: date | None = None,
+    janela_antecedencia_dias: int = 30,
+    janela_atraso_dias: int = 90,
+) -> list[DecisaoRetornoProgramado]:
+    """Dado até 6 pacientes de um lead, devolve os que precisam disparo agora.
+
+    Elegibilidade por paciente:
+      - cadencia normaliza pra "6m" ou "1ano"
+      - mes_prox_consulta existe
+      - hoje está entre (mes_prox - antecedencia) e (mes_prox + atraso)
+        → dispara "cedo" pra antecipar reagendamento sem constrangimento,
+          mas não muito tarde pra evitar batch retroativo antigo.
+
+    Ordena por dias_ate_prox crescente (urgência primeiro).
+
+    Não faz side effect — quem dispara é o dispatcher externo.
+    """
+    if hoje is None:
+        hoje = date.today()
+
+    decisoes: list[DecisaoRetornoProgramado] = []
+    for pac in pacientes:
+        cad = normalizar_cadencia(pac.cadencia)
+        if cad not in ("6m", "1ano"):
+            continue
+        if pac.mes_prox_consulta is None:
+            continue
+
+        delta = (pac.mes_prox_consulta - hoje).days
+        # cedo: até 30 dias antes da data-alvo
+        # atrasado: até 90 dias depois da data-alvo
+        if delta > janela_antecedencia_dias:
+            continue
+        if delta < -janela_atraso_dias:
+            continue
+
+        template = (
+            TEMPLATE_PROX_CONSULTA_6M_KARLA.template_name
+            if cad == "6m"
+            else TEMPLATE_PROX_CONSULTA_1ANO_KARLA.template_name
+        )
+
+        if delta < 0:
+            motivo = f"vencido_ha_{abs(delta)}_dias"
+        elif delta == 0:
+            motivo = "vence_hoje"
+        else:
+            motivo = f"vence_em_{delta}_dias"
+
+        decisoes.append(
+            DecisaoRetornoProgramado(
+                paciente=pac,
+                cadencia_normalizada=cad,
+                template_name=template,
+                dias_ate_prox=delta,
+                motivo=motivo,
+            )
+        )
+
+    decisoes.sort(key=lambda d: d.dias_ate_prox)
+    return decisoes
