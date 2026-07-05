@@ -5247,6 +5247,187 @@ setInterval(carregar, 30000);
             "nota_kommo_id": nota_kommo_id,
         })
 
+    @app.get("/admin/disparar-manual", response_class=HTMLResponse)
+    def admin_disparar_manual_form(request: Request) -> HTMLResponse:
+        """Página HTML pra atendente humana disparar template manual.
+
+        Sem terminal, sem .command, sem Cmd+V. Abre no browser (Mac/Windows/celular),
+        preenche 8 campos, aperta Enviar. Chama POST /admin/disparar-template/{lead_id}
+        que já existe.
+
+        Autenticação: passa ?secret=X na URL. O secret é injetado nos POSTs via JS.
+
+        Templates pré-carregados no dropdown:
+          - blink_prox_consulta_6m_karla_v3   (retorno 6 meses)
+          - blink_prox_consulta_1ano_karla_v3 (retorno anual)
+          - custom (digitar slug livre)
+
+        O form monta body_params como lista de 7 strings pra ordem definida no
+        template aprovado em templates_meta.py (nome_contato, nome_paciente,
+        data_ultima, data_prox_prevista, unidade, slot_1, slot_2).
+        """
+        secret_qs = request.query_params.get("secret") or ""
+        if settings.webhook_secret and secret_qs != settings.webhook_secret:
+            # 401 devolvendo HTML minimalista pra dar dica sem vazar detalhe
+            return HTMLResponse(
+                "<html><body style='font-family:sans-serif;padding:2rem'>"
+                "<h1>401 Unauthorized</h1>"
+                "<p>Adicione <code>?secret=SEU_TOKEN</code> na URL.</p>"
+                "</body></html>",
+                status_code=401,
+            )
+
+        html = """<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Disparo manual — Blink</title>
+<style>
+  :root { --brand:#0f3d6b; --ok:#0a8f2e; --err:#b3261e; --bg:#f6f7f9; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); font-family:-apple-system,Segoe UI,Roboto,sans-serif; color:#1a1a1a }
+  .wrap { max-width:720px; margin:2rem auto; padding:0 1rem }
+  h1 { color:var(--brand); font-size:1.4rem; margin:0 0 .3rem }
+  .sub { color:#555; font-size:.9rem; margin:0 0 1.2rem }
+  form { background:#fff; padding:1.2rem 1.4rem; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,.06) }
+  label { display:block; font-weight:600; margin:.9rem 0 .3rem; font-size:.9rem }
+  input, select { width:100%; padding:.6rem .75rem; border:1px solid #d0d5db; border-radius:6px; font-size:1rem; font-family:inherit }
+  input:focus, select:focus { outline:none; border-color:var(--brand) }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:.8rem }
+  @media (max-width:520px) { .row { grid-template-columns:1fr } }
+  .actions { display:flex; gap:.6rem; margin-top:1.2rem }
+  button { flex:1; padding:.75rem; border:0; border-radius:6px; font-size:1rem; font-weight:600; cursor:pointer }
+  .primary { background:var(--brand); color:#fff }
+  .primary:hover { background:#0d3157 }
+  .dry { background:#eef1f5; color:#333 }
+  .dry:hover { background:#e2e6ec }
+  #result { margin-top:1rem; padding:1rem; border-radius:8px; display:none; white-space:pre-wrap; font-size:.85rem; line-height:1.4 }
+  .ok  { background:#eaf7ee; color:var(--ok); border:1px solid #b7e1c1; display:block }
+  .err { background:#fbeaea; color:var(--err); border:1px solid #f2c1c1; display:block }
+  .hint { font-size:.78rem; color:#6c7280; margin-top:.2rem }
+  .divider { border:0; border-top:1px solid #ecedef; margin:1.2rem 0 .5rem }
+  .divider-lbl { color:#6c7280; font-size:.75rem; text-transform:uppercase; letter-spacing:.05em }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Disparo manual de template</h1>
+  <p class="sub">Escolha o lead, escolha o template, preencha os 7 campos e envie.</p>
+
+  <form id="f" onsubmit="return false">
+    <label for="lead_id">Lead ID (Kommo)</label>
+    <input id="lead_id" type="number" required placeholder="ex.: 24243754">
+    <div class="hint">Aparece na URL do Kommo: <code>/leads/detail/<b>24243754</b></code></div>
+
+    <label for="template">Template</label>
+    <select id="template" required>
+      <option value="blink_prox_consulta_6m_karla_v3">Próxima consulta 6 meses (Dra. Karla)</option>
+      <option value="blink_prox_consulta_1ano_karla_v3">Próxima consulta anual (Dra. Karla)</option>
+      <option value="__custom__">— outro (digitar slug) —</option>
+    </select>
+    <input id="template_custom" style="display:none;margin-top:.4rem" placeholder="slug exato do template no Meta">
+
+    <hr class="divider"><div class="divider-lbl">Variáveis do body — os 7 campos são preenchidos {{1}} até {{7}}</div>
+
+    <div class="row">
+      <div>
+        <label for="p1">{{1}} Nome do contato</label>
+        <input id="p1" required placeholder="Carol">
+      </div>
+      <div>
+        <label for="p2">{{2}} Nome do paciente</label>
+        <input id="p2" required placeholder="João">
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="p3">{{3}} Data última consulta</label>
+        <input id="p3" required placeholder="10/07/2025">
+      </div>
+      <div>
+        <label for="p4">{{4}} Data próxima prevista</label>
+        <input id="p4" required placeholder="10/01/2026">
+      </div>
+    </div>
+
+    <label for="p5">{{5}} Unidade</label>
+    <input id="p5" required placeholder="Asa Norte">
+
+    <div class="row">
+      <div>
+        <label for="p6">{{6}} Slot 1</label>
+        <input id="p6" required placeholder="12/01/2026 às 09h">
+      </div>
+      <div>
+        <label for="p7">{{7}} Slot 2</label>
+        <input id="p7" required placeholder="15/01/2026 às 14h">
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="dry" onclick="submit(true)">Simular (dry-run)</button>
+      <button class="primary" onclick="submit(false)">Enviar de verdade</button>
+    </div>
+  </form>
+
+  <div id="result"></div>
+</div>
+
+<script>
+const SECRET = new URLSearchParams(location.search).get('secret') || '';
+
+document.getElementById('template').addEventListener('change', (e) => {
+  document.getElementById('template_custom').style.display =
+    (e.target.value === '__custom__') ? 'block' : 'none';
+});
+
+async function submit(dryRun) {
+  const f = document.getElementById('f');
+  if (!f.reportValidity()) return;
+
+  const lead_id = document.getElementById('lead_id').value.trim();
+  let template = document.getElementById('template').value;
+  if (template === '__custom__') {
+    template = document.getElementById('template_custom').value.trim();
+    if (!template) { alert('Digite o slug do template'); return; }
+  }
+  const body_params = ['p1','p2','p3','p4','p5','p6','p7']
+    .map(id => document.getElementById(id).value.trim());
+
+  const box = document.getElementById('result');
+  box.className = '';
+  box.style.display = 'block';
+  box.textContent = 'Enviando…';
+
+  try {
+    const url = `/admin/disparar-template/${encodeURIComponent(lead_id)}?secret=${encodeURIComponent(SECRET)}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template, body_params, dry_run: dryRun }),
+    });
+    const txt = await r.text();
+    let data; try { data = JSON.parse(txt); } catch { data = txt; }
+    if (r.ok && (data.ok !== false)) {
+      box.className = 'ok';
+      box.textContent = (dryRun ? '[DRY-RUN] ' : '') +
+        'Enviado ✓\\n\\n' + JSON.stringify(data, null, 2);
+    } else {
+      box.className = 'err';
+      box.textContent = 'Falha (HTTP ' + r.status + ')\\n\\n' + JSON.stringify(data, null, 2);
+    }
+  } catch (e) {
+    box.className = 'err';
+    box.textContent = 'Erro de rede: ' + e;
+  }
+}
+</script>
+</body>
+</html>"""
+        return HTMLResponse(html)
+
     @app.get("/admin/disparar-template-get/{lead_id}")
     def admin_disparar_template_get(
         lead_id: int, request: Request,
