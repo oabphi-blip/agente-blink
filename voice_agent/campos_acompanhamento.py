@@ -90,15 +90,14 @@ FIELD_PROXIMA_ACAO = (1260858, {
 #
 # 2 campos criados no Kommo (funil ATENDE):
 #   - ÚLTIMA MENS PACIENTE (date_time) → timestamp do último inbound.
-#   - JANELA 24H (select) → status derivado (aberta / expirando / fechada),
-#     recalculado periodicamente pelo cron pra transicionar durante o silêncio
-#     do paciente (é aí que a janela vai fechando, sem turno rodando).
+#   - JANELA 24H (select) → CONTAGEM REGRESSIVA do tempo restante pra fechar
+#     a janela (Falta 20h … Falta 01h → Expirou), recalculada periodicamente
+#     pelo cron pra ir descendo durante o silêncio do paciente. Nova mensagem
+#     do paciente renova o timestamp → volta pro topo (Falta 20h).
 #
-# Field IDs + enum IDs criados via API Kommo em 05/07/2026:
+# Field IDs + enum IDs (API Kommo, 05-06/07/2026):
 #   ÚLTIMA MENS PACIENTE (date_time) = 1260984
-#   JANELA 24H (select) = 1260986 → Aberta 927302 / Expirando 927304 /
-#                                    Fechada 927306
-# (Emoji nos labels foi removido pelo Kommo — labels em texto puro.)
+#   JANELA 24H (select) = 1260986 (contagem regressiva, 9 opções)
 # Override por env pra teste/rollout.
 try:
     FIELD_TS_ULTIMA_MSG_PACIENTE = int(
@@ -107,7 +106,7 @@ try:
 except ValueError:
     FIELD_TS_ULTIMA_MSG_PACIENTE = 1260984
 
-# (field_id, {valor_semantico: enum_id})
+# (field_id, {rotulo_exato_kommo: enum_id})
 try:
     _FIELD_JANELA_24H_ID = int(
         _os.getenv("BLINK_FIELD_JANELA_24H") or "1260986"
@@ -115,21 +114,36 @@ try:
 except ValueError:
     _FIELD_JANELA_24H_ID = 1260986
 FIELD_JANELA_24H = (_FIELD_JANELA_24H_ID, {
-    "aberta": 927302,
-    "expirando": 927304,
-    "fechada": 927306,
+    "Falta 20h": 927302,
+    "Falta 15h": 927304,
+    "Falta 10h": 927306,
+    "Falta 05h": 927308,
+    "Falta 04h": 927310,
+    "Falta 03h": 927312,
+    "Falta 02h": 927314,
+    "Falta 01h": 927316,
+    "Expirou": 927318,
 })
 
-# Limiares (segundos). Reutiliza a mesma régua do motor de renovação:
-#   < 22h   → aberta   (🟢) — tem folga
-#   22h-24h → expirando (🟠) — < 2h pra fechar, hora de renovar
-#   >= 24h  → fechada  (🔴) — só template aprovado agora
 _JANELA_TOTAL_SEG = 24 * 60 * 60
-_JANELA_EXPIRANDO_SEG = 22 * 60 * 60
 
-JANELA_ABERTA = "aberta"
-JANELA_EXPIRANDO = "expirando"
-JANELA_FECHADA = "fechada"
+# Faixas de contagem regressiva — (piso_em_horas, rótulo), da maior pra menor.
+# Retorna o 1º rótulo cujo piso <= tempo restante. O piso 0 cobre <1h (mas >0).
+# Arredonda PRA BAIXO de propósito (ex.: restam 17h → "Falta 15h"): mostra
+# urgência conservadora. "Falta 20h" é também o estado logo após uma mensagem
+# nova do paciente (restante ~24h).
+_FAIXAS_JANELA: list[tuple[int, str]] = [
+    (20, "Falta 20h"),
+    (15, "Falta 15h"),
+    (10, "Falta 10h"),
+    (5, "Falta 05h"),
+    (4, "Falta 04h"),
+    (3, "Falta 03h"),
+    (2, "Falta 02h"),
+    (1, "Falta 01h"),
+    (0, "Falta 01h"),
+]
+JANELA_EXPIROU = "Expirou"
 
 
 def classificar_janela_24h(
@@ -137,27 +151,24 @@ def classificar_janela_24h(
     agora: int | float | datetime | None = None,
     *,
     total_seg: int = _JANELA_TOTAL_SEG,
-    expirando_seg: int = _JANELA_EXPIRANDO_SEG,
 ) -> str | None:
-    """Classifica o estado da janela de 24h a partir do último inbound.
+    """Rótulo de contagem regressiva a partir do último inbound.
 
-    Retorna "aberta" / "expirando" / "fechada", ou None se não há
+    Retorna "Falta 20h" … "Falta 01h" / "Expirou", ou None se não há
     timestamp de inbound (paciente nunca falou → janela não se aplica).
     """
-    ultima = _epoch(ultima_msg_paciente_ts)
-    if ultima is None:
+    restante = segundos_restantes_janela(
+        ultima_msg_paciente_ts, agora, total_seg=total_seg
+    )
+    if restante is None:
         return None
-    agora_epoch = _epoch(agora)
-    if agora_epoch is None:
-        agora_epoch = datetime.now(timezone.utc).timestamp()
-    delta = agora_epoch - ultima
-    if delta < 0:
-        delta = 0
-    if delta >= total_seg:
-        return JANELA_FECHADA
-    if delta >= expirando_seg:
-        return JANELA_EXPIRANDO
-    return JANELA_ABERTA
+    if restante <= 0:
+        return JANELA_EXPIROU
+    restante_h = restante / 3600.0
+    for piso, rotulo in _FAIXAS_JANELA:
+        if restante_h >= piso:
+            return rotulo
+    return JANELA_EXPIROU
 
 
 def segundos_restantes_janela(
@@ -185,7 +196,7 @@ def campos_janela_24h(
 
     Devolve dict (vazio se sem inbound):
       - ts_ultima_msg_paciente: int (epoch) — carimba o campo date_time
-      - janela_24h: str ("aberta"/"expirando"/"fechada") — status derivado
+      - janela_24h: str ("Falta 20h" … "Expirou") — contagem regressiva
     """
     ts = _epoch(ultima_msg_paciente_ts)
     if ts is None:

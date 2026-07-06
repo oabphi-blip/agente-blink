@@ -329,7 +329,7 @@ def _executar_janela_24h_varredura(*, pipeline, dry_run: bool) -> dict:
         return {"ok": False, "razao": "sem_redis"}
 
     limite = int(os.environ.get("JANELA24H_LIMITE_LEADS") or "200")
-    varridos = atualizados = sem_ts = erros = 0
+    varridos = atualizados = sem_ts = erros = sem_mudanca = 0
 
     try:
         leads = []
@@ -362,12 +362,29 @@ def _executar_janela_24h_varredura(*, pipeline, dry_run: bool) -> dict:
             if not campos:
                 sem_ts += 1
                 continue
+            # Grava só quando o rótulo MUDA de faixa — evita reescrever o
+            # mesmo valor a cada varredura (economia de chamadas Kommo).
+            novo_rotulo = campos.get("janela_24h")
+            cache_key = f"blink:janela:rotulo:{lead_id}"
+            try:
+                atual = redis_cli.get(cache_key)
+                if isinstance(atual, bytes):
+                    atual = atual.decode("utf-8", "ignore")
+            except Exception:  # noqa: BLE001
+                atual = None
+            if atual is not None and atual == novo_rotulo:
+                sem_mudanca += 1
+                continue
             if dry_run:
                 atualizados += 1
                 continue
             try:
                 kommo.update_lead_fields(int(lead_id), campos)
                 atualizados += 1
+                try:
+                    redis_cli.set(cache_key, str(novo_rotulo))
+                except Exception:  # noqa: BLE001
+                    pass
             except Exception as exc:  # noqa: BLE001
                 erros += 1
                 log.warning("[CRON janela24h] update lead=%s falhou: %s",
@@ -377,7 +394,8 @@ def _executar_janela_24h_varredura(*, pipeline, dry_run: bool) -> dict:
 
     return {
         "ok": True, "dry_run": dry_run, "varridos": varridos,
-        "atualizados": atualizados, "sem_ts": sem_ts, "erros": erros,
+        "atualizados": atualizados, "sem_ts": sem_ts,
+        "sem_mudanca": sem_mudanca, "erros": erros,
     }
 
 
