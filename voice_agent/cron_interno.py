@@ -362,9 +362,22 @@ def _executar_janela_24h_varredura(*, pipeline, dry_run: bool) -> dict:
             if not campos:
                 sem_ts += 1
                 continue
-            # Grava só quando o rótulo MUDA de faixa — evita reescrever o
-            # mesmo valor a cada varredura (economia de chamadas Kommo).
             novo_rotulo = campos.get("janela_24h")
+            # ULTIMA MENS HUMANO — só pra leads em 1-ATENDIMENTO HUMANO
+            # (106563343), onde o humano está conduzindo. Escopo estreito =
+            # custo baixo (1 leitura de notas só nesses leads).
+            human_ts = None
+            if int(lead.get("status_id") or 0) == 106563343:
+                try:
+                    human_ts = kommo.ts_ultima_msg_humano(lead_id)
+                except Exception:  # noqa: BLE001
+                    human_ts = None
+                if human_ts:
+                    campos["ts_ultima_msg_humano"] = int(human_ts)
+            # Grava só quando algo MUDA — evita reescrever o mesmo valor a
+            # cada varredura (economia de chamadas Kommo). Chave composta:
+            # rótulo da janela + ts humano.
+            marca = f"{novo_rotulo}|{int(human_ts) if human_ts else ''}"
             cache_key = f"blink:janela:rotulo:{lead_id}"
             try:
                 atual = redis_cli.get(cache_key)
@@ -372,7 +385,7 @@ def _executar_janela_24h_varredura(*, pipeline, dry_run: bool) -> dict:
                     atual = atual.decode("utf-8", "ignore")
             except Exception:  # noqa: BLE001
                 atual = None
-            if atual is not None and atual == novo_rotulo:
+            if atual is not None and atual == marca:
                 sem_mudanca += 1
                 continue
             if dry_run:
@@ -382,7 +395,7 @@ def _executar_janela_24h_varredura(*, pipeline, dry_run: bool) -> dict:
                 kommo.update_lead_fields(int(lead_id), campos)
                 atualizados += 1
                 try:
-                    redis_cli.set(cache_key, str(novo_rotulo))
+                    redis_cli.set(cache_key, marca)
                 except Exception:  # noqa: BLE001
                     pass
             except Exception as exc:  # noqa: BLE001

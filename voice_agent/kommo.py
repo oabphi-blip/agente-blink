@@ -687,6 +687,28 @@ def ler_cf_valor(lead_json: dict, field_id: int) -> Optional[str]:
     return None
 
 
+def _parse_created_at_epoch(ts_raw: Any) -> Optional[float]:
+    """Normaliza created_at do Kommo → epoch (segundos).
+
+    Kommo devolve created_at como epoch int na API v4, mas algumas notas
+    (service_message) vêm como ISO 8601. Aceita ambos; None se inválido.
+    """
+    if ts_raw is None:
+        return None
+    if isinstance(ts_raw, (int, float)):
+        return float(ts_raw)
+    s = str(ts_raw).strip()
+    if not s:
+        return None
+    if s.isdigit():
+        return float(s)
+    try:
+        from datetime import datetime as _dt
+        return _dt.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
 def _pick_enum(table: dict[str, int], value: str) -> Optional[int]:
     """Faz match case-insensitive + sem acento na tabela de enum."""
     if not value:
@@ -1575,6 +1597,28 @@ class KommoClient:
                 "Kommo get_lead_notes erro (lead %s): %s", lead_id, e,
             )
             return []
+
+    def ts_ultima_msg_humano(self, lead_id: int | str) -> Optional[float]:
+        """Epoch da atividade HUMANA mais recente do lead (created_by != 0).
+
+        Consistente com o resto do código: `created_by == 0` = bot/Lia,
+        `!= 0` = usuário Kommo real. Lê as notas do lead (desc) e devolve o
+        created_at (epoch) da mais recente com autor humano. None se não há
+        atividade humana. Usado pra carimbar ULTIMA MENS HUMANO (field 1260862).
+        """
+        notas = self.get_lead_notes(lead_id, limit=50) or []
+        melhor: Optional[float] = None
+        for n in notas:
+            if not isinstance(n, dict):
+                continue
+            if int(n.get("created_by") or 0) == 0:
+                continue  # bot/Lia
+            ts = _parse_created_at_epoch(n.get("created_at"))
+            if ts is None:
+                continue
+            if melhor is None or ts > melhor:
+                melhor = ts
+        return melhor
 
     def search_leads_by_window(
         self,
