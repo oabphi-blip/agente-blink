@@ -3302,6 +3302,63 @@ setInterval(carregar, 30000);
             log.exception("[admin_sync_meta_templates] erro")
             return JSONResponse({"erro": str(e)}, status_code=500)
 
+    # -------- Dump completo de templates Meta (nome + status + conteúdo) ----
+    # Usado pra reconciliação Meta × Kommo (06/07/2026). Lê TODOS os templates
+    # da WABA via Graph API (paginado) com o corpo (BODY). GET só-leitura.
+    @app.get("/admin/meta-templates-dump")
+    @app.post("/admin/meta-templates-dump")
+    def admin_meta_templates_dump(request: Request) -> JSONResponse:
+        _check_secret(request)
+        try:
+            import httpx as _hx
+            token = getattr(wa_cloud, "token", None)
+            waba = getattr(wa_cloud, "waba_id", None)
+            base = getattr(wa_cloud, "_base", "https://graph.facebook.com/v21.0")
+            if not token or not waba:
+                return JSONResponse(
+                    {"erro": "wa_cloud sem token/waba_id"}, status_code=500,
+                )
+            headers = {"Authorization": f"Bearer {token}"}
+            out: list[dict] = []
+            url = f"{base}/{waba}/message_templates"
+            params = {
+                "fields": "name,status,category,language,components",
+                "limit": 200,
+            }
+            somente = (request.query_params.get("status") or "").upper() or None
+            with _hx.Client(timeout=30) as c:
+                pagina = 0
+                while url and pagina < 15:
+                    pagina += 1
+                    r = c.get(url, headers=headers, params=params)
+                    params = None  # próximas páginas já vêm com querystring
+                    if r.status_code >= 400:
+                        return JSONResponse(
+                            {"erro": f"meta {r.status_code}: {(r.text or '')[:400]}"},
+                            status_code=500,
+                        )
+                    j = r.json() or {}
+                    for t in (j.get("data") or []):
+                        if somente and (t.get("status") or "").upper() != somente:
+                            continue
+                        body = ""
+                        for comp in (t.get("components") or []):
+                            if (comp.get("type") or "").upper() == "BODY":
+                                body = comp.get("text", "") or ""
+                        out.append({
+                            "name": t.get("name"),
+                            "status": t.get("status"),
+                            "category": t.get("category"),
+                            "language": t.get("language"),
+                            "body": body,
+                        })
+                    url = ((j.get("paging") or {}).get("next")) or None
+            out.sort(key=lambda x: (x.get("name") or ""))
+            return JSONResponse({"total": len(out), "templates": out})
+        except Exception as e:  # noqa: BLE001
+            log.exception("[admin_meta_templates_dump] erro")
+            return JSONResponse({"erro": str(e)}, status_code=500)
+
     # -------- PILAR 4: Synthetic users --------
     @app.get("/admin/synthetic-tick")
     @app.post("/admin/synthetic-tick")
