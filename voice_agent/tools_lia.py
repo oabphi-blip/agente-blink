@@ -509,6 +509,78 @@ def handle_gravar_agendamento_medware(
                     "[GRAVAR-MEDWARE] OK convo=%s cod_ag=%s med=%s uni=%s slot=%s %s",
                     convo_key, cod_ag, cod_med, cod_uni, data_iso, hora,
                 )
+
+                # === Bug C-40 (Fábio 01/07/2026, lead 24232988 Marcela) ===
+                # Após gravar sucesso, dispara 2 mensagens sequenciais:
+                # (1) Resumo do agendamento
+                # (2) Endereço + instruções da unidade
+                # Se qualquer import ou envio falhar, apenas loga —
+                # NÃO quebra o retorno OK do handler.
+                try:
+                    from voice_agent.templates_ativacao import (
+                        resolver_modelo_localizacao,
+                    )
+                    from voice_agent.mensagens_ciclo import (
+                        montar_resumo_agendamento,
+                    )
+
+                    nome_contato = (
+                        (caller_context or {}).get("name")
+                        or known.get("nome_contato")
+                        or known.get("nome_paciente", "")
+                    )
+                    dia_hora_hum = f"{data_iso} às {hora}"
+                    conv_str = known.get("convenio") or "sem convênio"
+
+                    resumo_msg = montar_resumo_agendamento(
+                        paciente=known.get("nome_paciente", ""),
+                        dia_hora=dia_hora_hum,
+                        medico=medico_nome or "Dra. Karla Delalíbera",
+                        unidade=unidade_nome or "Asa Norte",
+                        convenio_ou_valor=conv_str,
+                    )
+                    endereco_msg = resolver_modelo_localizacao(
+                        unidade_nome, nome_contato, dia_hora_hum,
+                    )
+
+                    # Envio via callback WhatsApp — usa qualquer canal que o
+                    # caller_context tenha injetado (whatsapp_cloud_client,
+                    # wa_send, send_text, meta_graph_send). Se nenhum
+                    # disponível, apenas armazena nos efeitos_colaterais.
+                    telefone = (
+                        (caller_context or {}).get("telefone")
+                        or known.get("telefone")
+                        or known.get("celular")
+                        or ""
+                    )
+                    wa_client = (
+                        (caller_context or {}).get("whatsapp_cloud_client")
+                        or (caller_context or {}).get("wa_client")
+                        or (caller_context or {}).get("meta_graph")
+                    )
+                    wa_send = (caller_context or {}).get("wa_send") or (
+                        caller_context or {}
+                    ).get("send_text")
+
+                    if wa_client and hasattr(wa_client, "send_text") and telefone:
+                        wa_client.send_text(telefone, resumo_msg)
+                        wa_client.send_text(telefone, endereco_msg)
+                        efeitos.append("C-40: enviadas 2 msgs (resumo + endereço)")
+                    elif callable(wa_send) and telefone:
+                        wa_send(telefone, resumo_msg)
+                        wa_send(telefone, endereco_msg)
+                        efeitos.append("C-40: enviadas 2 msgs via wa_send")
+                    else:
+                        efeitos.append(
+                            "C-40: msgs preparadas (sem canal p/ envio) "
+                            "— resumo+endereco em memoria"
+                        )
+                except Exception as _c40_exc:  # noqa: BLE001
+                    log.warning(
+                        "[C-40] Falha ao disparar resumo+endereço pós-agendamento: %s",
+                        _c40_exc,
+                    )
+                    efeitos.append(f"C-40 falhou: {_c40_exc}")
                 # Métricas live (task #260)
                 try:
                     from . import metricas_funcionamento as _mf

@@ -35,6 +35,37 @@ from voice_agent.mensagens_janela import (
 )
 
 # ===========================================================================
+# Bug C-40 (Fábio 01/07/2026, lead 24232988 Marcela) — resumo pós-agendamento
+# ===========================================================================
+
+def montar_resumo_agendamento(
+    paciente: str,
+    dia_hora: str,
+    medico: str,
+    unidade: str,
+    convenio_ou_valor: str,
+) -> str:
+    """Resumo canônico pós-agendamento (mensagem #1 do fluxo FE.2).
+
+    Formato exigido pelo prompt FE.2:
+        📋 Resumo:
+         · {paciente}
+         · {dia_hora}
+         · {medico}
+         · Unidade {unidade}
+         · Pagamento: {convenio_ou_valor}
+    """
+    return (
+        "📋 Resumo:\n"
+        f" · {paciente}\n"
+        f" · {dia_hora}\n"
+        f" · {medico}\n"
+        f" · Unidade {unidade}\n"
+        f" · Pagamento: {convenio_ou_valor}"
+    )
+
+
+# ===========================================================================
 # Unidades — fonte de verdade
 # ===========================================================================
 

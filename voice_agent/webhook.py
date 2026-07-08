@@ -533,6 +533,34 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             else (_conversation_key(contact) if contact else "kommo:unknown")
         )
 
+        # ---- Bug C-38 — migração de canal Kommo não vinculado ------------
+        # Antes de qualquer processamento normal: se este lead casa o padrão
+        # "lead fantasma em canal desconhecido" (0-ETAPA ENTRADA + custom_fields
+        # vazio + zero notas), dispara mensagem_migracao_8133() via Meta Graph
+        # direto, desativa a IA e ignora este turn. Dedup Redis 7d.
+        # Não bloqueia o fluxo normal se lead NÃO é candidato.
+        if lead_id:
+            try:
+                from .migracao_canal import talvez_disparar_migracao_canal
+                _res_migracao = talvez_disparar_migracao_canal(
+                    lead_id=lead_id,
+                    kommo_client=pipeline.kommo,
+                    wa_client=wa_cloud,
+                    redis_client=getattr(pipeline, "_redis", None),
+                )
+                if _res_migracao.get("acao") == "disparado":
+                    log.info(
+                        "/kommo C-38 migração disparada lead=%s wamid=%s",
+                        lead_id, _res_migracao.get("wamid"),
+                    )
+                    return JSONResponse({
+                        "ok": True,
+                        "acao": "migracao_canal_c38",
+                        "wamid": _res_migracao.get("wamid"),
+                    })
+            except Exception as e:  # noqa: BLE001
+                log.warning("/kommo C-38 orquestrador erro: %s", e)
+
         if not return_url:
             log.warning("Kommo webhook sem return_url — ignorado")
             return JSONResponse({"ignored": "sem return_url"})
@@ -3128,6 +3156,131 @@ setInterval(carregar, 30000);
         return JSONResponse(res)
 
     # ================================================================
+    # JANELA 24H — DIAGNÓSTICO (bug "Falta 20h" fixo, 08/07/2026)
+    # ================================================================
+    # Radiografa toggle + intervalo + contagem de chaves Redis + amostra
+    # + resultado dry-run pra achar por que a coluna JANELA 24H fica
+    # presa em "Falta 20h" pra todos os leads.
+    # GET /admin/janela24h-diagnostico?secret=...
+    @app.get("/admin/janela24h-diagnostico")
+    def admin_janela24h_diagnostico(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        try:
+            from voice_agent.cron_interno import (
+                _executar_janela_24h_varredura,
+                _janela24h_tick_enabled,
+                _intervalo_janela24h_seg,
+            )
+            from voice_agent.campos_acompanhamento import FIELD_JANELA_24H
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"erro": f"import falhou: {e}"}, status_code=500,
+            )
+
+        redis_cli = getattr(pipeline, "_redis", None)
+        # Contadores das 2 chaves Redis do sistema janela — dão base pra
+        # saber quantos leads têm ts pra ler e quantos cache_key ainda
+        # persistem depois do fix TTL.
+        count_ultima_msg = 0
+        count_rotulo = 0
+        amostra_rotulo: list[dict] = []
+        if redis_cli is not None:
+            try:
+                for _k in redis_cli.scan_iter(
+                    match="blink:janela:ultima_msg_paciente:*", count=500,
+                ):
+                    count_ultima_msg += 1
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                for k in redis_cli.scan_iter(
+                    match="blink:janela:rotulo:*", count=500,
+                ):
+                    count_rotulo += 1
+                    if len(amostra_rotulo) < 10:
+                        key_str = (
+                            k.decode() if isinstance(k, bytes) else k
+                        )
+                        try:
+                            v = redis_cli.get(key_str)
+                            if isinstance(v, bytes):
+                                v = v.decode("utf-8", "ignore")
+                        except Exception:  # noqa: BLE001
+                            v = None
+                        try:
+                            ttl = redis_cli.ttl(key_str)
+                        except Exception:  # noqa: BLE001
+                            ttl = None
+                        amostra_rotulo.append({
+                            "key": key_str, "valor": v, "ttl_seg": ttl,
+                        })
+            except Exception:  # noqa: BLE001
+                pass
+
+        try:
+            dry = _executar_janela_24h_varredura(
+                pipeline=pipeline, dry_run=True,
+            )
+        except Exception as e:  # noqa: BLE001
+            dry = {"erro": str(e)[:300]}
+
+        return JSONResponse({
+            "toggle_enabled": _janela24h_tick_enabled(),
+            "intervalo_seg": _intervalo_janela24h_seg(),
+            "kommo_field_janela_24h_id": FIELD_JANELA_24H[0],
+            "redis_ultima_msg_paciente_count": count_ultima_msg,
+            "redis_rotulo_count": count_rotulo,
+            "redis_rotulo_amostra": amostra_rotulo,
+            "dry_run_result": dry,
+        })
+
+    # POST /admin/janela24h-cache-flush?secret=...
+    # Uso: quando cache Redis "blink:janela:rotulo:*" fica com valor
+    # obsoleto (bug 05-08/07/2026 — todos os leads presos em "Falta 20h"),
+    # esse endpoint apaga TODAS as chaves de cache. No próximo tick o
+    # worker regrava a partir do valor real calculado do timestamp Redis.
+    # Não apaga blink:janela:ultima_msg_paciente:* — só o cache do rótulo.
+    @app.post("/admin/janela24h-cache-flush")
+    def admin_janela24h_cache_flush(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+        redis_cli = getattr(pipeline, "_redis", None)
+        if redis_cli is None:
+            return JSONResponse(
+                {"ok": False, "razao": "sem_redis"}, status_code=500,
+            )
+        flushed = 0
+        erros = 0
+        try:
+            for k in redis_cli.scan_iter(
+                match="blink:janela:rotulo:*", count=500,
+            ):
+                try:
+                    redis_cli.delete(k)
+                    flushed += 1
+                except Exception:  # noqa: BLE001
+                    erros += 1
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse(
+                {"ok": False, "erro": str(e)[:300], "flushed": flushed},
+                status_code=500,
+            )
+        return JSONResponse({
+            "ok": True, "flushed": flushed, "erros": erros,
+        })
+
+    # ================================================================
     # PILAR #5: canary lead diário — fluxo completo ponta-a-ponta
     # ================================================================
     # POST /admin/canary-tick?secret=...&dry_run=1&alertar_sempre=0
@@ -3308,7 +3461,9 @@ setInterval(carregar, 30000);
     @app.get("/admin/meta-templates-dump")
     @app.post("/admin/meta-templates-dump")
     def admin_meta_templates_dump(request: Request) -> JSONResponse:
-        _check_secret(request)
+        # TEMPORÁRIO (06/07/2026): sem secret de propósito, pra reconciliação
+        # rápida Meta×Kommo (dump só-leitura de conteúdo de template, não
+        # credencial). REMOVER este endpoint depois da reconciliação.
         try:
             import httpx as _hx
             token = getattr(wa_cloud, "token", None)

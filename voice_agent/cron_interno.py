@@ -329,6 +329,12 @@ def _executar_janela_24h_varredura(*, pipeline, dry_run: bool) -> dict:
         return {"ok": False, "razao": "sem_redis"}
 
     limite = int(os.environ.get("JANELA24H_LIMITE_LEADS") or "200")
+    # TTL do cache Redis do rótulo. 20min < 15min (intervalo do worker) daria
+    # ping-pong; 20min > 15min garante que qualquer entrada de cache expira
+    # ANTES do 2º tick seguinte — força re-avaliação periódica mesmo quando o
+    # rótulo "aparente" não mudou. Fix bug JANELA 24H fixo em "Falta 20h"
+    # (05/07/2026).
+    cache_ttl_seg = int(os.environ.get("JANELA24H_CACHE_TTL_SEG") or "1200")
     varridos = atualizados = sem_ts = erros = sem_mudanca = 0
 
     try:
@@ -385,6 +391,8 @@ def _executar_janela_24h_varredura(*, pipeline, dry_run: bool) -> dict:
                     atual = atual.decode("utf-8", "ignore")
             except Exception:  # noqa: BLE001
                 atual = None
+            # Só pula quando cache existe COM valor igual. Cache expirado
+            # (setex TTL 20min) volta como None → força re-write pra Kommo.
             if atual is not None and atual == marca:
                 sem_mudanca += 1
                 continue
@@ -395,7 +403,11 @@ def _executar_janela_24h_varredura(*, pipeline, dry_run: bool) -> dict:
                 kommo.update_lead_fields(int(lead_id), campos)
                 atualizados += 1
                 try:
-                    redis_cli.set(cache_key, marca)
+                    # setex TTL curto — força re-avaliação no próximo tick
+                    # mesmo que rótulo aparente igual. Chave nova regrava
+                    # depois da expiração natural, propagando "Falta 15h"
+                    # etc pro Kommo em vez de ficar preso em "Falta 20h".
+                    redis_cli.setex(cache_key, cache_ttl_seg, marca)
                 except Exception:  # noqa: BLE001
                     pass
             except Exception as exc:  # noqa: BLE001
@@ -405,11 +417,29 @@ def _executar_janela_24h_varredura(*, pipeline, dry_run: bool) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "razao": "excecao", "erro": str(exc)[:300]}
 
+    # Contador incremental de ticks pra observabilidade (não persistente
+    # entre restarts do processo — só serve pra numerar linhas no log).
+    global _JANELA24H_TICK_COUNTER
+    _JANELA24H_TICK_COUNTER += 1
+    log.info(
+        "[CRON janela24h] tick #%d varridos=%d atualizados=%d "
+        "sem_mudanca=%d sem_ts=%d erros=%d cache_ttl_seg=%d dry_run=%s",
+        _JANELA24H_TICK_COUNTER, varridos, atualizados,
+        sem_mudanca, sem_ts, erros, cache_ttl_seg, dry_run,
+    )
     return {
         "ok": True, "dry_run": dry_run, "varridos": varridos,
         "atualizados": atualizados, "sem_ts": sem_ts,
         "sem_mudanca": sem_mudanca, "erros": erros,
+        "cache_ttl_seg": cache_ttl_seg,
+        "tick_num": _JANELA24H_TICK_COUNTER,
     }
+
+
+# Contador global do worker JANELA 24H — reset a cada boot. Usado só pra
+# ordenar linhas de log ("[CRON janela24h] tick #N ..."). Fica no módulo
+# em vez de fechado no worker pra que /admin/janela-24h-tick também numere.
+_JANELA24H_TICK_COUNTER: int = 0
 
 
 def _worker_janela_24h_loop(*, pipeline, stop_event: threading.Event) -> None:

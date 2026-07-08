@@ -2255,6 +2255,54 @@ def _gerar_pre_reserva_10min(ctx: Optional[dict] = None) -> str:
 
 
 # ────────────────────────────────────────────────────────────────────────
+# Bug C-39 (01/07/2026, lead em status PRÓXIMA CONSULTA sendo tratado como AGENDAR)
+# ────────────────────────────────────────────────────────────────────────
+# Import local pra time (a função usa time.time() abaixo). Import global
+# de `time` fica no bloco a seguir pra garantir disponibilidade sempre-ON.
+import time as _time_c39  # noqa: E402
+
+
+def _viola_agendar_em_proxima_consulta(text: str, ctx: dict) -> bool:
+    """C-39: Lia oferecendo slot ou chamando tool AGENDAR quando lead em PRÓXIMA CONSULTA."""
+    if int((ctx or {}).get("lead", {}).get("status_id", 0)) != 106157327:
+        return False
+    padrao = re.compile(
+        r"(oferecer[_\s]slot|posso agendar|qual dia|qual hor[áa]rio|preferência de turno)",
+        re.IGNORECASE,
+    )
+    return bool(padrao.search(text or ""))
+
+
+def _viola_afirmou_consulta_marcada_data_passada(text: str, ctx: dict) -> bool:
+    """C-39: Lia dizendo 'consulta marcada' baseada em 1.DIA CONSULTA que é PASSADA."""
+    dia_consulta_ts = (
+        (ctx or {}).get("lead", {}).get("known", {}).get("dia_consulta_ts")
+    )
+    if not dia_consulta_ts:
+        return False
+    try:
+        ts_val = float(dia_consulta_ts)
+    except (TypeError, ValueError):
+        return False
+    if ts_val >= _time_c39.time():
+        return False  # data futura, ok
+    return bool(re.search(r"consulta (marcada|agendada|confirmada)", (text or "").lower()))
+
+
+def _gerar_fallback_c39(ctx: dict) -> str:
+    """Fallback C-39a: acompanhamento pós-consulta sem oferecer agenda."""
+    known = ((ctx or {}).get("lead", {}).get("known") or {}) or (
+        (ctx or {}).get("known") or {}
+    )
+    ultima = known.get("ultima_medware") or "data anterior"
+    return (
+        f"Sua última consulta com a Dra./o Dr. foi em {ultima}. "
+        f"Sua próxima consulta está prevista para daqui a 1 ano "
+        f"(protocolo médico). Continuo à disposição."
+    )
+
+
+# ────────────────────────────────────────────────────────────────────────
 # Bug C-51 (03/07/2026 madrugada, lead 24243754 Ani — mesmo lead C-50)
 # ────────────────────────────────────────────────────────────────────────
 # 4 bugs simultâneos:
@@ -2515,6 +2563,29 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """
     if not text:
         return text
+
+    # === FILTRO C-39 SEMPRE-ON (01/07/2026, lead status=PRÓXIMA CONSULTA 106157327) ===
+    # Sempre-ON, independe de FILTROS_LEGACY. Fatos objetivos (status_id +
+    # timestamp) — invariantes duros. Duas variantes:
+    #   (a) Lia oferecendo slot / perguntando dia-hora em lead PRÓXIMA CONSULTA
+    #   (b) Lia afirmando "consulta marcada" com dia_consulta_ts NO PASSADO
+    # Ambas viram fallback C-39a (acompanhamento pós-consulta).
+    _ctx_c39 = ctx or {}
+    if _viola_agendar_em_proxima_consulta(text, _ctx_c39):
+        log.error(
+            "[FILTRO C-39a] AGENDAR em lead PRÓXIMA CONSULTA. "
+            "status_id=%s texto=%r",
+            _ctx_c39.get("lead", {}).get("status_id"), text[:200],
+        )
+        return _gerar_fallback_c39(_ctx_c39)
+    if _viola_afirmou_consulta_marcada_data_passada(text, _ctx_c39):
+        log.error(
+            "[FILTRO C-39b] AFIRMOU consulta marcada com data PASSADA. "
+            "dia_consulta_ts=%s texto=%r",
+            _ctx_c39.get("lead", {}).get("known", {}).get("dia_consulta_ts"),
+            text[:200],
+        )
+        return _gerar_fallback_c39(_ctx_c39)
 
     # === FILTRO C-51 SEMPRE-ON (Fábio 03/07/2026 madrugada, lead 24243754 Ani) ===
     # 4 fixes simultâneos:
