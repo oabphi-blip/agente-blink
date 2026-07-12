@@ -5,6 +5,21 @@
 !.env.example
 config.json
 
+# Tokens/secrets em arquivos (proteção contra `git add -A` acidental)
+*TOKEN*
+*token*
+*SECRET*
+*secret*
+*.pem
+*.key
+*credentials*
+BLINK_TOKENS.txt
+.LOVABLE_WEBHOOK_SECRET_TEMP.txt
+
+# Scripts .command com credenciais embutidas
+PUSH_COM_TOKEN.command
+RENOVAR_KOMMO_TOKEN*.command
+
 # Build artifacts
 __pycache__/
 *.py[cod]
