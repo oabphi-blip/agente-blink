@@ -3659,6 +3659,32 @@ class Responder:
         #
         # Toggle rollback: AGENDA_DETERMINISTICA=0 (default ON).
         # ================================================================
+        # ================================================================
+        # NÍVEL 3 EXPANDIDO — bypasses determinísticos (Fábio 12/07/2026)
+        # ================================================================
+        # 4 pontos críticos onde LLM inventa. Python monta texto exato.
+        # Ordem em `tentar_bypass_deterministico`:
+        #   1. urgencia (segurança clínica)
+        #   2. valor consulta
+        #   3. aceite de slot (paciente disse "1️⃣" ou similar)
+        #   4. endereço pós-agenda (agenda gravada + envio pendente)
+        # Cada toggle é independente (BLINDAGEM_*_ATIVADO), default ON.
+        # ================================================================
+        try:
+            from voice_agent import blindagens_deterministicas as _blind
+            _bypass_result = _blind.tentar_bypass_deterministico(
+                caller_context, user_text,
+            )
+            if _bypass_result is not None:
+                _nome_bypass, _texto = _bypass_result
+                return {
+                    "answer": _texto,
+                    "model_used": f"blindagem_{_nome_bypass}",
+                    "articles_used": [],
+                }
+        except Exception:  # noqa: BLE001
+            log.exception("[BLINDAGEM] bypass falhou — caindo pra LLM")
+
         try:
             from voice_agent import oferta_deterministica as _oferta_det
             if _oferta_det.deve_ofertar_agora(caller_context):
