@@ -132,8 +132,8 @@ PLANO_CODES = {
     "e-vida": 5, "evida": 5, "e vida": 5, "luminar": 5,
     "e-vida (luminar)": 5, "evida luminar": 5,
 
-    # AFFEGO (codPlano 7) — sem correspondência Kommo, mantido pra compatibilidade
-    "affego": 7,
+    # AFFEGO (codPlano 7) — Kommo: "Afego" (SEM os 2 F) — bug Mariana Lopes 22617170 (12/07/2026)
+    "affego": 7, "afego": 7, "affeg": 7, "afego bh": 7, "afego brasilia": 7,
 
     # ANAFE (codPlano 8) — Kommo: "Anafe"
     "anafe": 8,

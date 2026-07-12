@@ -14,6 +14,7 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -1161,10 +1162,22 @@ _DIA_SEMANA_FALLBACK = (
 # Sem unidade definida no ctx: usa UNIÃO dos dias (mais permissivo) — só
 # bloqueia se cair em fim-de-semana ou dia que nenhuma unidade atende.
 
-_DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE = {
-    ("karla", "asa norte"):     {0, 2, 4},   # seg, qua, sex
-    ("karla", "águas claras"):  {1, 3},      # ter, qui
-    ("karla", "aguas claras"):  {1, 3},      # variante sem acento
+# Bug C-53 (11/07/2026) — Tabela de dias por médico+unidade agora é lida
+# do arquivo `voice_agent/calendar_atendimento.json`. Fonte única de verdade.
+# Editar o JSON = mudança em prod, sem redeploy. Cache TTL 60s pra não bater
+# no disco a cada mensagem. Se o JSON não carregar, cai em fallback hard-coded
+# (o mesmo dos últimos 6 meses) — jamais deixa a Lia sem defesa.
+
+_CALENDARIO_JSON_PATH = str(
+    Path(__file__).resolve().parent / "calendar_atendimento.json"
+)
+_CALENDARIO_CACHE_TTL_SEG = 60
+_calendario_cache: dict = {"carregado_em": 0.0, "dados": None}
+
+_DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE_FALLBACK = {
+    ("karla", "asa norte"):     {0, 2, 4},
+    ("karla", "águas claras"):  {1, 3},
+    ("karla", "aguas claras"):  {1, 3},
     ("fabricio", "asa norte"):    {1, 3},
     ("fabrício", "asa norte"):    {1, 3},
     ("fabricio", "águas claras"): {1, 3},
@@ -1175,14 +1188,136 @@ _DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE = {
     ("kátia", "asa norte"):    set(),
 }
 
-# Fallback quando unidade desconhecida — usa UNIÃO dos dias possíveis
-_DIAS_ATENDIMENTO_POR_MEDICO = {
-    "karla":    {0, 1, 2, 3, 4},   # união (seg-sex) — só usado se unidade ausente
+_DIAS_ATENDIMENTO_POR_MEDICO_FALLBACK = {
+    "karla":    {0, 1, 2, 3, 4},
     "fabricio": {1, 3},
     "fabrício": {1, 3},
     "katia":    set(),
     "kátia":    set(),
 }
+
+
+def _carregar_calendario_atendimento() -> dict:
+    """Carrega o JSON com dias × médico × unidade. Cache TTL 60s.
+
+    Retorna dict com chaves:
+      - medicos_unidades: {(medico, unidade): set(weekdays)}
+      - medicos_fallback_uniao: {medico: set(weekdays)}
+      - cidades_satelite_unidade: {cidade_lower: 'Asa Norte'|'Águas Claras'}
+      - fonte: 'json' ou 'fallback_hardcoded'
+    """
+    import json as _json
+    import time as _time
+
+    agora = _time.time()
+    if (
+        _calendario_cache["dados"] is not None
+        and agora - _calendario_cache["carregado_em"] < _CALENDARIO_CACHE_TTL_SEG
+    ):
+        return _calendario_cache["dados"]
+
+    try:
+        with open(_CALENDARIO_JSON_PATH, "r", encoding="utf-8") as f:
+            raw = _json.load(f)
+        medicos_unidades = {}
+        for chave_str, dias in (raw.get("medicos_unidades") or {}).items():
+            if "|" not in chave_str:
+                continue
+            medico, unidade = chave_str.split("|", 1)
+            medicos_unidades[(medico.strip().lower(), unidade.strip().lower())] = set(dias)
+        medicos_fallback = {
+            m.strip().lower(): set(d)
+            for m, d in (raw.get("medicos_fallback_uniao") or {}).items()
+        }
+        cidades = {
+            c.strip().lower(): u
+            for c, u in (raw.get("cidades_satelite_unidade") or {}).items()
+        }
+        dados = {
+            "medicos_unidades": medicos_unidades,
+            "medicos_fallback_uniao": medicos_fallback,
+            "cidades_satelite_unidade": cidades,
+            "fonte": "json",
+        }
+    except Exception as exc:  # noqa: BLE001
+        log.error(
+            "[CALENDARIO] Falha ao carregar %s: %s. Usando fallback hardcoded.",
+            _CALENDARIO_JSON_PATH, exc,
+        )
+        dados = {
+            "medicos_unidades": dict(_DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE_FALLBACK),
+            "medicos_fallback_uniao": dict(_DIAS_ATENDIMENTO_POR_MEDICO_FALLBACK),
+            "cidades_satelite_unidade": {},
+            "fonte": "fallback_hardcoded",
+        }
+
+    _calendario_cache["dados"] = dados
+    _calendario_cache["carregado_em"] = agora
+    return dados
+
+
+# Acessos legados — mantidos como propriedade dinâmica pra compatibilidade
+# com qualquer código que ainda importe os nomes antigos. Nunca CACHEAR
+# esses dicts fora do helper (senão TTL não vale).
+def _get_dias_por_medico_unidade():
+    return _carregar_calendario_atendimento()["medicos_unidades"]
+
+
+def _get_dias_por_medico():
+    return _carregar_calendario_atendimento()["medicos_fallback_uniao"]
+
+
+# Manter símbolos usados por outros arquivos apontando pra função (property-like).
+_DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE = _DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE_FALLBACK
+_DIAS_ATENDIMENTO_POR_MEDICO = _DIAS_ATENDIMENTO_POR_MEDICO_FALLBACK
+
+
+# ----- Bug C-53 helper: detectar padrão de OFERTA nova no texto -----
+# Quando ja_agendado=True + texto tem padrão de OFERTA, filtros C-31 rodam
+# assim mesmo. Confirmação/referência a agendamento passado NÃO usa esses
+# padrões (nunca escreve "1️⃣ Sexta-feira (07/08)...").
+_PADROES_OFERTA_NOVA = [
+    "1️⃣",
+    "2️⃣",
+    "posso oferecer",
+    "posso te oferecer",
+    "tenho 2 horários",
+    "tenho dois horários",
+    "tenho 3 horários",
+    "tenho três horários",
+    "tenho horários abertos",
+    "horários abertos com",
+    "horários disponíveis",
+    "estas opções",
+    "essas opções",
+    "algum desses cabe",
+    "algum desses funciona",
+    "algum desses horários",
+    "algum desses dias",
+    "qual desses",
+    "prefere qual",
+    "prefere um deles",
+    "opção 1",
+    "opção 2",
+]
+
+
+def _texto_parece_oferta_nova(text: str) -> bool:
+    """True se o texto contém padrões inequívocos de OFERTA de slot novo.
+
+    Usado por C-53 pra decidir se aplica os filtros C-31 mesmo com
+    ja_agendado=True. Deve dar false pra:
+      - Confirmação: "sua consulta está confirmada para..."
+      - Referência histórica: "sua última consulta foi em..."
+      - Resumo pós-agendamento: "Resumo do Atendimento: paciente..."
+    """
+    if not text:
+        return False
+    t = text.lower()
+    for p in _PADROES_OFERTA_NOVA:
+        if p in t:
+            return True
+    return False
 
 
 def _normaliza_medico(nome: Optional[str]) -> str:
@@ -1210,9 +1345,15 @@ def _viola_oferta_em_dia_nao_atendido(
     known = ((ctx or {}).get("known") or ctx or {})
     medico_raw = (known.get("medico") or (ctx or {}).get("medico") or "").lower()
     unidade_raw = (known.get("unidade") or (ctx or {}).get("unidade") or "").lower().strip()
+
+    # Carrega tabela do JSON externo (fonte única de verdade). Bug C-53:
+    # antes estava hard-coded — qualquer mudança operacional exigia deploy.
+    dias_por_med_unid = _get_dias_por_medico_unidade()
+    dias_por_med_uniao = _get_dias_por_medico()
+
     # Pega só o primeiro nome — alinha com o mapa
     medico_norm = ""
-    for m in _DIAS_ATENDIMENTO_POR_MEDICO:
+    for m in dias_por_med_uniao:
         if m in medico_raw:
             medico_norm = m
             break
@@ -1222,13 +1363,13 @@ def _viola_oferta_em_dia_nao_atendido(
     # Bug C-31 — usar mapping médico+unidade quando unidade está no ctx
     if unidade_raw:
         chave = (medico_norm, unidade_raw)
-        if chave in _DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE:
-            permitidos = _DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE[chave]
+        if chave in dias_por_med_unid:
+            permitidos = dias_por_med_unid[chave]
         else:
             # Unidade não reconhecida (ex: typo) — fallback pra mapa simples
-            permitidos = _DIAS_ATENDIMENTO_POR_MEDICO[medico_norm]
+            permitidos = dias_por_med_uniao[medico_norm]
     else:
-        permitidos = _DIAS_ATENDIMENTO_POR_MEDICO[medico_norm]
+        permitidos = dias_por_med_uniao[medico_norm]
 
     if not permitidos:
         # Médico em pausa — qualquer oferta é violação
@@ -1929,27 +2070,95 @@ def _fallback_slots_from_kommo(ctx: Optional[dict]) -> list:
     return slots
 
 
-def _gerar_resposta_honesta_medware_down(ctx: Optional[dict] = None) -> str:
-    """Medware down: tenta FONTE B (campos Kommo) antes de admitir espera.
+def _gerar_slots_do_calendario_json(ctx: Optional[dict] = None) -> list:
+    """Bug Sofia 22843522 (11/07/2026) — Camada C.
 
-    Ordem (02/07/2026):
+    Quando Medware DOWN E fallback Kommo vazio, gera 2 slots plausíveis
+    baseados no calendar_atendimento.json (fonte única de verdade dos
+    dias em que o médico+unidade atende). Não é slot Medware real —
+    é slot "pré-reserva sujeita a confirmação pela recepção", igual ao
+    padrão humano da equipe Blink quando o Medware oscila.
+
+    Retorna lista de dicts no MESMO formato de ctx.agenda:
+        [{"data": "DD/MM/YYYY", "hora": "HH:MM", "dia": "quinta-feira"}, ...]
+
+    Regras:
+      - Precisa médico + unidade no ctx.known pra saber que dias oferecer.
+      - Sem médico/unidade → retorna [] (chamador cai no fallback honesto).
+      - Escolhe os 2 PRÓXIMOS dias que o médico atende naquela unidade.
+      - Horário fixo padrão: manhã 10:00 e tarde 14:00 (comum na Blink).
+    """
+    known = ((ctx or {}).get("known") or ctx or {})
+    medico_raw = (known.get("medico") or (ctx or {}).get("medico") or "").lower()
+    unidade_raw = (
+        known.get("unidade") or (ctx or {}).get("unidade") or ""
+    ).lower().strip()
+
+    if not medico_raw or not unidade_raw:
+        return []
+
+    dias_por_med_unid = _get_dias_por_medico_unidade()
+
+    medico_norm = ""
+    for m in _get_dias_por_medico():
+        if m in medico_raw:
+            medico_norm = m
+            break
+    if not medico_norm:
+        return []
+
+    chave = (medico_norm, unidade_raw)
+    permitidos = dias_por_med_unid.get(chave)
+    if not permitidos:
+        return []
+
+    hoje = datetime.now(_TZ_BRT).date()
+    slots = []
+    # Varre próximos 30 dias, coleta os 2 primeiros que o médico atende.
+    # Formato compatível com _selecionar_2_slots_inteligente + _gerar_oferta_2_slots:
+    # data_br, dia_semana, hora, hora_int são as chaves consumidas.
+    for offset in range(1, 31):
+        data = hoje + timedelta(days=offset)
+        if data.weekday() in permitidos:
+            hora = "10:00" if len(slots) == 0 else "14:00"
+            hora_int = int(hora.split(":")[0])
+            slots.append({
+                "data_br": data.strftime("%d/%m/%Y"),
+                "hora": hora,
+                "hora_int": hora_int,
+                "dia_semana": _DIA_SEMANA_PT[data.weekday()],
+                "origem": "calendario_json",
+            })
+            if len(slots) >= 2:
+                break
+    return slots
+
+
+def _gerar_resposta_honesta_medware_down(ctx: Optional[dict] = None) -> str:
+    """Medware down: cascata de 3 fontes ANTES de admitir espera.
+
+    Ordem (11/07/2026 — bug Sofia 22843522 adicionou Camada C):
       1. Se ctx.agenda já tem slots (Medware respondeu) → oferta com eles.
-      2. Senão, tenta fallback dos campos "1./2. DIA COM CONVÊNIO" do Kommo.
-         Se houver ao menos 1 slot futuro → oferta real (fim do loop de
-         hesitação que afetou Carolina 21225483).
-      3. Só se NENHUMA fonte tiver slot → frase honesta curta. E, mesmo aqui,
-         a escalação pra humano já foi sinalizada pelo chamador (C-30A).
+      2. Fallback Kommo (campos "1./2. DIA COM CONVÊNIO"): slot histórico
+         futuro → oferta real (fim do loop Carolina 21225483).
+      3. Fallback CALENDÁRIO JSON: se médico+unidade conhecidos, gera 2
+         próximos dias válidos (Karla AC → próxima terça 10h + próxima
+         quinta 14h; Karla AN → próxima seg/qua/sex; etc). Sujeito a
+         confirmação da recepção. Encerra o padrão "agenda fora do ar".
+      4. Só se NENHUMA fonte tiver slot → frase honesta curta. Escalação
+         pra humano já foi sinalizada pelo chamador (C-30A).
     """
     agenda = (ctx or {}).get("agenda") or []
     if not agenda:
         agenda = _fallback_slots_from_kommo(ctx)
+    if not agenda:
+        agenda = _gerar_slots_do_calendario_json(ctx)
     if agenda:
         ctx_com_agenda = dict(ctx or {})
         ctx_com_agenda["agenda"] = agenda
         return _gerar_oferta_2_slots(ctx_com_agenda)
 
-    # Sem NENHUMA fonte de agenda (nem Medware, nem fallback Kommo): admite
-    # honestamente + garante escalação humana (idempotente/best-effort).
+    # Sem NENHUMA fonte de agenda: admite honestamente + garante escalação.
     _sinalizar_escalation_medware_down(ctx)
     known = (ctx or {}).get("known") or {}
     nome = known.get("nome_contato") or known.get("nome_paciente") or ""
@@ -3045,26 +3254,37 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     # calendário real. Se Lia escreveu "terça-feira, 03/06" e Python
     # diz que é quarta, bloqueia e força regenerar via fallback.
     #
-    # EXCEÇÃO crítica (lead 21392947 Sabrina, 02/06/2026 tarde): se o
-    # paciente JÁ ESTÁ AGENDADO (ja_agendado=True), QUALQUER menção a
-    # dia/data na resposta é CONFIRMAÇÃO/REFERÊNCIA — não oferta nova.
-    # Substituir pelo fallback genérico "deixa eu reconferir o calendário"
-    # QUEBRA o contexto: paciente respondeu "1" (Tudo Correto) ao template
-    # de conclusão, e Lia abriu reconferência. Skip do filtro nesse caso.
     # Bug C-31 (16/06/2026) — _viola_dia_semana e _viola_oferta_em_dia_nao_atendido
     # SEMPRE-ON (fora do gate FILTROS_LEGACY). Esses são INVARIANTES DUROS, não
     # regras subjetivas: dia-da-semana é fato calculável, médico atende ou não
     # atende é fato operacional. Bug Fábio Philipe 24113652: Lia ofereceu
     # "quarta 18/06" (era quinta) e "sexta 20/06" (era sábado, fim-de-semana,
     # Karla não atende) porque ambos os filtros estavam atrás de FILTROS_LEGACY=0.
-    if not (ctx and ctx.get("ja_agendado")):
+    #
+    # Bug C-53 (11/07/2026) Beatriz 16843614 — filtro C-31b estava atrás do
+    # gate `not ja_agendado`. Lead em 5-AGENDADO com 1.DIA CONSULTA de
+    # 07/08/2025 (passado) → ja_agendado=True → filtro pulado → Lia ofereceu
+    # "Sexta (07/08) 10:00" e "Segunda (17/08) 10:00" para Karla Águas Claras
+    # (que só atende ter/qui). Bug composto: (a) ja_agendado incorretamente
+    # True por consulta passada, (b) filtro que valida DIA IMPOSSÍVEL não
+    # deveria depender de estado do lead — dia impossível é impossível
+    # em qualquer contexto. Fix: quando o texto tem padrão de OFERTA
+    # (emoji 1️⃣ 2️⃣, "tenho N horários", "posso oferecer"), rodar os 2
+    # filtros SEMPRE, mesmo com ja_agendado=True. Confirmação/referência
+    # a agendamento passado NÃO usa esses padrões.
+    _padrao_oferta = _texto_parece_oferta_nova(text)
+    _pular_por_agendado = bool(ctx and ctx.get("ja_agendado")) and not _padrao_oferta
+
+    if not _pular_por_agendado:
         violacao_dia = _viola_dia_semana(text)
         if violacao_dia:
             dia_falado, data_str, dia_real = violacao_dia
             log.error(
                 "[FILTRO C-31a] DIA DA SEMANA INVENTADO — Lia disse '%s' para %s, "
-                "mas Python calculou '%s'. Texto ORIGINAL completo: %r",
-                dia_falado, data_str, dia_real, text,
+                "mas Python calculou '%s'. ja_agendado=%s padrao_oferta=%s "
+                "Texto ORIGINAL completo: %r",
+                dia_falado, data_str, dia_real,
+                bool(ctx and ctx.get("ja_agendado")), _padrao_oferta, text,
             )
             return _DIA_SEMANA_FALLBACK
 
@@ -3074,21 +3294,33 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             medico_norm, data_str, dia_real = violacao_dia_med
             log.error(
                 "[FILTRO C-31b] OFERTA EM DIA NAO ATENDIDO — médico=%r data=%s "
-                "cai em %s. Médico não trabalha nesse dia/unidade. Texto: %r",
-                medico_norm, data_str, dia_real, text[:300],
+                "cai em %s. Médico não trabalha nesse dia/unidade. "
+                "ja_agendado=%s padrao_oferta=%s Texto: %r",
+                medico_norm, data_str, dia_real,
+                bool(ctx and ctx.get("ja_agendado")), _padrao_oferta, text[:300],
             )
             return _DIA_NAO_ATENDIDO_FALLBACK
     else:
-        # Log preventivo: paciente já agendado, NÃO aplicamos o filtro
-        # de dia-da-semana. Se Lia disse algo errado, vai aparecer aqui.
+        # Log preventivo: paciente já agendado E texto NÃO parece oferta nova
+        # → tratamos como confirmação/referência. Se Lia disse algo errado,
+        # aparece aqui pra investigar depois.
         violacao_dia_check = _viola_dia_semana(text)
         if violacao_dia_check:
             dia_falado, data_str, dia_real = violacao_dia_check
             log.warning(
                 "[FILTRO PULADO ja_agendado=True] _viola_dia_semana detectou "
-                "mismatch '%s' vs '%s' em %s, mas paciente já agendado — "
-                "considerando confirmação/referência, não oferta. Texto: %r",
+                "mismatch '%s' vs '%s' em %s, mas paciente já agendado e texto "
+                "não parece oferta — considerando confirmação/referência. Texto: %r",
                 dia_falado, dia_real, data_str, text,
+            )
+        violacao_dia_med_check = _viola_oferta_em_dia_nao_atendido(text, ctx)
+        if violacao_dia_med_check:
+            medico_norm, data_str, dia_real = violacao_dia_med_check
+            log.warning(
+                "[FILTRO PULADO ja_agendado=True] _viola_oferta_em_dia_nao_atendido "
+                "detectou médico=%r data=%s cai em %s (não atende), mas paciente já "
+                "agendado e texto não parece oferta — investigar. Texto: %r",
+                medico_norm, data_str, dia_real, text[:300],
             )
 
     # 0a. Cobrança de sinal/Pix ANTES de slot concreto (regra 12.9 do master).
@@ -3340,6 +3572,52 @@ class Responder:
         # Chaos gate — força timeout quando flag Redis ativa (default OFF).
         if _chaos_ativo_anthropic():
             raise TimeoutError("chaos_test_active")
+
+        # ================================================================
+        # BYPASS DETERMINÍSTICO DE OFERTA DE AGENDA
+        # ================================================================
+        # Origem: Fábio 08/07/2026, lead Mariana 24273236. Bug crônico 60d
+        # de "Lia inventa frase e trava" nos filtros regex reativos.
+        #
+        # Quando FSM=AGENDA + dados prontos + médico/unidade + ctx.agenda
+        # já pré-buscada pelo pipeline (linha ~347), a mensagem de oferta
+        # é montada em PYTHON PURO — LLM NÃO é chamado.
+        #
+        # Se Medware retornou vazio (ctx.agenda=[]), Python devolve UMA
+        # frase canônica de escalação; pipeline complementa desativando
+        # IA + movendo pra 1-ATENDIMENTO HUMANO (webhook.py).
+        #
+        # Toggle rollback: AGENDA_DETERMINISTICA=0 (default ON).
+        # ================================================================
+        try:
+            from voice_agent import oferta_deterministica as _oferta_det
+            if _oferta_det.deve_ofertar_agora(caller_context):
+                _slots_agenda = (caller_context or {}).get("agenda") or []
+                if _slots_agenda:
+                    _texto = _oferta_det.montar_texto_2_slots(
+                        _slots_agenda, caller_context,
+                    )
+                    return {
+                        "answer": _texto,
+                        "model_used": "deterministica_agenda",
+                        "articles_used": [],
+                    }
+                else:
+                    _texto = _oferta_det.frase_escalacao_humano(caller_context)
+                    return {
+                        "answer": _texto,
+                        "model_used": "escalacao_medware_vazio",
+                        "articles_used": [],
+                    }
+        except AssertionError:
+            # Contrato violado (frase banida vazou) — deixa fluxo normal
+            # seguir. Sentinela loga em runtime pra investigação.
+            log.exception("[OFERTA_DET] sentinela disparou — caindo pra LLM")
+        except Exception:  # noqa: BLE001
+            # Qualquer erro (import, ctx malformado, etc) NÃO bloqueia o
+            # atendimento. Log e segue pro LLM.
+            log.exception("[OFERTA_DET] falha no bypass — caindo pra LLM")
+
         # 1. Seleciona artigos relevantes da KB
         relevant = self._kb.select_relevant(user_text, max_articles=3, max_chars=12000)
 

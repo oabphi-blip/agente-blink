@@ -6706,6 +6706,7 @@ async function submit(dryRun) {
             96441724,   # 0-ETAPA ENTRADA
             106919911,  # 0-a classificar/EXCLUIR DUPLICADO
             101508307,  # 2.LEADS FRIO
+            108749463,  # 2.1 campanha agosto (Bug C-43 Mariana Lopes 22617170, 12/07/2026)
             102560495,  # 3-AGENDAR
             107084255,  # 4-APRESENTADO HORÁRIOS
             106184631,  # 5.REAGENDAR (now show)
@@ -6727,6 +6728,7 @@ async function submit(dryRun) {
             96441724,   # 0-ETAPA ENTRADA
             106919911,  # 0-a classificar/EXCLUIR DUPLICADO
             101508307,  # 2.LEADS FRIO
+            108749463,  # 2.1 campanha agosto (Bug C-43)
             102560495,  # 3-AGENDAR
             107084255,  # 4-APRESENTADO HORÁRIOS
             106184631,  # 5.REAGENDAR (now show)
