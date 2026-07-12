@@ -2471,6 +2471,65 @@ def _gerar_pre_reserva_10min(ctx: Optional[dict] = None) -> str:
 import time as _time_c39  # noqa: E402
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# BUG C-44 (Fábio 12/07/2026 lead Clarice 22544990) — Papéis inventados
+# ═══════════════════════════════════════════════════════════════════════════
+# Sintoma: Lia escreveu 4× "vou encaminhar você para nossa especialista em
+# remarcação" em intervalos de 22s-2h. Papel inexistente. Prompt bumped
+# não bloqueou (cache Anthropic 5min TTL). Filtro SEMPRE-ON pós-geração
+# blinda: qualquer variante de "especialista em [X que não seja Karla/
+# Fabrício]" ou "vou encaminhar pra nossa/nosso [cargo]" vira frase
+# canônica de handoff humano.
+#
+# Não depende de FSM=AGENDA. Não depende de deve_ofertar_agora. Sempre-ON.
+
+_PAPEIS_INVENTADOS = re.compile(
+    r"(especialista\s+em\s+(?:remarca[cç][aã]o|remarca[cç][oõ]es|agendamento|"
+    r"cancelamento|altera[cç][aã]o|mudan[cç]a|troca|hor[áa]rios?)"
+    r"|nossa?\s+especialista\s+em\s+\w+"
+    r"|nosso?\s+especialista\s+em\s+\w+"
+    r"|vou\s+(?:te\s+)?encaminhar\s+(?:voc[eê]\s+)?(?:para|pra)\s+"
+    r"(?:nossa|nosso|a|o)\s+(?:especialista|equipe\s+de|departamento))",
+    re.IGNORECASE,
+)
+
+
+def _viola_papel_inventado(text: str) -> bool:
+    """C-44: Lia inventou cargo/papel que não existe na Blink.
+
+    Papéis reais da Blink (esses PODEM aparecer):
+        - Dra. Karla Delalíbera
+        - Dr. Fabrício Freitas
+        - Nossa equipe (genérico)
+        - Secretaria
+        - Um atendente humano
+
+    Qualquer variante de "especialista em X" (remarcação, agendamento,
+    cancelamento, alteração, mudança, troca, horários) OU "vou encaminhar
+    você para nossa/nosso [algo]" bate no filtro.
+    """
+    if not text:
+        return False
+    return bool(_PAPEIS_INVENTADOS.search(text))
+
+
+def _gerar_fallback_papel_inventado(ctx: Optional[dict]) -> str:
+    """C-44: substituição canônica quando Lia inventa cargo.
+
+    Frase única, curta, honesta. Sinaliza handoff humano sem prometer
+    cargo específico. Pipeline complementa desativando IA + movendo lead
+    pra 1-ATENDIMENTO HUMANO.
+    """
+    known = (ctx or {}).get("known") or {}
+    nome = known.get("nome_paciente") or ""
+    primeiro = str(nome).strip().split()[0] if nome else ""
+    saudacao = f"{primeiro}, " if primeiro else ""
+    return (
+        f"{saudacao}vou te conectar com nossa equipe pra dar continuidade — "
+        "só um momento, já retornam com você."
+    )
+
+
 def _viola_agendar_em_proxima_consulta(text: str, ctx: dict) -> bool:
     """C-39: Lia oferecendo slot ou chamando tool AGENDAR quando lead em PRÓXIMA CONSULTA."""
     if int((ctx or {}).get("lead", {}).get("status_id", 0)) != 106157327:
@@ -2772,6 +2831,17 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """
     if not text:
         return text
+
+    # === FILTRO C-44 SEMPRE-ON (Fábio 12/07/2026, lead Clarice 22544990) ===
+    # Detecta "especialista em [remarcação/agendamento/etc]" e "vou encaminhar
+    # você para nossa/nosso [cargo]". Papéis inexistentes na Blink. Substitui
+    # por frase canônica de handoff humano. Não depende de FSM nem status.
+    if _viola_papel_inventado(text):
+        log.error(
+            "[FILTRO C-44] PAPEL INVENTADO detectado. texto=%r",
+            text[:200],
+        )
+        return _gerar_fallback_papel_inventado(ctx)
 
     # === FILTRO C-39 SEMPRE-ON (01/07/2026, lead status=PRÓXIMA CONSULTA 106157327) ===
     # Sempre-ON, independe de FILTROS_LEGACY. Fatos objetivos (status_id +

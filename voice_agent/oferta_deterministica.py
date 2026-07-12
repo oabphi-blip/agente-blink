@@ -65,7 +65,7 @@ def _ativado() -> bool:
 # ===========================================================================
 # Se alguma dessas aparecer no texto de saída, é bug e AssertionError.
 FRASES_BANIDAS: tuple[str, ...] = (
-    # Bug Mariana 08/07/2026 lead 24273236
+    # Bug Mariana 08/07/2026 lead 24273236 + Clarice 12/07/2026 lead 22544990
     "reconferir",
     "reconferir com o calendário",
     "reconferir com o calendario",
@@ -73,9 +73,21 @@ FRASES_BANIDAS: tuple[str, ...] = (
     "reconferir os horarios",
     "especialista em remarcação",
     "especialista em remarcacao",
+    "especialista em agendamento",
+    "especialista em cancelamento",
+    "especialista em remarcações",
+    "especialista em remarcacoes",
+    "nossa especialista em",
+    "nosso especialista em",
+    "equipe de remarcação",
+    "equipe de remarcacao",
     "fora do ar",
     "não está retornando",
     "nao esta retornando",
+    "vou encaminhar você para nossa",
+    "vou encaminhar voce para nossa",
+    "vou encaminhar você para nosso",
+    "vou encaminhar voce para nosso",
     "vou encaminhar você",
     "vou encaminhar voce",
     # Bug Sofia 16/06, Alice 03/06, Sabrina/Kamila/Janeide/Iara/Keyla 02/06

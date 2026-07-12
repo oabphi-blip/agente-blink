@@ -213,6 +213,59 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (12/07/2026) Bug C-43 — Etapa nova "2.1 campanha agosto" + convênio Afego não mapeados (Mariana Lopes 22617170)
+
+**Caso:** 11/07/2026 18:55 lead 22617170 Mariana Lopes Gomes (12a, Afego, Karla Águas Claras, oftalmologia geral). Ela pediu terça-feira à tarde. Lia respondeu em sequência:
+- 18:46 "Perfeito, Aliana! Terça em Águas Claras com Dra. Karla..."
+- 18:46 "Deixa eu **reconferir os horários com o calendário**..." ← frase nova
+- 18:54 "Ótimo! Você prefere terça à tarde... me dá um minutinho..."
+- 18:55 **"nossa agenda está fora do ar neste exato momento"** ← MENTIRA (Medware UP)
+
+Chat travou 41h sem resposta. Slots disponíveis Karla Águas Claras 11/08 15h/15h30/16h — nunca ofertados.
+
+**Causas raiz (duas simultâneas, fix necessário nas duas):**
+
+1. **Etapa `108749463` (2.1 campanha agosto) fora de `_STATUS_ATIVOS_IA`** em `voice_agent/webhook.py`. Etapa criada recentemente pelo Fábio pra lista AGO 2026 (nº Slack `0116AGO`). Sem mapeamento, Lia caía em fallback genérico → resposta livre → invenção de frase.
+
+2. **Convênio "Afego" (Kommo, 1 F)** não estava em `PLANO_CODES` de `voice_agent/medware.py`. Medware mapeia como `AFFEGO` (2 F, codPlano 7). Gravação Medware falhava com "plano não mapeado" → escalação humano → paciente ficava esperando indefinidamente.
+
+**Fix arquitetural (commit 2f3af92, 12/07/2026 08:00):**
+
+- **`voice_agent/webhook.py`:** `108749463` adicionado nas 2 políticas ATIVOS_IA (simplificada + rollback antiga).
+- **`voice_agent/medware.py::PLANO_CODES`:** aliases `"afego": 7`, `"affeg": 7`, `"afego bh": 7`, `"afego brasilia": 7` (todas as variantes que paciente pode digitar).
+- **`voice_agent/oferta_deterministica.py`:** frase "fora do ar" já estava em `FRASES_BANIDAS` desde MEGA SPRINT (24 frases). Bypass Python força texto canônico quando `deve_ofertar_agora()` retorna True.
+- **`tests/test_bug_c43_mariana_lopes_campanha_agosto.py`:** 14 asserções blindando os 2 fixes + frases banidas + texto canônico usando ctx real da Mariana.
+
+**Pytest:** 14/14 verde + 65/65 oferta_deterministica.
+
+**Lição arquitetural CRÍTICA (recorrência do C-53):**
+
+- **Etapa criada no Kommo sem propagar pro código = bug garantido.** Toda etapa nova em `pipeline_id=8601819` PRECISA ser adicionada em `_STATUS_ATIVOS_IA` OU `_STATUS_INATIVOS_IA` no mesmo dia. Task recorrente pra criar: script/cron que compara `list_pipelines_and_stages` com o hardcoded no webhook.py e alerta Slack quando diverge.
+- **Convênio novo no Kommo (enum) sem alias no PLANO_CODES = gravação Medware falha silenciosamente.** Mesmo padrão do bug arquitetural indexado no C-53 (regras hard-coded em Python). Migrar `PLANO_CODES` pra JSON externo com watchdog é próximo passo.
+- **Frase nova ("reconferir com o calendário") escapa do filtro regex — mas bypass Python `oferta_deterministica` já matematicamente elimina esse risco.** Fix arquitetural correto ativado.
+
+### 0. (11/07/2026) Bug C-53 — Filtro C-31b (dia impossível) pulado com ja_agendado=True (Beatriz 16843614)
+
+**Caso:** lead 16843614 Beatriz Lobosque em 5-AGENDADO com `1.DIA CONSULTA=07/08/2025` (passado), `MEDICOS=Karla`, `UNIDADE=Águas Claras`. Lia respondeu (11/07/2026 07:29): *"Tenho 2 horários abertos com a Dra. Karla Delalibera, Águas Claras: 1️⃣ Sexta-feira (07/08) às 10:00 2️⃣ Segunda-feira (17/08) às 10:00 Algum desses cabe pra você?"*. Karla em Águas Claras só atende terça e quinta. Sexta e segunda são impossíveis.
+
+**Causa raiz — combinação venenosa de 3 bugs:**
+
+1. `ja_agendado=True` mesmo com `1.DIA CONSULTA` no passado (bug C-36 residual).
+2. Filtro `_viola_oferta_em_dia_nao_atendido` pulado quando `ja_agendado=True` — presumia que qualquer menção a data era CONFIRMAÇÃO. Errado: emoji 1️⃣ 2️⃣ + "Algum desses cabe" é OFERTA nova.
+3. Tabela dias × médico × unidade hard-coded em Python — qualquer bug de gate/redeploy tira a defesa do ar.
+
+**Fix arquitetural em 3 camadas:**
+
+1. Helper `_texto_parece_oferta_nova(text)` detecta padrões de OFERTA: 1️⃣ 2️⃣, "tenho N horários", "posso oferecer", "algum desses cabe/funciona", "prefere qual". Confirmação/resumo/referência NÃO usa esses padrões.
+2. Loop C-31 roda quando `NOT ja_agendado OR texto_parece_oferta`. Beatriz agora é bloqueada.
+3. Tabela migrada pra JSON externo `voice_agent/calendar_atendimento.json`. Cache TTL 60s. Editar o JSON = mudança em prod, sem redeploy. Fallback hard-coded como safety net.
+
+**Pytest:** `tests/test_bug_c53_beatriz_agendada_dia_impossivel.py` — 17/17 verde. 110/110 combinado.
+
+**Lição arquitetural CRÍTICA (Fábio 11/07):** "continuar disfuncional porque não grava esta tabela no database, para não ocorrer retrocessos. Já tivemos este mesmo tipo de erro 1000 vezes."
+
+Fábio está certo. O padrão hard-coded-em-Python foi causa raiz de C-31, C-38, C-53 — o mesmo bug com nomes diferentes. **Nova regra permanente:** TODA tabela de regras clínicas/operacionais (dias de atendimento, valores, agrupadores, cidades × unidade, convênios aceitos, códigos Medware) DEVE viver em JSON externo com cache TTL curto + fallback hard-coded. Alterar o JSON = alterar prod. Migrações pendentes: agrupadores, convênios aceitos, PLANO_CODES Medware.
+
 ### 0. (26/06/2026) Bug C-42 — Lia escreve contradições em lead já AGENDADO (Thamilla 23811372)
 
 **Caso:** lead 23811372 Thamilla Torres de Freitas. Status 5-AGENDADO, CONVÊNIO=Saúde Caixa (aceito), 1.DIA CONSULTA=02/07/2026 16:30, UNIDADE=Águas Claras. Lia escreveu em 26/06 11:26: *"Sua consulta com a Dra. Karla Delalíbera pelo Saúde Caixa está confirmada para quinta-feira 02/07/2026 às 16:30 na unidade Águas Claras"* ✓. **10 horas depois, às 21:33**, Lia escreveu: *"Thamilla, preciso te corrigir uma informação: o **AMIL** não está credenciado na nossa rede... Como prefere seguir? 1) Seguir sem convênio  2) Somente com convênio (encerro o atendimento aqui)"*. 5 incoerências simultâneas:
