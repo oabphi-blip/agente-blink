@@ -213,6 +213,33 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (14/07/2026 NOITE) Bug C-55 + C-56 deployados + 2 fixes pendentes (C-57 + handoff-contexto)
+
+**Sessão intensa 14/07 madrugada 15/07. Fábio muito frustrado com repetição de bugs.**
+
+**Deployados em prod:**
+
+| Commit | Bug | Efeito |
+|---|---|---|
+| **c4a8595** | C-55 Valores Karla + Fabrício + regra anti-cobertura | Tabela oficial do Kommo (Pix R$611 / Cartão 1x R$670 / 2x R$670 pra Karla; R$445/470/470 pra Fabrício). NUNCA fala "coberto/coparticipação/reembolso". "Sem Convênio" = PARTICULAR (aplica tabela). Bug apareceu em Dani 24292474 e Emilly 24295374 no dia. |
+| **812bb07** | C-56 Trace `[VA-FB-2025]` + fallback instabilidade | 3 problemas de uma vez: trace ID interno vazava, fallback resetava contexto, dedup era 300s em vez de 24h. Fix: silêncio > lixo. Claude API falha 3x → move lead SILENCIOSAMENTE pra 1-ATENDIMENTO HUMANO + nota interna. Zero mensagem quebrada. Bug apareceu em Ana Luiza 24290902 (12/07), Emilly 24300272 (14/07), Melissa 10934653 (14/07). |
+
+**Pendentes indexados pra próxima sessão** (ler `HANDOFF_ATUAL.md` na raiz):
+
+- **Task #412 — Bug C-57**: Lia ignorou "NÃO AGENDAR MAIS" da Dra. Karla pra Melissa (nota de 15/08/2025). Implementar `voice_agent/bloqueio_clinico.py` + regex nas notas humanas + auto-desativa IA. Pytest 8 cenários. ~1h.
+- **Task #413 (a criar) — Handoff humano preserva contexto**: quando humano manda mensagem no meio, Lia perde tudo e pula/silencia. Fix: carregar últimas 20 notas do Kommo + injetar no system prompt como bloco CONVERSA_ATUAL. Pytest cenário Emmy/Ariany. ~2h.
+
+**Estado emocional Fábio (importante):**
+Cobrou "só cobra dinheiro, promete e não entrega". Toda próxima sessão deve começar mostrando **evidência de trabalho concreto** (commit sha, arquivo criado, teste rodado) antes de propor plano novo. Não prometer — mostrar.
+
+**Aprendizado sem custo extra (roadmap conceitual, respondi mas ainda não implementei):**
+1. Prompt evolution automatizada via bugs-licoes/ + RAG
+2. RAG dinâmico já existe (`memoria_bugs.py`) mas subutilizado
+3. Few-shot dinâmico injetando 3 exemplos similares
+4. Feedback loop: correção humana em nota Kommo → regra reativa auto
+
+Custo zero adicional — só usa tokens já pagos.
+
 ### 0. (12/07/2026) Bug C-43 — Etapa nova "2.1 campanha agosto" + convênio Afego não mapeados (Mariana Lopes 22617170)
 
 **Caso:** 11/07/2026 18:55 lead 22617170 Mariana Lopes Gomes (12a, Afego, Karla Águas Claras, oftalmologia geral). Ela pediu terça-feira à tarde. Lia respondeu em sequência:
