@@ -8,6 +8,11 @@ conhecimento de primeira ordem.
 Valores atualizados conforme fonte oficial no Kommo — corrige bug C-55
 (Lia dizia "Sem Convênio é coberto, coparticipação" pra particular).
 
+**Revisão 15/07/2026 — Bug C-58 (Fábio print field 1259108 atualizado):**
+- Nova categoria **Encaixe 2ª a 6ª** (R$ 511 / 570 / 570) — separada de Sábado
+- **Sábado** ficou mais barato (R$ 411 / 467 / 467)
+- **Formato "mensagem humana"** libera Lia a apresentar Pix como **sinal 50%** + Cartão **integral no ato do agendamento** — antes proibido, agora autorizado por Fábio como opção mais flexível
+
 Regra fixa: **NUNCA explicar cobertura do convênio do paciente**. Isso
 é decisão do paciente com o plano dele. Nós apresentamos SEMPRE o valor
 particular (Pix, cartão 1x, cartão 2x) e paciente decide.
@@ -28,10 +33,10 @@ particular (Pix, cartão 1x, cartão 2x) e paciente decide.
 
 ---
 
-### 2. Consulta SÁBADO / ENCAIXE — Dra. Karla Delalíbera
+### 2. Consulta ENCAIXE 2ª a 6ª — Dra. Karla Delalíbera *(NOVA CATEGORIA, 15/07/2026)*
 
-Consulta em horário especial de sábado ou encaixe fora da grade regular
-(agenda estendida, valor incentivado).
+Encaixe fora da grade regular em dia útil (segunda a sexta) — valor incentivado
+por ser slot extra além do normal do dia.
 
 | Forma de pagamento | Valor |
 |---|---|
@@ -41,13 +46,27 @@ Consulta em horário especial de sábado ou encaixe fora da grade regular
 
 **Exames inclusos:** tonometria, motilidade, mapeamento de retina.
 
+---
+
+### 3. Consulta SÁBADO — Dra. Karla Delalíbera *(valores atualizados 15/07/2026)*
+
+Consulta em sábado (agenda estendida, valor incentivado ainda menor que encaixe).
+
+| Forma de pagamento | Valor |
+|---|---|
+| 📲 **1ª opção — Pix (à vista)** | **R$ 411,00** |
+| 💳 **2ª opção — Cartão 1x** | **R$ 467,00** |
+| 💳 **3ª opção — Cartão 2x sem juros** | **R$ 467,00** (2x R$ 233,50) |
+
+**Exames inclusos:** tonometria, motilidade, mapeamento de retina.
+
 **Sábados atendidos:**
 - **Asa Norte** — penúltimo sábado do mês
 - **Águas Claras** — último sábado do mês
 
 ---
 
-### 3. Avaliação do Processamento Visual (APV) — Dra. Karla Delalíbera
+### 4. Avaliação do Processamento Visual (APV) — Dra. Karla Delalíbera
 
 Consulta específica de APV (Suporte ao Desenvolvimento e Aprendizagem).
 
@@ -59,7 +78,7 @@ Consulta específica de APV (Suporte ao Desenvolvimento e Aprendizagem).
 
 ---
 
-### 4. Avaliação para cirurgia de catarata + pós-op — Dr. Fabrício Freitas
+### 5. Avaliação para cirurgia de catarata + pós-op — Dr. Fabrício Freitas
 
 Fonte oficial: Kommo field **R$ FABRICIO** (id 1260631). Revisão 13/07/2026.
 
@@ -77,12 +96,14 @@ Pós-operatório até 30 dias segue mesmo valor.
 
 ## Como a Lia deve responder
 
-### Caso 1 — Paciente pergunta valor SEM convênio (particular / "Sem Convênio" / "Não se aplica")
+Existem 2 formatos autorizados. A Lia usa o **Formato Padrão** por default;
+o **Formato Humano (Pix sinal 50%)** só é liberado quando o atendente humano
+já enviou mensagem nesse formato no chat (Lia replica o modelo humano) OU
+quando o paciente pergunta explicitamente sobre parcelamento/sinal.
 
-Lia responde DIRETO com as 3 opções + exames inclusos. Zero fala sobre
-cobertura de plano.
+### Formato PADRÃO — 3 opções à vista, sinal só depois da aceitação
 
-Script canônico:
+Script canônico (Caso 1 — particular / "Sem Convênio" / "Não se aplica"):
 
 > "A consulta com a Dra. Karla Delalíbera tem 3 opções:
 >
@@ -94,8 +115,52 @@ Script canônico:
 >
 > Qual forma de pagamento fica melhor pra você?"
 
-Para APV (R$ 800/870), sábado/encaixe (R$ 511/570), Fabrício catarata
-(R$ 297) — usar a linha correspondente da tabela.
+Depois que paciente aceitar o slot, aí sim entra o sinal 50% na etapa E9
+(agendamento). No PADRÃO, apresentação inicial NÃO menciona sinal.
+
+Para APV (R$ 800/870), encaixe (R$ 511/570), sábado (R$ 411/467), Fabrício
+catarata (R$ 445) — usar a linha correspondente da tabela.
+
+### Formato HUMANO — Pix 50% sinal + Cartão integral no ato *(liberado 15/07/2026)*
+
+Autorização: quando atendente humano enviou mensagem nesse formato antes
+da Lia (Lia replica o padrão do chat) OU quando paciente pergunta sobre
+sinal/parcelamento/reserva.
+
+Script canônico (Caso 1 humano — particular):
+
+> "Olá, [Nome],
+>
+> Em continuidade ao atendimento sem convênio, apresentamos o valor da consulta.
+>
+> 🎯 Sua consulta oftalmológica já inclui exames importantes como:
+> 👁️ Tonometria
+> 👀 Exame de Motilidade
+> 🌀 Mapeamento de Retina
+>
+> 💳 Valor total: R$ 611,00 — 2 formas de pagar:
+>
+> 1️⃣ **Pix** — sinal de 50% (R$ 305,50) no ato do agendamento e os R$ 305,50 restantes no dia da consulta.
+>
+> 2️⃣ **Cartão de crédito** — valor integral de R$ 670,00 no ato do agendamento.
+>
+> Chave Pix ([Unidade]): [chave conforme unidade]
+>
+> Qual a sua escolha?"
+
+Chaves Pix (allowlist estrita — filtro `_scrub_prohibited` bloqueia qualquer outra):
+- **Asa Norte:** `karladelaliberaoftalmo@gmail.com` (e-mail)
+- **Águas Claras:** CNPJ `52.303.729/0001-30`
+
+Cálculo do sinal 50% por categoria (formato humano):
+
+| Categoria | Valor total | Sinal 50% Pix | Cartão integral |
+|---|---|---|---|
+| Individual até 2 | R$ 611 | R$ 305,50 | R$ 670 |
+| Encaixe 2ª-6ª | R$ 511 | R$ 255,50 | R$ 570 |
+| Sábado | R$ 411 | R$ 205,50 | R$ 467 |
+| APV | R$ 800 | R$ 400,00 | R$ 870 |
+| Fabrício catarata | R$ 445 | R$ 222,50 | R$ 470 |
 
 ### Caso 2 — Paciente pergunta valor COM convênio aceito
 
@@ -131,28 +196,45 @@ Lia pergunta 1 coisa só (motivo/especialidade) e antecipa faixa:
 
 > "Depende do tipo de consulta:
 > • Consulta com a Dra. Karla (rotina, pediátrica, estrabismo): R$ 611 Pix ou R$ 670 em 2x
-> • Consulta especial de sábado (Dra. Karla): R$ 511 Pix ou R$ 570 em 2x
+> • Encaixe 2ª a 6ª (slot extra fora da grade regular): R$ 511 Pix ou R$ 570 em 2x
+> • Consulta especial de sábado (Dra. Karla): R$ 411 Pix ou R$ 467 em 2x
 > • Avaliação do Processamento Visual (aprendizagem): R$ 800
 > • Avaliação de catarata (Dr. Fabrício Freitas): R$ 445 Pix ou R$ 470 no cartão (1x ou 2x R$ 235)
 >
 > Qual desses interessa pra você?"
 
-### Caso 5 — Paciente pergunta sobre sábado / encaixe
+### Caso 5 — Paciente pergunta sobre sábado
 
-Sábado é valor incentivado (mais barato que dia útil regular):
+Sábado é o valor mais incentivado (mais barato que dia útil regular e que
+encaixe):
 
 > "Nossa agenda especial de sábado com a Dra. Karla Delalíbera é uma
 > oportunidade de cuidar da visão sem correria de escola ou trabalho:
 >
-> 📲 **1ª opção — Pix:** R$ 511
-> 💳 **2ª opção — Cartão 1x:** R$ 570
-> 💳 **3ª opção — Cartão 2x sem juros:** R$ 570 (2x R$ 285)
+> 📲 **1ª opção — Pix:** R$ 411
+> 💳 **2ª opção — Cartão 1x:** R$ 467
+> 💳 **3ª opção — Cartão 2x sem juros:** R$ 467 (2x R$ 233,50)
 >
 > A consulta já inclui os exames. Sábados atendidos:
 > • Asa Norte — penúltimo sábado do mês
 > • Águas Claras — último sábado do mês
 >
 > Qual unidade fica melhor?"
+
+### Caso 6 — Paciente pergunta sobre encaixe *(NOVO 15/07/2026)*
+
+Encaixe = slot extra em dia útil fora da grade regular. Valor incentivado
+por ser oferta pontual.
+
+> "Nossa agenda de encaixe (2ª a 6ª) com a Dra. Karla Delalíbera é uma
+> oportunidade quando abre slot extra fora da grade regular:
+>
+> 📲 **1ª opção — Pix:** R$ 511
+> 💳 **2ª opção — Cartão 1x:** R$ 570
+> 💳 **3ª opção — Cartão 2x sem juros:** R$ 570 (2x R$ 285)
+>
+> Encaixes dependem de disponibilidade — me diz qual unidade prefere
+> (Asa Norte ou Águas Claras) e eu verifico o próximo slot livre."
 
 ---
 
@@ -166,9 +248,10 @@ convênio. Regra Fábio 13/07/2026 (bug C-55, leads 24292474 Dani e
 ❌ **NUNCA tratar "Sem Convênio" ou "Não se aplica" como convênio.** São
 sinônimos de PARTICULAR — aplicar Caso 1 (3 opções Pix/Cartão 1x/Cartão 2x).
 
-❌ **NUNCA misturar valor de dia útil (R$ 611) com sábado (R$ 511).**
-Se paciente quer sábado, aplicar tabela sábado. Se quer dia útil, aplicar
-tabela dia útil. Não somar, não confundir.
+❌ **NUNCA misturar valor de encaixe (R$ 511) com sábado (R$ 411) ou
+dia útil regular (R$ 611).** São 3 tabelas distintas. Se paciente
+pediu sábado, aplicar tabela sábado. Se pediu encaixe, tabela encaixe.
+Se pediu dia normal, tabela individual.
 
 ❌ Perguntar "com ou sem convênio?" quando `ctx.known.convenio` já tem
 qualquer valor (incluindo "Não se aplica", "Particular", "Não aceita").
@@ -182,15 +265,17 @@ pelo menos a tabela do Caso 4.
 ❌ Inventar valores fora desta tabela. Se Fábio mudar valor, este
 artigo é a única fonte de verdade. Lia deve ler aqui.
 
-❌ Falar em "sinal 50%" logo no valor. Sinal só entra na etapa E9
-(pós-agendamento), não no Caso 1 (apresentação de valor).
+❌ **Falar em "sinal 50%" no Formato PADRÃO.** Sinal só entra na etapa
+E9 (pós-agendamento) OU quando o atendente humano já usou o Formato
+HUMANO no chat (Lia replica o padrão) OU quando paciente pergunta
+explicitamente sobre parcelamento/sinal.
 
 ---
 
 ## Fonte oficial
 
 **Campo Kommo `R$ KARLA DELALÍB`** (field_id 1259108, seleção múltipla).
-Enum values transcritos do print Fábio 13/07/2026:
+Enum values transcritos do print Fábio 15/07/2026:
 
 ```
 Individual até 2 pacientes
@@ -198,10 +283,15 @@ Individual até 2 pacientes
   ├── Segunda Opção. R$670,00 (1x Cartão)
   └── Terceira Opção. R$670,00 (2x Cartão)
 
-Sábado, Encaixe
+Encaixe 2ª a 6ª (NOVO 15/07/2026)
   ├── Primeira Opção. R$511,00 Pix
   ├── Segunda Opção. R$570,00 (1x Cartão)
   └── Terceira Opção. R$570,00 (2x Cartão)
+
+Sábado (valores atualizados 15/07/2026)
+  ├── Primeira Opção. R$411,00 Pix
+  ├── Segunda Opção. R$467,00 (1x Cartão)
+  └── Terceira Opção. R$467,00 (2x Cartão)
 
 Avaliação do Processamento Visual
   ├── Primeira Opção. R$800,00 Pix
