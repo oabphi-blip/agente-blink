@@ -691,29 +691,73 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "user_text=%r last_exc=%s",
                 convo_key, user_text[:200], _last_exc_repr or "(sem exc)",
             )
-            # DEDUP do fallback: 24h por convo_key.
-            # Antes era 30 min — mas paciente Patricia Somera (lead 24041465,
-            # 29/05) recebeu 2 fallbacks em 35 min porque TTL expirou entre as
-            # falhas. 24h elimina repetição total. Se Claude continuar caindo,
-            # silêncio é melhor que robô quebrado.
+            # Bug C-56 (14/07/2026, leads 24290902, 24300272, 10934653):
+            # o fallback antigo mandava "[VA-FB-2025] Oi! Tivemos uma
+            # instabilidade rápida por aqui 🙏 Já voltei — me conta de novo
+            # como posso te ajudar?" — 3 problemas simultâneos:
+            #   1. Trace ID interno vazava pra paciente
+            #   2. "Me conta de novo" apagava o contexto do paciente
+            #   3. Dedup dizia 24h no comentário mas usava 300s (5min) — mesmo
+            #      paciente recebia o fallback 2-3x por dia (Emilly 24300272
+            #      recebeu 3x em 2h30min)
+            #
+            # Fix C-56 — em vez de mandar mensagem quebrada pro paciente,
+            # SILENCIOSAMENTE escalar pra humano:
+            #   - Mover lead pra 1-ATENDIMENTO HUMANO (status 106563343)
+            #   - Setar ATIVADO IA = Desativado
+            #   - Gravar nota interna com contexto do erro
+            #   - NÃO mandar mensagem pro paciente (silêncio > lixo)
+            # Watchdog promessa e equipe humana pegam o lead na etapa nova.
+            try:
+                _kommo = getattr(pipeline, "kommo", None)
+                _lead_id_hint = None
+                if _kommo:
+                    try:
+                        _lead_id_hint = _kommo.find_lead_id_by_phone(phone)
+                    except Exception:  # noqa: BLE001
+                        pass
+                if _kommo and _lead_id_hint:
+                    try:
+                        _kommo.update_lead_fields(
+                            _lead_id_hint,
+                            {
+                                "status_id": 106563343,  # 1-ATENDIMENTO HUMANO
+                                "ativado_ia": "Desativado",
+                            },
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        log.warning(
+                            "C-56 escala humano falhou (%s): %s", phone, e,
+                        )
+                    try:
+                        _kommo.add_note(
+                            _lead_id_hint,
+                            f"⚠️ [SISTEMA {_time.strftime('%H:%M %d/%m')}] "
+                            f"Claude API falhou 3x pra este paciente. Lead "
+                            f"movido pra ATENDIMENTO HUMANO automaticamente. "
+                            f"Última pergunta: {user_text[:200]!r}. "
+                            f"Erro: {_last_exc_repr[:120] or 'sem exc'}",
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        log.warning(
+                            "C-56 nota escalação falhou (%s): %s", phone, e,
+                        )
+            except Exception as e:  # noqa: BLE001
+                log.warning("C-56 escalada humano ignorada: %s", e)
+
+            # DEDUP verdadeiro: 24h por convo_key (era 300s por bug).
+            # Além disso, não manda MAIS mensagem pro paciente — só escala.
             _fallback_key = f"blink:fallback:instab:{convo_key}"
             try:
                 _redis = getattr(pipeline, "_redis", None)
-                if _redis is not None and _redis.exists(_fallback_key):
-                    log.warning(
-                        "WA Cloud: fallback instabilidade suprimido "
-                        "(já enviado nas últimas 24h para %s)",
-                        convo_key,
-                    )
-                    return
                 if _redis is not None:
-                    _redis.set(_fallback_key, "1", ex=300)  # 5 min DEBUG 30-mai
+                    _redis.set(_fallback_key, "1", ex=86400)  # 24h
             except Exception as e:  # noqa: BLE001
                 log.debug("dedup fallback ignorado: %s", e)
-            answer = (
-                "[VA-FB-2025] Oi! Tivemos uma instabilidade rápida por aqui 🙏 "
-                "Já voltei — me conta de novo como posso te ajudar?"
-            )
+
+            # Zero mensagem pro paciente. Silêncio > "instabilidade rápida"
+            # com contexto perdido. Humano assume no chat.
+            return
         if not answer:
             return
         # Pausa natural — tempo total proporcional ao tamanho da resposta
