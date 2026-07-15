@@ -355,6 +355,65 @@ def test_c55_kb_valores_exames_inclusos_declarados():
 
 
 # ============================================================================
+# C-57 — Bloqueio clínico (Melissa/Karla)
+# ============================================================================
+
+def test_c57_modulo_bloqueio_clinico_existe():
+    """voice_agent/bloqueio_clinico.py deve existir com função pública."""
+    from voice_agent.bloqueio_clinico import (
+        detectar_bloqueio_clinico,
+        paciente_bloqueado,
+    )
+    # Assert que funções são callable
+    assert callable(detectar_bloqueio_clinico)
+    assert callable(paciente_bloqueado)
+
+
+def test_c57_kommo_agent_paused_usa_bloqueio_clinico():
+    """agent_paused_for_lead deve ter Regra 3 chamando detectar_bloqueio_clinico."""
+    kommo = (VOICE_AGENT / "kommo.py").read_text(encoding="utf-8")
+    assert "detectar_bloqueio_clinico" in kommo, (
+        "kommo.py deve usar detectar_bloqueio_clinico como Regra 3"
+    )
+    assert "bloqueio-clinico" in kommo, (
+        "Motivo 'bloqueio-clinico' deve ser retornado"
+    )
+
+
+# ============================================================================
+# C-58 / Task #413 — Handoff humano preserva contexto (Emmy 24300272)
+# ============================================================================
+
+def test_c58_modulo_historico_conversa_existe():
+    """voice_agent/historico_conversa.py deve existir com funções públicas."""
+    from voice_agent.historico_conversa import (
+        houve_handoff_humano_recente,
+        montar_bloco_conversa_atual,
+    )
+    assert callable(houve_handoff_humano_recente)
+    assert callable(montar_bloco_conversa_atual)
+
+
+def test_c58_responder_injeta_bloco_conversa_atual():
+    """responder.py deve importar e chamar montar_bloco_conversa_atual."""
+    responder = (VOICE_AGENT / "responder.py").read_text(encoding="utf-8")
+    assert "montar_bloco_conversa_atual" in responder, (
+        "responder.py deve importar montar_bloco_conversa_atual"
+    )
+    assert "notas_historico" in responder, (
+        "responder.py deve ler caller_context['notas_historico']"
+    )
+
+
+def test_c58_kommo_expoe_notas_historico():
+    """kommo.py::get_caller_context_by_lead deve popular ctx['notas_historico']."""
+    kommo = (VOICE_AGENT / "kommo.py").read_text(encoding="utf-8")
+    assert 'out["notas_historico"]' in kommo or "out['notas_historico']" in kommo, (
+        "kommo.py deve popular out['notas_historico'] em get_caller_context_by_lead"
+    )
+
+
+# ============================================================================
 # Meta-teste: VERSAO_PROMPT bumpada
 # ============================================================================
 

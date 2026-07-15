@@ -1410,6 +1410,121 @@ _DIA_NAO_ATENDIDO_FALLBACK = (
 
 
 # ------------------------------------------------------------------
+# Filtro C-54 (13/07/2026, lead 24185000 Ubirata/Lucas) —
+# menção a dia-da-semana SEM data numérica, cruzada com unidade do ctx.
+# ------------------------------------------------------------------
+# O filtro C-31b acima só valida quando o texto tem DD/MM. Ubirata disse
+# "quinta ou sexta" e a Lia gravou "quinta ou sexta na Asa Norte" — mas
+# quinta em Asa Norte é impossível (Karla está em Águas Claras).
+# Este filtro pega a variante SEM data.
+
+# nome -> weekday
+_DIAS_SEMANA_PT_TO_WEEKDAY = {
+    "segunda": 0, "segunda-feira": 0, "seg": 0,
+    "terça": 1, "terca": 1, "terça-feira": 1, "terca-feira": 1, "ter": 1,
+    "quarta": 2, "quarta-feira": 2, "qua": 2,
+    "quinta": 3, "quinta-feira": 3, "qui": 3,
+    "sexta": 4, "sexta-feira": 4, "sex": 4,
+    "sábado": 5, "sabado": 5, "sáb": 5, "sab": 5,
+    "domingo": 6, "dom": 6,
+}
+
+# Padrão: dia-da-semana isolado (não seguido de número DD/MM)
+_DIA_SEM_DATA_REGEX = re.compile(
+    r"\b(segunda|ter(?:ç|c)a|quarta|quinta|sexta|s(?:á|a)bado|domingo)"
+    r"(?:[\s-]*feira)?\b",
+    re.IGNORECASE,
+)
+
+
+def _viola_dia_sem_data_incompativel_unidade(
+    text: str,
+    ctx: Optional[dict] = None,
+) -> Optional[tuple[str, str, str]]:
+    """Detecta menção a dia-da-semana (sem data DD/MM) que é impossível
+    naquela unidade dado o médico do ctx.
+
+    Ex: ctx tem `medico=Karla` e `unidade=Asa Norte`. Texto tem "quinta"
+    (sem data). Karla Asa Norte atende seg/qua/sex — quinta é impossível.
+    Retorna (dia_mencionado, medico_norm, unidade_norm).
+
+    Só dispara se:
+      - ctx tem médico E unidade
+      - texto tem dia-da-semana isolado (sem DD/MM próximo)
+      - dia-da-semana NÃO bate com os dias permitidos
+
+    Não bloqueia se o texto TAMBÉM tem uma data DD/MM (nesse caso é o
+    filtro C-31b que age).
+    """
+    if not text:
+        return None
+    known = ((ctx or {}).get("known") or ctx or {})
+    medico_raw = (known.get("medico") or (ctx or {}).get("medico") or "").lower()
+    unidade_raw = (
+        known.get("unidade") or (ctx or {}).get("unidade") or ""
+    ).lower().strip()
+    if not medico_raw or not unidade_raw:
+        return None
+
+    dias_por_med_unid = _get_dias_por_medico_unidade()
+    dias_por_med_uniao = _get_dias_por_medico()
+
+    medico_norm = ""
+    for m in dias_por_med_uniao:
+        if m in medico_raw:
+            medico_norm = m
+            break
+    if not medico_norm:
+        return None
+
+    chave = (medico_norm, unidade_raw)
+    permitidos = dias_por_med_unid.get(chave)
+    if not permitidos:
+        # Se combinação médico+unidade não está mapeada (Kátia em pausa,
+        # unidade nova), não bloqueia. Deixa filtro C-31b lidar.
+        return None
+
+    # Se o texto TAMBÉM tem uma data DD/MM próxima do dia-da-semana,
+    # deixa o filtro C-31b tratar (ele valida a data completa).
+    if _DIA_DATA_REGEX.search(text):
+        return None
+
+    # Detecta dia-da-semana isolado no texto e checa se NENHUMA das
+    # menções bate com permitidos.
+    dias_mencionados = set()
+    for match in _DIA_SEM_DATA_REGEX.finditer(text):
+        dia_raw = match.group(1).lower().replace("terca", "terça")
+        wd = _DIAS_SEMANA_PT_TO_WEEKDAY.get(dia_raw)
+        if wd is None:
+            # tenta com -feira
+            wd = _DIAS_SEMANA_PT_TO_WEEKDAY.get(dia_raw + "-feira")
+        if wd is not None:
+            dias_mencionados.add((dia_raw, wd))
+
+    if not dias_mencionados:
+        return None
+
+    # Se PELO MENOS UM dia mencionado É atendido, tudo bem (ex: "sexta"
+    # sozinha em Asa Norte é ok — sexta é seg/qua/sex).
+    for dia_raw, wd in dias_mencionados:
+        if wd in permitidos:
+            return None
+
+    # Todos os dias mencionados são IMPOSSÍVEIS naquela unidade.
+    # Retorna o primeiro pra log/alerta.
+    dia_raw, _ = next(iter(dias_mencionados))
+    return (dia_raw, medico_norm, unidade_raw)
+
+
+_DIA_SEM_DATA_FALLBACK = (
+    "Deixa eu conferir os dias direito antes de gravar. A Dra. Karla "
+    "Delalíbera atende **seg/qua/sex em Asa Norte** e **ter/qui em "
+    "Águas Claras**. Me diz de novo qual dia funciona melhor e eu já "
+    "confirmo a unidade certa pra esse dia."
+)
+
+
+# ------------------------------------------------------------------
 # Filtro anti-mentira: NUNCA afirmar que foi gravado no Medware
 # ------------------------------------------------------------------
 # Origem: lead 24038029 (29/05/2026), nota 28929893. Paciente perguntou
@@ -3370,6 +3485,19 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
                 bool(ctx and ctx.get("ja_agendado")), _padrao_oferta, text[:300],
             )
             return _DIA_NAO_ATENDIDO_FALLBACK
+
+        # C-54 (13/07/2026 — Ubirata/Lucas 24185000): menção a dia-da-semana
+        # SEM data (ex: "quinta ou sexta") + unidade no ctx que não bate.
+        violacao_dia_sem_data = _viola_dia_sem_data_incompativel_unidade(text, ctx)
+        if violacao_dia_sem_data:
+            dia_men, medico_norm, unidade_norm = violacao_dia_sem_data
+            log.error(
+                "[FILTRO C-54] DIA SEM DATA INCOMPATIVEL UNIDADE — "
+                "texto menciona %r mas ctx tem medico=%s unidade=%s "
+                "(dias permitidos nessa unidade não incluem %r). Texto: %r",
+                dia_men, medico_norm, unidade_norm, dia_men, text[:300],
+            )
+            return _DIA_SEM_DATA_FALLBACK
     else:
         # Log preventivo: paciente já agendado E texto NÃO parece oferta nova
         # → tratamos como confirmação/referência. Se Lia disse algo errado,
@@ -3769,6 +3897,24 @@ class Responder:
 
         bloco_variavel = _today_brt_block()
         bloco_variavel += _caller_context_block(caller_context)
+
+        # Task #413 (14/07/2026) — bloco CONVERSA_ATUAL. Quando humano
+        # (Ariany/Stephany/etc) mandou mensagem nas últimas 6h, injeta as
+        # últimas 20 notas cronológicas (Lia + Humano + Paciente) pra Lia
+        # NÃO perder contexto após handoff. Retorna string vazia se não
+        # houve handoff humano recente.
+        try:
+            from voice_agent.historico_conversa import montar_bloco_conversa_atual
+            _notas_hist = None
+            if isinstance(caller_context, dict):
+                _notas_hist = caller_context.get("notas_historico")
+            _bloco_conv = montar_bloco_conversa_atual(_notas_hist)
+            if _bloco_conv:
+                bloco_variavel += _bloco_conv
+        except Exception:  # noqa: BLE001
+            # Fail-silent: bloco é apenas melhoria, não é obrigatório.
+            pass
+
         # FSM (task #125) — bloco de estado da conversa pra Claude
         # respeitar a transição válida. Persistido em Redis.
         try:

@@ -2283,6 +2283,15 @@ class KommoClient:
                     cname = (rc.json() or {}).get("name")
                     if cname and str(cname).strip():
                         out["name"] = str(cname).strip()
+
+            # Task #413 (14/07/2026) — expõe notas pra bloco CONVERSA_ATUAL
+            # no responder.py. `notas_lead` já foi carregado acima pra camadas
+            # 3-5 do ja_agendado. Aqui só re-usa a mesma lista.
+            try:
+                if notas_lead:
+                    out["notas_historico"] = list(notas_lead)
+            except Exception:  # noqa: BLE001
+                pass
         except Exception as e:  # noqa: BLE001
             log.warning("Kommo get_caller_context_by_lead erro: %s", e)
         return out
@@ -2439,6 +2448,31 @@ class KommoClient:
             except Exception as e:  # noqa: BLE001
                 log.warning(
                     "agent_paused_for_lead: checagem humano-recente "
+                    "falhou (lead %s): %s", lead_id, e,
+                )
+
+        # Regra 3 (Bug C-57, Fábio 14/07/2026 — lead 10934653 Melissa):
+        # Bloqueio clínico permanente. Se médica ou secretaria escreveu
+        # em nota humana ANTIGA uma ordem explícita de "NÃO AGENDAR MAIS"
+        # ou "paciente bloqueada", a IA respeita PERMANENTEMENTE.
+        # Diferença vs regra 2 (30min temporário): esta regra é permanente
+        # até desbloqueio manual. Voltar a agendar exige humano remover
+        # a instrução ou marcar campo específico.
+        if lead_id:
+            try:
+                from .bloqueio_clinico import detectar_bloqueio_clinico
+                notas = self.get_lead_notes(lead_id, limit=200) or []
+                trecho = detectar_bloqueio_clinico(notas)
+                if trecho:
+                    log.warning(
+                        "agent_paused_for_lead: BLOQUEIO CLINICO detectado "
+                        "no lead %s. Trecho: %r",
+                        lead_id, trecho[:150],
+                    )
+                    return "bloqueio-clinico"
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "agent_paused_for_lead: checagem bloqueio-clinico "
                     "falhou (lead %s): %s", lead_id, e,
                 )
 
