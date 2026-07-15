@@ -44,6 +44,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 PASTA_BUGS_LICOES = _PROJECT_ROOT / "lia-atendimento-blink" / "memoria" / "bugs-licoes"
 PASTA_KNOWLEDGE_BASE = _PROJECT_ROOT / "voice_agent" / "knowledge_base"
+# Camada 3 (15/07/2026): indexa também CLAUDE.md do repo raiz — bugs indexados
+# no formato "### 0. (DATA) Bug C-NN — título" viram lições recuperáveis.
+ARQUIVO_CLAUDE_MD = _PROJECT_ROOT / "CLAUDE.md"
 
 # Quantos trechos recuperar por consulta.
 TOP_K_DEFAULT = int(os.environ.get("MEMORIA_RAG_TOP_K", "3"))
@@ -146,6 +149,41 @@ def _fonte_relativa(md: Path) -> str:
         return md.name
 
 
+def _carregar_claude_md(arquivo: Path) -> list[_Trecho]:
+    """Camada 3 (15/07/2026): indexa CLAUDE.md por bug.
+
+    Cada seção `### 0. (DATA) Bug C-NN — título` vira um _Trecho independente
+    com fonte_tipo="bug_indexado". Retorna [] se arquivo não existe.
+    """
+    import re
+    if not arquivo.exists():
+        return []
+    texto = _ler_markdown(arquivo)
+    if not texto.strip():
+        return []
+    _HEADER = re.compile(
+        r"^###\s+0?\.?\s*\(([^)]+)\)\s+Bug\s+(C-\d+[a-z]?)\s*—?\s*(.+?)$",
+        re.MULTILINE,
+    )
+    matches = list(_HEADER.finditer(texto))
+    if not matches:
+        return []
+    out: list[_Trecho] = []
+    for i, m in enumerate(matches):
+        inicio = m.start()
+        fim = matches[i + 1].start() if i + 1 < len(matches) else len(texto)
+        corpo = texto[inicio:fim].strip()
+        bug_id, data, titulo = m.group(2), m.group(1), m.group(3).strip()
+        for chunk in _chunkar(corpo, max_chars=1200):
+            out.append(_Trecho(
+                fonte=f"CLAUDE.md#{bug_id}",
+                titulo=f"Bug {bug_id} ({data}) — {titulo[:100]}",
+                conteudo=chunk,
+                fonte_tipo="bug_indexado",
+            ))
+    return out
+
+
 def _carregar_pasta(pasta: Path, fonte_tipo: str) -> list[_Trecho]:
     out: list[_Trecho] = []
     if not pasta.exists():
@@ -182,6 +220,8 @@ def construir_indice(
     if pastas_extras is None:
         trechos.extend(_carregar_pasta(PASTA_BUGS_LICOES, "licao"))
         trechos.extend(_carregar_pasta(PASTA_KNOWLEDGE_BASE, "kb"))
+        # Camada 3 (15/07/2026): indexa CLAUDE.md por bug (### 0. (DATA) Bug C-NN)
+        trechos.extend(_carregar_claude_md(ARQUIVO_CLAUDE_MD))
     else:
         for path, tipo in pastas_extras:
             trechos.extend(_carregar_pasta(path, tipo))
@@ -283,17 +323,36 @@ def recuperar_licoes_relevantes(
     return out
 
 
+_TAG_POR_TIPO = {
+    "licao": "LIÇÃO",
+    "kb": "KB",
+    "bug_indexado": "⚠️ BUG",  # Camada 3 (15/07/2026)
+}
+
+
 def formatar_para_prompt(trechos: list[TrechoRelevante]) -> str:
     """Bloco markdown pra injetar no system prompt do Claude.
 
     Mantém formato compacto — Lia não cita as fontes ao paciente, é
     contexto interno.
+
+    Camada 3 (15/07/2026): bugs indexados do CLAUDE.md ganham prefixo
+    ⚠️ BUG pra o LLM priorizar evitá-los.
     """
     if not trechos:
         return ""
-    linhas = ["## Memória ativa recuperada (uso interno — não citar ao paciente)"]
-    for i, t in enumerate(trechos, 1):
-        tag = "LIÇÃO" if t.fonte_tipo == "licao" else "KB"
+    linhas = [
+        "## ⚠️ MEMÓRIA ATIVA — CONTEXTO SIMILAR JÁ VISTO",
+        "> Uso INTERNO — não citar ao paciente. Aplique lições/regras "
+        "aqui pra evitar repetir bug conhecido.",
+    ]
+    # Ordena: BUGS primeiro (mais críticos), depois LIÇÕES, depois KB
+    def _prio(t):
+        return {"bug_indexado": 0, "licao": 1, "kb": 2}.get(t.fonte_tipo, 3)
+    trechos_ordenados = sorted(trechos, key=_prio)
+
+    for t in trechos_ordenados:
+        tag = _TAG_POR_TIPO.get(t.fonte_tipo, "REF")
         linhas.append(
             f"\n### [{tag}] {t.titulo}  _(sim={t.similaridade:.2f})_"
         )
@@ -307,6 +366,53 @@ def formatar_para_prompt(trechos: list[TrechoRelevante]) -> str:
         "\n---\nFim da memória recuperada. Aplique se aplicável; senão ignore."
     )
     return "\n".join(linhas)
+
+
+# ---------------------------------------------------------------------------
+# Camada 3 (15/07/2026) — Post-turn validator
+# ---------------------------------------------------------------------------
+
+def avaliar_resposta_pos_llm(
+    resposta_gerada: str,
+    contexto_query: str,
+    threshold_alerta: float = 0.25,
+) -> dict:
+    """Post-turn validator: verifica se resposta gerada é similar a bug conhecido.
+
+    Retorna dict com:
+      - similar_a_bug: bool
+      - bug_id: str | None
+      - similaridade: float
+      - acao_recomendada: "ok" | "log_alerta" | "substituir_por_fallback"
+
+    Não substitui automaticamente — retorna diagnóstico pro caller decidir.
+    Usar em conjunto com filtros SEMPRE-ON existentes (papel inventado, etc).
+    """
+    if not resposta_gerada or not resposta_gerada.strip():
+        return {"similar_a_bug": False, "bug_id": None, "similaridade": 0.0, "acao_recomendada": "ok"}
+    try:
+        query = f"{contexto_query} {resposta_gerada}"[:500]
+        bugs = recuperar_licoes_relevantes(query, k=1, filtrar_tipo="bug_indexado")
+        if not bugs:
+            return {"similar_a_bug": False, "bug_id": None, "similaridade": 0.0, "acao_recomendada": "ok"}
+        top = bugs[0]
+        # Extrai bug_id do título ("Bug C-43 (12/07) — ...")
+        import re
+        m = re.search(r"(C-\d+[a-z]?)", top.titulo)
+        bug_id = m.group(1) if m else None
+        acao = "ok"
+        if top.similaridade >= threshold_alerta:
+            acao = "log_alerta"
+        # Threshold mais duro (0.40+) poderia acionar substituição automática
+        # — desativado por default pra evitar falso positivo (lição Juiz Haiku 02/06)
+        return {
+            "similar_a_bug": top.similaridade >= threshold_alerta,
+            "bug_id": bug_id,
+            "similaridade": top.similaridade,
+            "acao_recomendada": acao,
+        }
+    except Exception:  # noqa: BLE001
+        return {"similar_a_bug": False, "bug_id": None, "similaridade": 0.0, "acao_recomendada": "ok"}
 
 
 # ---------------------------------------------------------------------------

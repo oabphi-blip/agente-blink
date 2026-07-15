@@ -217,10 +217,15 @@ def _prompt_caching_habilitado() -> bool:
 def _memoria_rag_habilitada() -> bool:
     """RAG nível 1 — recupera lições da memória ativa por similaridade.
 
-    Default OFF. Ligar com `MEMORIA_RAG_ENABLED=1`. Quando off, a Lia
-    funciona exatamente como antes — zero risco.
+    Camada 3 memória ativa (15/07/2026): DEFAULT ON.
+    Desligar com `MEMORIA_RAG_ENABLED=0` em caso de emergência.
+
+    Mudança: era default OFF (`==1`), agora default ON (`not in off-list`).
+    Segue mesmo padrão do Bug C-32 (defaults ON pra envs críticas).
     """
-    return os.environ.get("MEMORIA_RAG_ENABLED") == "1"
+    return (os.environ.get("MEMORIA_RAG_ENABLED") or "1").lower() not in (
+        "0", "false", "no", "off", "",
+    )
 
 
 def _bloco_memoria_rag(mensagem_paciente: str) -> str:
