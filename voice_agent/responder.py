@@ -1999,25 +1999,36 @@ def _gerar_oferta_pos_agendado_fallback(ctx: Optional[dict]) -> str:
 # enganoso "Inas GDf (somente Dr. Fabrício Freitas)" — Lia leu literal e
 # tratou como aceito com restrição. Filtro pós-geração é a defesa final.
 
-# Lista canônica de convênios NÃO aceitos (extraída de KB 18, lowercase).
-# Cada item tem variantes; matching por substring case-insensitive.
-_CONVENIOS_NAO_ACEITOS_KB18 = frozenset({
-    "afeb", "afego", "amil", "assefaz", "asete", "aste",
-    "bradesco", "brb",
-    "cassi", "caeme", "caesan", "camed", "cnti",
-    "eletronorte", "embratel",
-    "fusex", "fapes",
-    "geap", "golden",
-    "hapvida", "hap vida", "hap-vida",
-    "inas", "gdf inas", "inas gdf", "inas-gdf", "gdf saúde", "gdf saude",
-    "gdf",  # token isolado — quase sempre se refere ao GDF Saúde (Bug C-22 Sandra)
-    "notre dame", "notredame",
-    "polícia militar", "policia militar", "porto seguro",
-    "quality",
-    "sul américa", "sul america", "sulamérica", "sulamerica", "sul-américa",
-    "sus",
-    "unimed", "unafisco", "sindifisco",
-})
+# Task #400 (20/07/2026): fonte agora é JSON externo com cache TTL 60s.
+# _CONVENIOS_NAO_ACEITOS_KB18 vira alias LAZY pro loader.
+# Mudança em prod = editar voice_agent/convenios_nao_aceitos.json (sem redeploy).
+# Fallback hard-coded no loader (safety net idêntico ao antigo).
+try:
+    from voice_agent.convenios_nao_aceitos_loader import (
+        convenios_nao_aceitos as _convenios_nao_aceitos_carregar,
+        detectar_convenio_nao_aceito as _detectar_conv_do_loader,
+    )
+    _CONVENIOS_NAO_ACEITOS_KB18 = _convenios_nao_aceitos_carregar()
+except Exception:  # noqa: BLE001
+    # Fallback ULTIMA-LINHA — se loader nem importa, mantém hard-coded.
+    _detectar_conv_do_loader = None  # type: ignore[assignment]
+    _CONVENIOS_NAO_ACEITOS_KB18 = frozenset({
+        "afeb", "afego", "amil", "assefaz", "asete", "aste",
+        "bradesco", "brb",
+        "cassi", "caeme", "caesan", "camed", "cnti",
+        "eletronorte", "embratel",
+        "fusex", "fapes",
+        "geap", "golden",
+        "hapvida", "hap vida", "hap-vida",
+        "inas", "gdf inas", "inas gdf", "inas-gdf",
+        "gdf saúde", "gdf saude", "gdf",
+        "notre dame", "notredame",
+        "polícia militar", "policia militar", "porto seguro",
+        "quality",
+        "sul américa", "sul america", "sulamérica", "sulamerica",
+        "sul-américa",
+        "sus", "unimed", "unafisco", "sindifisco",
+    })
 
 # Padrões de AFIRMAÇÃO POSITIVA sobre convênio: "atendemos", "cobrimos",
 # "aceitamos", "credenciamos", "está na rede". Tolerantes a pontuação.
@@ -2614,6 +2625,82 @@ _PAPEIS_INVENTADOS = re.compile(
 )
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# FILTRO C-61 — Anti-cobertura quando convênio é "Sem Convênio"/particular
+# Origem: Fábio 20/07/2026, lead 24325544 (Patrícia/Maria bebê Amil→particular)
+# Lia disse "pelo seu convênio (Sem Convênio), a consulta é coberta —
+# você não paga direto (pode ter coparticipação)". PROIBIDO. Sem Convênio
+# = particular, valor R$ 611. Zero cobertura/coparticipação/reembolso.
+# Regressão do Bug C-55 (Dani/Emilly 13/07).
+# ═══════════════════════════════════════════════════════════════════════
+
+_PALAVRAS_COBERTURA = re.compile(
+    r"("
+    r"copart(?:icipa[cç][aã]o|icipa)"
+    r"|(?:est[aá]|é|será|fica)\s+cobert[oa]"  # 'está coberta / é coberto / fica coberta'
+    r"|cobert[oa]\s+pelo"                       # 'coberto pelo (plano|convênio)'
+    r"|cobertur[a]?\s+(?:do|pelo)"
+    r"|reembols(?:o|ar|áveis?)"
+    r"|n[aã]o\s+paga\s+direto"
+    r"|depende\s+do\s+(?:seu\s+)?plano"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _convenio_particular_ou_sem(ctx: Optional[dict]) -> bool:
+    """True se ctx.convenio for particular / sem convênio / não se aplica."""
+    if not ctx:
+        return False
+    known = ctx.get("known") or {}
+    conv = str(known.get("convenio") or "").strip().lower()
+    if not conv:
+        return False
+    return conv in (
+        "sem convênio", "sem convenio", "particular",
+        "não se aplica", "nao se aplica", "sem plano",
+        "não tem", "nao tem",
+    )
+
+
+def _viola_cobertura_sem_convenio(text: str, ctx: Optional[dict]) -> bool:
+    """C-61: Lia falou em 'cobertura/coparticipação/reembolso' pra particular."""
+    if not text or not ctx:
+        return False
+    if not _convenio_particular_ou_sem(ctx):
+        return False
+    return bool(_PALAVRAS_COBERTURA.search(text))
+
+
+def _gerar_fallback_particular(ctx: Optional[dict]) -> str:
+    """C-61: substituição canônica pra particular. Valor direto SEM cobertura."""
+    known = (ctx or {}).get("known") or {}
+    nome = str(known.get("nome_contato") or known.get("nome_paciente") or "").strip()
+    primeiro = nome.split()[0] if nome else ""
+    saudacao = f"{primeiro}, " if primeiro else ""
+
+    # Detecta APV pra faixa correta
+    motivo = str(known.get("motivo") or "").lower()
+    medico = str(known.get("medico") or "").lower()
+
+    if "processamento" in motivo or "apv" in motivo:
+        linha_valor = "**Pix (à vista):** R$ 800 · **Cartão 1x:** R$ 870 · **Cartão 2x:** R$ 870 (2x R$ 435)"
+        info = "Avaliação do Processamento Visual (APV)"
+    elif "catarata" in motivo or "fabr" in medico:
+        linha_valor = "**Pix (à vista):** R$ 445 · **Cartão 1x:** R$ 470 · **Cartão 2x:** R$ 470 (2x R$ 235)"
+        info = "Avaliação de catarata com Dr. Fabrício Freitas"
+    else:
+        linha_valor = "**Pix (à vista):** R$ 611 · **Cartão 1x:** R$ 670 · **Cartão 2x:** R$ 670 (2x R$ 335)"
+        info = "Consulta com Dra. Karla Delalíbera (inclui tonometria, motilidade e mapeamento de retina)"
+
+    return (
+        f"{saudacao}o valor da consulta particular é:\n\n"
+        f"📲💳 {linha_valor}\n\n"
+        f"{info}.\n\n"
+        "Qual forma de pagamento fica melhor pra você?"
+    )
+
+
 def _viola_papel_inventado(text: str) -> bool:
     """C-44: Lia inventou cargo/papel que não existe na Blink.
 
@@ -2951,6 +3038,16 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """
     if not text:
         return text
+
+    # === FILTRO C-61 SEMPRE-ON (Fábio 20/07/2026, lead Patrícia 24325544) ===
+    # Sem Convênio / Particular → NUNCA falar "coberta/coparticipação/reembolso".
+    # Detecção antes do C-44 pra bloquear regressão Bug C-55.
+    if _viola_cobertura_sem_convenio(text, ctx):
+        log.error(
+            "[FILTRO C-61] COBERTURA em Sem Convênio. texto=%r",
+            text[:200],
+        )
+        return _gerar_fallback_particular(ctx)
 
     # === FILTRO C-44 SEMPRE-ON (Fábio 12/07/2026, lead Clarice 22544990) ===
     # Detecta "especialista em [remarcação/agendamento/etc]" e "vou encaminhar
