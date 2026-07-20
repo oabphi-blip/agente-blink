@@ -213,6 +213,102 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (20/07/2026) Bug C-59 revisão — "1.299 duplicatas" era estrutura Medware, não bug (Task #422)
+
+**Origem:** lead 24259380 Fábio Philipe recebeu 2 slots ofertados pela Lia (22/07 13:30 + 24/07 16:30). Ambos OCUPADOS. Investigação revelou que MINHA lógica em `voice_agent/medware_sql.py` (Task #420) contava exames como "duplicatas".
+
+**Causa raiz REAL:**
+
+- Estrutura Medware: 1 consulta = 1 PARENT AGENDAMENTO + N children (um child por procedimento/exame do agrupador). Exemplo: consulta rotina Karla tem N registros AGENDAMENTO com `CODAGENDAMENTOPAI` apontando pro pai, cada um com `CODPROCEDIMENTO` diferente (biomicroscopia, tonometria, refração, etc).
+- Prova: registros 54101 e 54111 da Ísis no mesmo slot têm CODPROCEDIMENTO=311 vs 5. Não é duplicata — é procedimento diferente.
+- **Erro meu**: chamei essa estrutura de "1.299 duplicatas C-59" e propus limpar 91 slots (BUG_C59_DUPLICATAS_A_LIMPAR.csv está DEPRECATED — não rodar).
+
+**Fix arquitetural em `voice_agent/medware_sql.py`:**
+
+1. `contar_slots_ocupados_hora` (novo nome; `contar_duplicatas_slot` virou alias DEPRECATED): usa `COUNT(DISTINCT CODPACIENTE)`. Retorna PACIENTES no slot, não registros AGENDAMENTO.
+2. `listar_slots_livres` query ocupados: `SELECT DISTINCT DATAHORAAGENDADA, CODPACIENTE`. Um slot só é ocupado se pelo menos 1 paciente distinto marcado.
+3. `existe_agendamento` + `listar_slots_ocupados_dia`: REMOVI o filtro `CODAGENDAMENTOPAI IS NULL` (provou vazar falsos negativos — Eloah 23955974 tinha 11 registros TODOS com PAI preenchido, retornava 0 pacientes = pipeline ofertaria slot ocupado).
+
+**Validação prod (Karla Asa Norte, tabela real):**
+
+| Slot | Bug antigo | Fix novo | Real |
+|---|---|---|---|
+| 20/07 11:30 | 56 "duplicatas" | 3 pacientes | 3 ✓ |
+| 22/07 13:30 | livre (bug) | OCUPADO 2 pac | Lia ofertou errado |
+| 24/07 16:30 | livre (bug) | OCUPADO 1 pac | Lia ofertou errado |
+| 31/07 13:30 | livre | LIVRE | Livre ✓ |
+
+Agenda 30d disponível: 68 livres em 8 dias (Asa Norte) + 105 livres em 12 dias (Águas Claras). Sem duplicatas pra limpar — bug era conceitual.
+
+**Pytest 53/53 verde:** `test_task420_agenda_sql.py` + `test_bug_c59_dedup_slot.py` (asserção `COUNT(*)` → `COUNT(DISTINCT CODPACIENTE)`) + `test_bugs_indexados_regressao_master.py`. Push: `PUSH_FIX_C59_COUNT_DISTINCT_PACIENTE.command`.
+
+**Lição arquitetural CRÍTICA:**
+
+- **Antes de chamar dados de "duplicata", INVESTIGAR o schema.** Deveria ter feito `SELECT CODPROCEDIMENTO, COUNT(*) FROM AGENDAMENTO WHERE CODAGENDAMENTOPAI IS NOT NULL GROUP BY CODPROCEDIMENTO` antes de assumir que 56 registros = 56 duplicatas. Custou uma sessão inteira do Fábio.
+- **Filtros lógicos "óbvios" (CODAGENDAMENTOPAI IS NULL) são frágeis.** Semânticas Firebird/schemas legados nem sempre respeitam a convenção "PAI IS NULL = raiz". Preferir `DISTINCT` sobre chave natural (paciente + data + hora) que é semanticamente robusta.
+- **Validar contra prod (query cega) antes de mudar código pra corrigir "bug" imaginário.** MEDWARE_AGENDA_SQL=1 já em prod pegou o problema real (Lia ofertando ocupados) — só depois disso a causa real virou clara.
+
+### 0. (15/07/2026) Bug auto-detectado C-AUTO-001 — Learning Loop (lead 999)
+
+**Origem:** captura automática via `learning_loop.detectar_correcao_humana` (PADRÃO EXPLÍCITO).
+
+**Resposta da Lia (problemática):**
+> Erro
+
+**Correção/resposta humana (padrão a seguir):**
+> Lia, não é assim
+
+**Contexto:** lead 999, correção humana em janela <15min após Lia.
+
+**Regra:** Lia deve evitar o padrão da resposta problemática e adotar o tom/conteúdo da correção humana quando contexto for similar.
+
+**Ação:** revisar em auditoria semanal se esse padrão recorre. Se sim, promover pra filtro reativo em `responder.py::_scrub_prohibited`.
+
+
+### 0. (15/07/2026) Bug auto-detectado C-AUTO-001 — Learning Loop (lead 999)
+
+**Origem:** captura automática via `learning_loop.detectar_correcao_humana` (PADRÃO EXPLÍCITO).
+
+**Resposta da Lia (problemática):**
+> Resposta problemática
+
+**Correção/resposta humana (padrão a seguir):**
+> Lia, não é assim, o correto é X
+
+**Contexto:** lead 999, correção humana em janela <15min após Lia.
+
+**Regra:** Lia deve evitar o padrão da resposta problemática e adotar o tom/conteúdo da correção humana quando contexto for similar.
+
+**Ação:** revisar em auditoria semanal se esse padrão recorre. Se sim, promover pra filtro reativo em `responder.py::_scrub_prohibited`.
+
+
+### 0. (15/07/2026 MADRUGADA) Bug C-58 + Task #405 código pronto (pytest 84/84 verde) — 1 push consolidado pendente
+
+**Continuação da sessão 14/07 sem quebra:**
+
+1. **Bug C-58 / Task #413 — Handoff humano preserva contexto (Emmy Rodrigues 24300272)**
+   - Novo módulo `voice_agent/historico_conversa.py`: `houve_handoff_humano_recente()` + `montar_bloco_conversa_atual()`.
+   - `kommo.py::get_caller_context_by_lead` expõe `out["notas_historico"]`.
+   - `responder.py` injeta bloco `CONVERSA_ATUAL` no `bloco_variavel` do system prompt quando há nota humana das últimas 6h.
+   - Formato: `[LIA HH:MM]` / `[HUMANO HH:MM]` / `[PACIENTE HH:MM]` + REGRA DE OURO.
+   - Pytest 20/20.
+
+2. **Task #400/405 — PLANO_CODES migrado pra JSON externo (bug C-43 arquitetural)**
+   - `voice_agent/planos_medware.json` (novo) — 31 blocos de convênio, fonte de verdade EDITÁVEL sem redeploy.
+   - `voice_agent/planos_medware_loader.py` (novo) — cache TTL 60s + fallback pro `PLANO_CODES` hard-coded (safety net).
+   - `voice_agent/medware.py::resolver_plano` — consulta loader PRIMEIRO. Zero breaking change.
+   - Pytest 21/21.
+
+3. **Master regressão ampliada:** +3 asserções Task #405 (30/30 verde).
+
+**Total local:** 84/84 pytest verde. Push num `.command` consolidado (`PUSH_C58_E_TASK405_PLANOS_JSON.command`).
+
+**Efeito arquitetural Task #405:** convênio novo Kommo = editar JSON + commit + push (sem esperar Easypanel Implantar). Cache 60s recarrega no container. Mesmo padrão do `calendar_atendimento.json` (C-53). Fábio 11/07 P0: "já tivemos este mesmo tipo de erro 1000 vezes" — bug ARQUITETURAL de convênios resolvido.
+
+**Próxima migração Task #400:** agrupadores em `procedimentos.py` (mais complexo — 4 listas + faixas etárias Kommo + palavras-chave urgência). Deixado pra próxima sessão porque exige refatorar 5-6 arquivos.
+
+**Estado pra próxima sessão:** `HANDOFF_ATUAL.md` atualizado. Fábio precisa colar o comando no Terminal — clipboard já tem.
+
 ### 0. (14/07/2026 NOITE) Bug C-55 + C-56 deployados + 2 fixes pendentes (C-57 + handoff-contexto)
 
 **Sessão intensa 14/07 madrugada 15/07. Fábio muito frustrado com repetição de bugs.**

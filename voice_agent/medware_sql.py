@@ -263,17 +263,24 @@ def agendamentos_paciente(cod_paciente: int, limit: int = 5) -> list[dict]:
         return []
 
 
-def contar_duplicatas_slot(cod_medico: int, cod_unidade: int, data_hora_iso: str) -> int:
-    """Retorna quantos AGENDAMENTOS existem no slot exato (médico, unidade, data, hora).
-    Usado pra detectar Bug C-59 (56 duplicatas 20/07 11:30)."""
-    # Firebird compara DATETIME via CAST — string literal '2026-07-20T08:30:00' quebra
-    # com HTTP 400. Split em data + hora, usar CAST(... AS DATE) + EXTRACT.
+def contar_slots_ocupados_hora(cod_medico: int, cod_unidade: int, data_hora_iso: str) -> int:
+    """Retorna quantos PACIENTES DISTINTOS estão no slot.
+
+    CRÍTICO (descoberto 20/07/2026): no Medware, 1 consulta = múltiplos
+    registros AGENDAMENTO (um por procedimento/exame). Todos compartilham
+    DATAHORAAGENDADA e CODPACIENTE. Usar COUNT(DISTINCT CODPACIENTE) dá
+    o número REAL de consultas naquele slot — independente de quantos
+    exames a paciente vai fazer.
+
+    Ex: slot 20/07 11:30 tem 56 registros (18 exames × 3 pacientes) →
+    retorna 3 (pacientes distintos).
+    """
     d, h = data_hora_iso.split("T") if "T" in data_hora_iso else (data_hora_iso, "00:00:00")
     if len(h) == 5:
         h = h + ":00"
-    hora_h, hora_m, hora_s = h.split(":")
+    hora_h, hora_m, _ = h.split(":")
     q = (
-        f"SELECT COUNT(*) AS QTD FROM AGENDAMENTO "
+        f"SELECT COUNT(DISTINCT CODPACIENTE) AS QTD FROM AGENDAMENTO "
         f"WHERE CODMEDICO={int(cod_medico)} AND CODUNIDADE={int(cod_unidade)} "
         f"AND CAST(DATAHORAAGENDADA AS DATE)='{d}' "
         f"AND EXTRACT(HOUR FROM DATAHORAAGENDADA)={int(hora_h)} "
@@ -283,16 +290,28 @@ def contar_duplicatas_slot(cod_medico: int, cod_unidade: int, data_hora_iso: str
         r = rows(executar(q))
         return int(r[0].get("QTD", 0)) if r else 0
     except MedwareSQLError as e:
-        log.warning("contar_duplicatas_slot erro: %s", e)
+        log.warning("contar_slots_ocupados_hora erro: %s", e)
         return 0
+
+
+# Alias retro-compatível — 'duplicata' era interpretação errada; cada
+# 'duplicata' é 1 procedimento do agrupador da consulta. Mantido pra não
+# quebrar chamadores existentes.
+def contar_duplicatas_slot(cod_medico: int, cod_unidade: int, data_hora_iso: str) -> int:
+    """DEPRECATED — usar contar_slots_ocupados_hora."""
+    return contar_slots_ocupados_hora(cod_medico, cod_unidade, data_hora_iso)
 
 
 def existe_agendamento(
     cod_medico: int, cod_unidade: int,
     data_hora_iso: str, cod_paciente: int = 0,
 ) -> Optional[int]:
-    """DEDUP KEY do Bug C-59: retorna CODAGENDAMENTO existente pra
-    (medico+unidade+data+hora [+paciente opcional]) OU None se slot está livre.
+    """Retorna CODAGENDAMENTO do PAI existente pra
+    (medico+unidade+data+hora [+paciente opcional]) OU None se slot livre.
+
+    Fix 20/07/2026: filtra CODAGENDAMENTOPAI IS NULL — só o PAI da consulta,
+    não os N filhos/exames. Sem esse filtro, cada consulta parecia N
+    'duplicatas' e o dedup bloqueava agendamento legítimo.
 
     Uso principal em criar_agendamento: chamar ANTES de POST. Se existe,
     retornar o mesmo CODAGENDAMENTO em vez de gravar duplicata.
@@ -305,6 +324,9 @@ def existe_agendamento(
         h = h + ":00"
     hora_h, hora_m, _ = h.split(":")
     filtro_pac = f" AND CODPACIENTE={int(cod_paciente)}" if cod_paciente else ""
+    # Fix 20/07/2026: dedup por PACIENTE, não por CODAGENDAMENTO.
+    # Semântica: "existe alguma consulta desse paciente neste slot?"
+    # Se cod_paciente=0, "alguma consulta de qualquer paciente".
     q = (
         f"SELECT FIRST 1 CODAGENDAMENTO FROM AGENDAMENTO "
         f"WHERE CODMEDICO={int(cod_medico)} AND CODUNIDADE={int(cod_unidade)} "
@@ -405,10 +427,14 @@ def listar_slots_livres(
         dw = int(g.get("DIASEMANA", 0))
         grade_por_dia.setdefault(dw, []).append(g)
 
-    # Ocupados no período (1 query pra N dias)
+    # Ocupados no período — DISTINCT(DATAHORAAGENDADA, CODPACIENTE).
+    # Fix 20/07/2026: cada consulta tem N registros (um por procedimento).
+    # Contar DISTINCT paciente por slot dá ocupação real independente de
+    # quantos exames a paciente vai fazer. Um slot só é ocupado se tem
+    # pelo menos 1 paciente distinto marcado nele.
     fim = hoje + timedelta(days=dias)
     q_ocupados = (
-        f"SELECT DATAHORAAGENDADA FROM AGENDAMENTO "
+        f"SELECT DISTINCT DATAHORAAGENDADA, CODPACIENTE FROM AGENDAMENTO "
         f"WHERE CODMEDICO={int(cod_medico)} AND CODUNIDADE={int(cod_unidade)} "
         f"AND CAST(DATAHORAAGENDADA AS DATE) >= '{hoje.isoformat()}' "
         f"AND CAST(DATAHORAAGENDADA AS DATE) < '{fim.isoformat()}'"

@@ -102,7 +102,10 @@ def test_medware_sql_contar_duplicatas_slot_query():
 
     assert n == 56
     q = query_captured[0]
-    assert "COUNT(*)" in q
+    # Fix 20/07/2026: usar COUNT(DISTINCT CODPACIENTE) em vez de COUNT(*).
+    # 1 consulta Medware = N registros (um por procedimento/exame). COUNT(*)
+    # conta exames; COUNT DISTINCT paciente conta consultas reais.
+    assert "COUNT(DISTINCT CODPACIENTE)" in q
     assert "EXTRACT(HOUR FROM DATAHORAAGENDADA)=11" in q
     assert "EXTRACT(MINUTE FROM DATAHORAAGENDADA)=30" in q
 
