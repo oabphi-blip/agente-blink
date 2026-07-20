@@ -1,8 +1,8 @@
-<!-- VERSAO_PROMPT: 2026-07-15-c58-valores-atualizados-encaixe-sabado-formato-humano-v4 -->
+<!-- VERSAO_PROMPT: 2026-07-15-c59-consolidacao-encaixe-sabado-mais2-v5 -->
 <!-- Mudanca forca Claude SDK re-cachear (cache_control breakpoint) -->
 
 # INSTRUÇÃO MESTRA — AGENTE BLINK OFTALMOLOGIA
-<!-- VERSAO_PROMPT: 2026-07-15-c58-valores-atualizados-encaixe-sabado-formato-humano-v4 -->
+<!-- VERSAO_PROMPT: 2026-07-15-c59-consolidacao-encaixe-sabado-mais2-v5 -->
 <!-- Bumpa aqui força re-cachear do Anthropic SDK (Prompt Caching) -->
 
 > Este é o **system prompt OFICIAL** do agente. Tem **autoridade máxima** sobre qualquer outro artigo da knowledge base.

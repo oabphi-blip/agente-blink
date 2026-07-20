@@ -20,6 +20,7 @@ apenas os parâmetros com valor real — ver `listar_horarios_livres`.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -245,9 +246,27 @@ def resolver_plano(convenio: Optional[str]) -> int:
     """Nome do convênio → codPlano. 0 = desconhecido (→ atendimento humano).
 
     'Particular'/'sem convênio'/vazio resolve para o plano particular (1).
+
+    Task #400/405 (15/07/2026, Fábio 11/07 P0 arquitetural):
+    - PRIMEIRA tentativa: JSON externo via planos_medware_loader (cache TTL 60s).
+      Permite adicionar convênio/alias sem redeploy (bug C-43 arquitetural).
+    - Fallback: PLANO_CODES hard-coded neste arquivo (safety net).
     """
     if not convenio or not str(convenio).strip():
         return 0
+
+    # 1ª tentativa: loader JSON externo (fonte de verdade editável).
+    try:
+        from voice_agent.planos_medware_loader import resolver_plano_codigo  # noqa: WPS433
+        cod_json = resolver_plano_codigo(convenio)
+        if cod_json:
+            return cod_json
+    except Exception:  # noqa: BLE001
+        # Fail-silent — loader tem os seus próprios logs críticos. Cai pro
+        # fallback hard-coded abaixo.
+        pass
+
+    # Fallback hard-coded (safety net).
     chave = str(convenio).strip().lower()
     if chave in PLANO_CODES:
         return PLANO_CODES[chave]
@@ -549,13 +568,47 @@ class MedwareClient:
 
         # Body conforme AgendamentoExternoDto (spec OpenAPI v1.5.0):
         # campos da raiz são SÓ estes — additionalProperties=false.
+        data_hora_norm = _data_hora_iso(data_hora)
         body: dict[str, Any] = {
             "codAgenda": cod_agenda,
             "codMedico": cod_medico,
             "codProcedimento": cod_proc,
             "codPlano": cod_plano,
-            "dataHoraAgendada": _data_hora_iso(data_hora),  # yyyy-MM-ddTHH:mm
+            "dataHoraAgendada": data_hora_norm,  # yyyy-MM-ddTHH:mm
         }
+
+        # DEDUP Bug C-59 (20/07/2026) — 18 slots com duplicatas em 1 dia,
+        # slot 20/07 11:30 com 56 registros idênticos. Cada retry sem dedup
+        # duplica. Checa via SQL direto se já existe agendamento no slot
+        # exato (mesmo cod_medico + cod_unidade + data + hora + paciente).
+        # Se existe, retorna o cod_agendamento existente sem duplicar.
+        if os.environ.get("MEDWARE_DEDUP_SLOT", "1") not in ("0", "false", "no"):
+            try:
+                from voice_agent.medware_sql import existe_agendamento
+                cod_existente = existe_agendamento(
+                    cod_medico=cod_medico,
+                    cod_unidade=cod_unidade,
+                    data_hora_iso=data_hora_norm,
+                    cod_paciente=cod_paciente or 0,
+                )
+                if cod_existente:
+                    log.warning(
+                        "[MEDWARE DEDUP C-59] slot %s med=%s uni=%s pac=%s "
+                        "já tem CODAGENDAMENTO=%s — retornando sem duplicar",
+                        data_hora_norm, cod_medico, cod_unidade,
+                        cod_paciente, cod_existente,
+                    )
+                    return {
+                        "ok": True,
+                        "cod_agendamento": cod_existente,
+                        "plano": cod_plano,
+                        "procedimento": cod_proc,
+                        "motivo": "dedup_slot_existente",
+                    }
+            except Exception as e:  # noqa: BLE001
+                # Fail-open: se SQL Medware está fora, deixa gravar
+                # (risco de duplicar > risco de não gravar cliente).
+                log.warning("[MEDWARE DEDUP C-59] check falhou: %s", e)
         # Celular: DDD e número SEPARADOS.
         cel = "".join(ch for ch in (celular or "") if ch.isdigit())
         if len(cel) > 11 and cel.startswith("55"):

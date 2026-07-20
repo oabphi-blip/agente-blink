@@ -414,6 +414,91 @@ def test_c58_kommo_expoe_notas_historico():
 
 
 # ============================================================================
+# Task #400/405 — PLANO_CODES migrado pra JSON externo
+# ============================================================================
+
+def test_task405_planos_medware_json_existe():
+    """voice_agent/planos_medware.json deve existir com >20 aliases."""
+    from voice_agent import planos_medware_loader as loader
+    loader.forcar_recarregar_cache()
+    snap = loader.snapshot_cache()
+    assert len(snap) >= 20, f"esperava >=20 aliases, achou {len(snap)}"
+
+
+def test_task405_loader_bug_c43_afego_ok():
+    """Bug C-43 (Mariana Lopes) — 'Afego' precisa resolver."""
+    from voice_agent.planos_medware_loader import resolver_plano_codigo
+    assert resolver_plano_codigo("Afego") == 7
+
+
+def test_task405_medware_resolver_plano_usa_loader():
+    """medware.resolver_plano deve consultar o loader antes do PLANO_CODES."""
+    medware = (VOICE_AGENT / "medware.py").read_text(encoding="utf-8")
+    assert "planos_medware_loader" in medware or "resolver_plano_codigo" in medware, (
+        "medware.py deve importar planos_medware_loader"
+    )
+
+
+# ============================================================================
+# Bug C-59 — Dedup slot Medware (20/07/2026)
+# ============================================================================
+
+def test_c59_medware_dedup_por_slot():
+    """medware.py deve consultar existe_agendamento (SQL) antes de POST
+    /Medware/Agendamento/Salvar pra evitar duplicatas."""
+    medware = (VOICE_AGENT / "medware.py").read_text(encoding="utf-8")
+    assert "existe_agendamento" in medware, (
+        "medware.py deve importar existe_agendamento de medware_sql"
+    )
+    assert "MEDWARE_DEDUP_SLOT" in medware, (
+        "medware.py deve suportar env MEDWARE_DEDUP_SLOT (default ON)"
+    )
+    assert "dedup_slot_existente" in medware, (
+        "medware.py deve retornar motivo='dedup_slot_existente' quando pega dup"
+    )
+
+
+def test_c59_medware_sql_modulo_existe():
+    """voice_agent/medware_sql.py deve existir com funções públicas
+    executar, existe_agendamento, contar_duplicatas_slot."""
+    from voice_agent.medware_sql import (
+        executar,
+        existe_agendamento,
+        contar_duplicatas_slot,
+        agendamentos_paciente,
+        agendamentos_por_data,
+        healthcheck,
+        obter_token,
+    )
+    for f in (
+        executar, existe_agendamento, contar_duplicatas_slot,
+        agendamentos_paciente, agendamentos_por_data, healthcheck, obter_token,
+    ):
+        assert callable(f)
+
+
+def test_c59_medware_sql_query_usa_cast_extract():
+    """Firebird rejeita comparação string em DATETIME. existe_agendamento
+    deve usar CAST(AS DATE) + EXTRACT(HOUR/MINUTE) — não string literal."""
+    from voice_agent import medware_sql
+    from unittest.mock import patch
+
+    capturado = []
+    with patch.object(
+        medware_sql, "executar",
+        side_effect=lambda q: (capturado.append(q), {"colunas": [], "dados": []})[1],
+    ):
+        medware_sql.existe_agendamento(12080, 5, "2026-07-20T08:30:00")
+
+    q = capturado[0]
+    assert "CAST(DATAHORAAGENDADA AS DATE)" in q
+    assert "EXTRACT(HOUR FROM DATAHORAAGENDADA)" in q
+    assert "EXTRACT(MINUTE FROM DATAHORAAGENDADA)" in q
+    # NÃO deve comparar como string
+    assert "DATAHORAAGENDADA='2026-07-20T08:30:00'" not in q
+
+
+# ============================================================================
 # Meta-teste: VERSAO_PROMPT bumpada
 # ============================================================================
 

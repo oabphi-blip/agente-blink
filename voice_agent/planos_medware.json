@@ -1,0 +1,166 @@
+{
+  "_versao": "2026-07-15-migracao-task-405",
+  "_atualizado_em": "2026-07-15",
+  "_atualizado_por": "Claude (task #405 — Fábio 11/07 P0 arquitetural)",
+  "_descricao": "Aliases convênio (livre-texto Kommo/paciente) → codPlano Medware. Fonte de verdade EDITÁVEL SEM REDEPLOY. Cache TTL 60s. Fallback hard-coded em voice_agent/medware.py::PLANO_CODES se JSON quebrar/desaparecer.",
+  "_como_editar": "Adicionar aliases NOVOS = adicionar linha em 'aliases'. Adicionar convênio NOVO = adicionar bloco. Salvar. Efeito em prod em <60s.",
+  "_atencao": "PARTICULAR (codPlano 1) é caminho quente. NUNCA remover os aliases de 'sem convênio'/'particular'/etc.",
+
+  "particular": {
+    "codPlano": 1,
+    "nome_kommo": "Não se aplica",
+    "aliases": ["particular", "sem convenio", "sem convênio", "particular ", "nao se aplica", "não se aplica", "n/a"]
+  },
+  "tjdft": {
+    "codPlano": 2,
+    "nome_kommo": "TJDFT Pró-Saúde",
+    "aliases": ["tjdft", "t.j.d.f.t", "t.j.d.f.t - direto", "tjdft direto", "tribunal de justica", "tjdft pró-saúde", "tjdft pro-saude", "tjdft pro saude", "pro saude tjdft", "pró-saúde tjdft"]
+  },
+  "stj": {
+    "codPlano": 3,
+    "nome_kommo": "Pro ser STJ",
+    "aliases": ["stj", "superior tribunal de justica", "pro ser stj", "pro-ser stj", "proser stj", "pro ser", "pro-ser", "pro ser do stj", "pro-ser do stj"]
+  },
+  "plan_assist_mpf": {
+    "codPlano": 4,
+    "nome_kommo": "Plan Assiste - MPF (MPU)",
+    "aliases": ["plan-assist", "plan assist", "planassist", "plan-assit", "plan assiste", "plan-assiste", "planassiste", "plan assiste mpf", "plan assiste - mpf (mpu)", "mpf", "mpu"],
+    "_nota": "MPU pode cair em codPlano 74 (Águas Claras direto) — decidir caso a caso; default 4."
+  },
+  "e_vida": {
+    "codPlano": 5,
+    "nome_kommo": "E-vida (Luminar)",
+    "aliases": ["e-vida", "evida", "e vida", "luminar", "e-vida (luminar)", "evida luminar"]
+  },
+  "affego": {
+    "codPlano": 7,
+    "nome_kommo": "Afego",
+    "aliases": ["affego", "afego", "affeg", "afego bh", "afego brasilia"],
+    "_bug": "C-43 (Mariana Lopes 22617170, 12/07/2026) — Kommo grafa 'Afego' com 1F, Medware grafa 'AFFEGO' com 2F. Aliases cobrindo os dois."
+  },
+  "anafe": {
+    "codPlano": 8,
+    "nome_kommo": "Anafe",
+    "aliases": ["anafe"]
+  },
+  "bacen": {
+    "codPlano": 9,
+    "nome_kommo": "Bacen",
+    "aliases": ["bacen", "banco central"]
+  },
+  "care_plus": {
+    "codPlano": 14,
+    "nome_kommo": "Care Plus",
+    "aliases": ["care plus", "careplus", "care-plus"]
+  },
+  "casec": {
+    "codPlano": 15,
+    "nome_kommo": "Casec (Codevasf)",
+    "aliases": ["casec", "casec (codevasf)", "codevasf"]
+  },
+  "casembrapa": {
+    "codPlano": 16,
+    "nome_kommo": "Casembrapa _ Embrapa",
+    "aliases": ["casembrapa", "embrapa", "casembrapa _ embrapa", "casembrapa  _ embrapa", "casembrapa embrapa"]
+  },
+  "cnti": {
+    "codPlano": 18,
+    "nome_kommo": null,
+    "aliases": ["cnti"]
+  },
+  "conab": {
+    "codPlano": 19,
+    "nome_kommo": "Conab",
+    "aliases": ["conab"]
+  },
+  "fascal": {
+    "codPlano": 22,
+    "nome_kommo": "Fascal",
+    "aliases": ["fascal"]
+  },
+  "omint": {
+    "codPlano": 25,
+    "nome_kommo": "Omint",
+    "aliases": ["omint"]
+  },
+  "pf_saude": {
+    "codPlano": 26,
+    "nome_kommo": "PF Saúde",
+    "aliases": ["policia federal", "polícia federal", "pf", "pf saude", "pf saúde", "pfsaude", "policia", "polícia"]
+  },
+  "stm": {
+    "codPlano": 27,
+    "nome_kommo": "PLAS/JMU (STM)",
+    "aliases": ["stm", "plas/jmu", "plas jmu", "plas/jmu (stm)", "jmu"]
+  },
+  "proasa": {
+    "codPlano": 28,
+    "nome_kommo": "Proasa",
+    "aliases": ["proasa", "pro-asa", "pro asa"]
+  },
+  "saude_caixa": {
+    "codPlano": 29,
+    "nome_kommo": "Saúde Caixa",
+    "aliases": ["saude caixa", "saúde caixa", "caixa", "saúde-caixa", "saude-caixa"]
+  },
+  "saude_petrobras": {
+    "codPlano": 30,
+    "nome_kommo": "Petrobrás (Saúde Petrobrás)",
+    "aliases": ["saude petrobras", "saúde petrobras", "saúde petrobrás", "petrobras", "petrobrás", "petrobrás (saúde petrobrás)", "petrobras (saude petrobras)"]
+  },
+  "serpro": {
+    "codPlano": 31,
+    "nome_kommo": "Serpro",
+    "aliases": ["serpro"]
+  },
+  "sis_senado": {
+    "codPlano": 32,
+    "nome_kommo": "SIS Senado",
+    "aliases": ["sis senado", "sis-senado", "senado", "sis"]
+  },
+  "stf_med": {
+    "codPlano": 33,
+    "nome_kommo": "STF-Med",
+    "aliases": ["stf-med", "stf med", "stfmed", "stf"]
+  },
+  "trf": {
+    "codPlano": 34,
+    "nome_kommo": "TRF Pró-Social",
+    "aliases": ["trf", "trf pro-social", "trf pró-social", "pro social trf", "pró-social trf"]
+  },
+  "tre": {
+    "codPlano": 35,
+    "nome_kommo": "TRE",
+    "aliases": ["tre"]
+  },
+  "trt": {
+    "codPlano": 36,
+    "nome_kommo": "TRT",
+    "aliases": ["trt"]
+  },
+  "tst_saude": {
+    "codPlano": 37,
+    "nome_kommo": "TST Saúde",
+    "aliases": ["tst", "tst saude", "tst saúde", "tstsaude"]
+  },
+  "unafisco": {
+    "codPlano": 38,
+    "nome_kommo": null,
+    "aliases": ["unafisco", "unafisco saude", "unafisco saúde"]
+  },
+  "camara_deputados": {
+    "codPlano": 39,
+    "nome_kommo": "PróSaúde (Câmara dos Deputados)",
+    "aliases": ["camara dos deputados", "câmara dos deputados", "camara", "câmara", "prosaude camara", "prósaúde câmara", "prósaúde (camara dos deputados)", "prosaude (camara dos deputados)", "pró-saúde câmara", "pró-saúde camara dos deputados"]
+  },
+  "bacen_amhpdf": {
+    "codPlano": 45,
+    "nome_kommo": null,
+    "aliases": ["bacen amhpdf", "amhpdf"]
+  },
+  "mpu_aguas_claras": {
+    "codPlano": 74,
+    "nome_kommo": null,
+    "aliases": ["mpu plan assiste aguas claras", "mpu- plan assiste aguas claras (direto)", "plan assiste aguas claras"]
+  }
+}
