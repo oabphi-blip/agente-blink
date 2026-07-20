@@ -324,6 +324,140 @@ def existe_agendamento(
         return None
 
 
+def listar_grade_medico(cod_medico: int, cod_unidade: int) -> list[dict]:
+    """Retorna a grade semanal do médico+unidade (HORARIOAGENDA ativos).
+
+    Cada linha: {CODHORARIOAGENDA, CODAGENDA, DIASEMANA, HORAINICIO, HORAFIM,
+                 INTERVALO, DATAINICIO, DATAFIM}.
+
+    DIASEMANA (convenção Medware): 1=domingo, 2=segunda, 3=terça, 4=quarta,
+    5=quinta, 6=sexta, 7=sábado. STATUS=-1 significa ativo (não confundir
+    com STATUS=1 que é INATIVO nesse schema).
+    """
+    q = (
+        f"SELECT DISTINCT h.CODHORARIOAGENDA, h.CODAGENDA, h.DIASEMANA, "
+        f"h.HORAINICIO, h.HORAFIM, h.INTERVALO, h.DATAINICIO, h.DATAFIM "
+        f"FROM MEDICO_PROCED_HORARIOAGENDA mp "
+        f"JOIN HORARIOAGENDA h ON h.CODHORARIOAGENDA=mp.CODHORARIOAGENDA "
+        f"JOIN AGENDA a ON a.CODAGENDA=h.CODAGENDA "
+        f"WHERE mp.CODMEDICO={int(cod_medico)} "
+        f"AND a.CODUNIDADE={int(cod_unidade)} "
+        f"AND h.STATUS=-1 AND a.STATUS=-1 "
+        f"ORDER BY h.DIASEMANA, h.HORAINICIO"
+    )
+    try:
+        return rows(executar(q))
+    except MedwareSQLError as e:
+        log.warning("listar_grade_medico erro: %s", e)
+        return []
+
+
+def _isoweekday_para_diasemana_medware(iso: int) -> int:
+    """Python isoweekday (1=seg..7=dom) → Medware DIASEMANA (1=dom..7=sab)."""
+    return (iso % 7) + 1
+
+
+def _hhmm_para_minutos(hora: str) -> int:
+    """'08:30' ou '08:30:00' → 510."""
+    p = hora.split(":")
+    return int(p[0]) * 60 + int(p[1])
+
+
+def _minutos_para_hhmm(mins: int) -> str:
+    return f"{mins // 60:02d}:{mins % 60:02d}"
+
+
+def listar_slots_livres(
+    cod_medico: int,
+    cod_unidade: int,
+    dias: int = 14,
+    data_inicio: Optional[str] = None,
+) -> list[dict]:
+    """Slots LIVRES do médico+unidade nos próximos N dias.
+
+    Estratégia:
+    1. Carrega grade semanal (HORARIOAGENDA + MEDICO_PROCED_HORARIOAGENDA)
+    2. Carrega TODOS agendamentos ocupados no período
+    3. Expande grade em slots concretos por dia (data + hora)
+    4. Filtra ocupados
+    5. Retorna lista ordenada [{data_iso, hora, dia_semana, dow_python}]
+
+    Todas as datas/horas em TZ BRASÍLIA local (Medware é o servidor local
+    da clínica, sem conversão). Retorna hora HH:MM formato string.
+
+    dias: quantos dias a partir de hoje (default 14).
+    data_inicio: opcional 'YYYY-MM-DD'. Padrão: hoje BRT.
+    """
+    from datetime import date, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    brt = ZoneInfo("America/Sao_Paulo")
+    hoje = date.today() if not data_inicio else date.fromisoformat(data_inicio)
+    agora_brt = datetime.now(brt)
+
+    grade = listar_grade_medico(cod_medico, cod_unidade)
+    if not grade:
+        return []
+
+    # Índice: DIASEMANA (Medware) → lista de faixas de horário
+    grade_por_dia: dict[int, list[dict]] = {}
+    for g in grade:
+        dw = int(g.get("DIASEMANA", 0))
+        grade_por_dia.setdefault(dw, []).append(g)
+
+    # Ocupados no período (1 query pra N dias)
+    fim = hoje + timedelta(days=dias)
+    q_ocupados = (
+        f"SELECT DATAHORAAGENDADA FROM AGENDAMENTO "
+        f"WHERE CODMEDICO={int(cod_medico)} AND CODUNIDADE={int(cod_unidade)} "
+        f"AND CAST(DATAHORAAGENDADA AS DATE) >= '{hoje.isoformat()}' "
+        f"AND CAST(DATAHORAAGENDADA AS DATE) < '{fim.isoformat()}'"
+    )
+    ocupados: set[tuple[str, str]] = set()
+    try:
+        for r in rows(executar(q_ocupados)):
+            dh = r.get("DATAHORAAGENDADA", "")
+            if "T" in dh:
+                d, h = dh.split("T")
+                ocupados.add((d, h[:5]))
+    except MedwareSQLError as e:
+        log.warning("listar_slots_livres ocupados erro: %s", e)
+
+    # Expande grade em slots
+    livres: list[dict] = []
+    for offset in range(dias):
+        dia = hoje + timedelta(days=offset)
+        dw_medware = _isoweekday_para_diasemana_medware(dia.isoweekday())
+        faixas = grade_por_dia.get(dw_medware, [])
+        for faixa in faixas:
+            hora_ini = _hhmm_para_minutos(str(faixa.get("HORAINICIO", "")))
+            hora_fim = _hhmm_para_minutos(str(faixa.get("HORAFIM", "")))
+            intervalo = int(faixa.get("INTERVALO", 30)) or 30
+            for m in range(hora_ini, hora_fim, intervalo):
+                hora_str = _minutos_para_hhmm(m)
+                data_iso = dia.isoformat()
+
+                # Filtra ocupados
+                if (data_iso, hora_str) in ocupados:
+                    continue
+
+                # Filtra slots no passado (mesmo dia hoje)
+                if offset == 0:
+                    slot_dt = datetime.combine(dia, datetime.min.time(), tzinfo=brt)
+                    slot_dt = slot_dt.replace(hour=m // 60, minute=m % 60)
+                    if slot_dt <= agora_brt:
+                        continue
+
+                livres.append({
+                    "data_iso": data_iso,
+                    "hora": hora_str,
+                    "dia_semana": dia.isoweekday(),  # 1=seg..7=dom
+                    "diasemana_medware": dw_medware,
+                })
+
+    return livres
+
+
 def listar_slots_ocupados_dia(
     cod_medico: int, cod_unidade: int, data_iso: str,
 ) -> set[tuple[str, str]]:

@@ -499,6 +499,43 @@ def test_c59_medware_sql_query_usa_cast_extract():
 
 
 # ============================================================================
+# Task #420 — Apresentação agenda via SQL Medware (toggle rollout)
+# ============================================================================
+
+def test_task420_medware_agenda_sql_toggle_existe():
+    """medware.py::horarios_para_agente deve ter caminho SQL condicional
+    ao env MEDWARE_AGENDA_SQL. Fallback REST em caso de exception."""
+    medware = (VOICE_AGENT / "medware.py").read_text(encoding="utf-8")
+    assert "MEDWARE_AGENDA_SQL" in medware
+    assert "medware_sql" in medware
+    assert "listar_slots_livres" in medware
+    assert "fallback REST" in medware
+
+
+def test_task420_grade_semanal_via_sql():
+    """medware_sql.listar_grade_medico usa JOIN MEDICO_PROCED_HORARIOAGENDA
+    + HORARIOAGENDA + AGENDA. Não pode retornar dias fora da grade real
+    (fim do Bug C-31/C-53: 'Karla sábado', 'quinta Asa Norte' etc)."""
+    from voice_agent import medware_sql
+    from unittest.mock import patch
+
+    capturado = []
+    with patch.object(
+        medware_sql, "executar",
+        side_effect=lambda q: (capturado.append(q), {"colunas": [], "dados": []})[1],
+    ):
+        medware_sql.listar_grade_medico(12080, 5)
+
+    q = capturado[0]
+    assert "MEDICO_PROCED_HORARIOAGENDA" in q
+    assert "HORARIOAGENDA" in q
+    assert "AGENDA" in q
+    assert "h.STATUS=-1" in q  # ativo Firebird
+    assert "CODMEDICO=12080" in q
+    assert "CODUNIDADE=5" in q
+
+
+# ============================================================================
 # Meta-teste: VERSAO_PROMPT bumpada
 # ============================================================================
 

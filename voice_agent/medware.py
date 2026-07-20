@@ -784,6 +784,65 @@ class MedwareClient:
             return []
         cod_unidade = _code_lookup(UNIDADE_CODES, unidade_nome)
         hoje = datetime.now(_TZ)
+
+        # TASK #420 (20/07/2026) — SQL direto Medware substitui REST quando
+        # MEDWARE_AGENDA_SQL=1 no env. Motivos:
+        # - Grade real HORARIOAGENDA + MEDICO_PROCED_HORARIOAGENDA (não infere)
+        # - Timezone Brasília local (Firebird sem conversão UTC)
+        # - Dedup natural: 56 duplicatas C-59 contam 1 slot ocupado
+        # - Dias da semana corretos (mata Bug C-31/C-53 recorrentes)
+        # Default OFF pra rollout gradual. Fábio liga via Easypanel env.
+        if _os.getenv("MEDWARE_AGENDA_SQL", "0") in ("1", "true", "yes", "on"):
+            try:
+                from voice_agent import medware_sql
+                # Janela: usa data_inicio se veio, senão dias_default
+                try:
+                    _env_dias_sql = int(_os.getenv("MEDWARE_DIAS_DEFAULT") or "0")
+                    dias_sql = _env_dias_sql if 1 <= _env_dias_sql <= 90 else dias
+                except (TypeError, ValueError):
+                    dias_sql = dias
+                if data_inicio is not None and hasattr(data_inicio, "isoformat"):
+                    data_inicio_sql = data_inicio.isoformat()
+                else:
+                    data_inicio_sql = None
+                livres = medware_sql.listar_slots_livres(
+                    cod_medico=cod_medico,
+                    cod_unidade=cod_unidade,
+                    dias=dias_sql,
+                    data_inicio=data_inicio_sql,
+                )
+                out_sql: list[dict] = []
+                for s in livres:
+                    try:
+                        dt = datetime.strptime(s["data_iso"], "%Y-%m-%d")
+                    except (ValueError, KeyError):
+                        continue
+                    out_sql.append({
+                        "data_iso": s["data_iso"],
+                        "data_br": dt.strftime("%d/%m"),
+                        "dia_semana": _DIAS_SEMANA[dt.weekday()],
+                        "hora": s["hora"],
+                        "cod_agenda": 0,  # descoberto internamente
+                        "cod_unidade": cod_unidade,
+                        "cod_medico": cod_medico,
+                    })
+                log.info(
+                    "[MEDWARE AGENDA_SQL] medico=%s unidade=%s dias=%s → %d slots livres",
+                    medico_nome, unidade_nome, dias_sql, len(out_sql),
+                )
+                self.ultimo_req_horarios = {
+                    "evento": "medware_horarios_req_sql",
+                    "medico": medico_nome, "cod_medico": cod_medico,
+                    "unidade": unidade_nome, "cod_unidade": cod_unidade,
+                    "dias": dias_sql, "modo": "SQL",
+                }
+                return out_sql
+            except Exception as e:  # noqa: BLE001
+                # Fail-open pro REST antigo se SQL falhar (rollback automático)
+                log.warning(
+                    "[MEDWARE AGENDA_SQL] falhou, fallback REST: %s", e,
+                )
+
         # Bug C-38: env override pro default. Permite voltar pra 90d se
         # provedor consertar SQL/índices, sem precisar de novo deploy.
         try:
