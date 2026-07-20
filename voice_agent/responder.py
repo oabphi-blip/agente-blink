@@ -3039,6 +3039,37 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     if not text:
         return text
 
+    # === FILTRO C-62 SEMPRE-ON (Fábio 20/07/2026, lead 24325532 CBMDF) ===
+    # Anti-loop outbound. Se mesma mensagem foi enviada 3× em <3min pro
+    # mesmo lead → substitui pela nota canônica de handoff.
+    # Origem: Lia mandou 'Anotado. Qual dia da semana...' 7× seguidas
+    # em 5min. Paciente disse 'meu deus' e desistiu.
+    try:
+        from voice_agent.dedup_outbound import (
+            resposta_canonica_loop, verificar_e_registrar,
+        )
+        _lead = (ctx or {}).get("lead") or {}
+        _lead_id = _lead.get("id") or (ctx or {}).get("lead_id")
+        if _lead_id:
+            # Redis do responder — tenta importar do settings/pipeline
+            _redis_client = None
+            try:
+                from voice_agent.settings import get_redis
+                _redis_client = get_redis()
+            except Exception:  # noqa: BLE001
+                pass
+            _dedup = verificar_e_registrar(_lead_id, text, _redis_client)
+            if _dedup.get("loop_detectado"):
+                log.error(
+                    "[FILTRO C-62] LOOP OUTBOUND detectado lead=%s hash=%s",
+                    _lead_id, _dedup.get("hash"),
+                )
+                _known = (ctx or {}).get("known") or {}
+                _nome = str(_known.get("nome_contato") or _known.get("nome_paciente") or "").strip() or None
+                return resposta_canonica_loop(_nome)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[FILTRO C-62] falhou (fail-open): %s", e)
+
     # === FILTRO C-61 SEMPRE-ON (Fábio 20/07/2026, lead Patrícia 24325544) ===
     # Sem Convênio / Particular → NUNCA falar "coberta/coparticipação/reembolso".
     # Detecção antes do C-44 pra bloquear regressão Bug C-55.
