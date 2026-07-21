@@ -213,6 +213,31 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (21/07/2026) Bug C-64 — Loop circular: fallbacks C-31/C-54 contêm frases stall que C-60 deveria bloquear
+
+**Origem:** lead 24330790 Lauanne recebeu às 19:03 BRT a frase "Deixa eu reconferir os horários com o calendário aqui. Qual dia da semana..." — um stall clássico do C-60.
+
+**Causa raiz — 2 problemas simultâneos:**
+
+1. **`_DIA_SEMANA_FALLBACK`, `_DIA_NAO_ATENDIDO_FALLBACK`, `_DIA_SEM_DATA_FALLBACK`** em `responder.py` começavam com "Deixa eu reconferir/conferir..." — as próprias frases que C-60 deveria bloquear. Quando filtro C-31/C-54 acionava → gerava stall → C-60 deveria pegar mas não pegava → paciente recebia loop.
+
+2. **Regex C-60 com `.{0,25}` era estreito demais.** A frase "reconferir os horários com o calendário aqui. Qual dia da semana" tem gap de ~40 chars entre "reconferir" e "dia da semana" — regex `.{0,25}` não casava.
+
+**Fix (commit e2885d0, 21/07/2026):**
+
+1. **`_DIA_SEMANA_FALLBACK`** → `"Qual dia da semana e turno funcionam melhor pra você? Assim confirmo a data e o horário exatos na unidade certa."`
+2. **`_DIA_NAO_ATENDIDO_FALLBACK`** → `"Qual turno funciona melhor pra você — manhã ou tarde? Com isso confirmo o horário disponível."`
+3. **`_DIA_SEM_DATA_FALLBACK`** → `"A Dra. Karla Delalíbera atende seg/qua/sex em Asa Norte e ter/qui em Águas Claras. Qual dia funciona melhor pra você?"`
+4. **Regex C-60 expandido de `.{0,25}` para `.{0,60}`** — cobre gaps maiores.
+5. **Padrão novo:** `re.compile(r"(?:reconferir).{0,30}(?:horários|calendário|agenda).{0,30}(?:aqui|correto)", ...)`
+
+**Pytest:** `test_bug_c64_circular_fallback.py` — 12/12 verde. Valida que nenhum fallback contém stall phrase E que C-60 pega frases com gap >25 chars.
+
+**Lição arquitetural CRÍTICA:**
+- **Fallbacks de filtros de defesa NÃO podem conter as frases que esses filtros bloqueiam.** Loop circular é inevitável se o "texto de substituição seguro" contém o padrão que desencadeou a substituição.
+- **Antes de escrever qualquer fallback/substituto, validar manualmente que NÃO aciona nenhum outro filtro.** Simples checklist: rodar `_has_stall(fallback_text)` antes de commitar.
+- **Regex com `{0,N}` curto (N<30) falha em frases com subordinadas.** Sempre usar N≥60 pra capturar frases com cláusulas intermediárias.
+
 ### 0. (20/07/2026) Bug C-59 revisão — "1.299 duplicatas" era estrutura Medware, não bug (Task #422)
 
 **Origem:** lead 24259380 Fábio Philipe recebeu 2 slots ofertados pela Lia (22/07 13:30 + 24/07 16:30). Ambos OCUPADOS. Investigação revelou que MINHA lógica em `voice_agent/medware_sql.py` (Task #420) contava exames como "duplicatas".
