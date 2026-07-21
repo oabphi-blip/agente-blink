@@ -804,8 +804,9 @@ _FAKE_AGENDA_LOOKUP = [
     # "Deixa eu conferir os dias direito antes de gravar." Regex antigo exigia
     # 'agenda|horário|disponibilidade' perto de conferir. Nova variação usa
     # 'dias' + 'antes de gravar'. Cobrindo agora.
-    re.compile(r"(?:deixa eu\s+|vou\s+)?(?:conferir|reconferir|verificar|checar).{0,25}(?:dia|dias|dia da semana|dia certo)", re.IGNORECASE | re.DOTALL),
-    re.compile(r"(?:conferir|reconferir|verificar|checar).{0,25}antes de\s+(?:gravar|marcar|agendar|confirmar)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?:deixa eu\s+|vou\s+)?(?:conferir|reconferir|verificar|checar).{0,60}(?:dia|dias|dia da semana|dia certo)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?:conferir|reconferir|verificar|checar).{0,60}antes de\s+(?:gravar|marcar|agendar|confirmar)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?:reconferir|reconferir).{0,30}(?:horários|calendário|agenda).{0,30}(?:aqui|correto)", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:atende\s+)?\*?\*?seg\s*/\s*qua\s*/\s*sex\*?\*?.{0,60}\*?\*?ter\s*/\s*qui\*?\*?", re.IGNORECASE | re.DOTALL),
 ]
 
@@ -1141,9 +1142,8 @@ def _viola_dia_semana(text: str) -> Optional[tuple[str, str, str]]:
 
 
 _DIA_SEMANA_FALLBACK = (
-    "Deixa eu reconferir os horários com o calendário aqui. "
     "Qual dia da semana e turno funcionam melhor pra você? "
-    "Assim já volto com as opções concretas — com a data e o dia da semana certinhos."
+    "Assim confirmo a data e o horário exatos na unidade certa."
 )
 
 
@@ -1415,9 +1415,8 @@ def _viola_oferta_em_dia_nao_atendido(
 
 
 _DIA_NAO_ATENDIDO_FALLBACK = (
-    "Deixa eu reconferir a agenda — preciso confirmar os dias que esse "
-    "médico atende essa semana. Qual turno funciona melhor pra você "
-    "(manhã ou tarde)? Volto em 1 minuto com horários certos."
+    "Qual turno funciona melhor pra você — manhã ou tarde? "
+    "Com isso confirmo o horário disponível."
 )
 
 
@@ -1529,10 +1528,8 @@ def _viola_dia_sem_data_incompativel_unidade(
 
 
 _DIA_SEM_DATA_FALLBACK = (
-    "Deixa eu conferir os dias direito antes de gravar. A Dra. Karla "
-    "Delalíbera atende **seg/qua/sex em Asa Norte** e **ter/qui em "
-    "Águas Claras**. Me diz de novo qual dia funciona melhor e eu já "
-    "confirmo a unidade certa pra esse dia."
+    "A Dra. Karla Delalíbera atende seg/qua/sex em Asa Norte e ter/qui em "
+    "Águas Claras. Qual dia funciona melhor pra você?"
 )
 
 
