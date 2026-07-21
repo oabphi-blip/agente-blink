@@ -2630,6 +2630,91 @@ _PAPEIS_INVENTADOS = re.compile(
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# FILTRO C-65 — Anti-chute agenda (Fábio 21/07/2026, lead 21329281)
+# Lia disse "segunda/quarta/sexta à tarde" sem hora concreta em FSM=AGENDA.
+# Fábio: "nao pode chutar agenda, este trabalho é sério".
+# Se resposta cita dias-da-semana em contexto de oferta MAS não tem HH:MM
+# concreto → bloqueia + substitui por reconsulta Medware.
+# ═══════════════════════════════════════════════════════════════════════
+
+_DIAS_SEMANA_MENCAO = re.compile(
+    r"\b(?:segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo)(?:\s*-\s*feira)?\b",
+    re.IGNORECASE,
+)
+
+_HORA_CONCRETA = re.compile(
+    r"\b(?:[01]?\d|2[0-3])[:h]\s*[0-5]?\d\b"  # 10:30, 10h30, 10:00, 10h
+    r"|\b(?:[01]?\d|2[0-3])h\b"                # 10h, 14h
+    r"|\bàs\s+(?:[01]?\d|2[0-3])\b",           # às 10, às 14
+    re.IGNORECASE,
+)
+
+_PALAVRAS_OFERTA_AGENDA = re.compile(
+    r"("
+    r"funcionam?\s+(?:melhor|pra)"
+    r"|prefere"
+    r"|melhores?\s+op(?:ções|cão)"
+    r"|op(?:ções|cão)\s+(?:pra|para)"
+    r"|dispon[ií]vel(?:eis)?"
+    r"|hor[áa]rios?\s+(?:pra|abertos|dispon)"
+    r"|(?:qual|quais)\s+(?:dia|hor[áa]rio|desses)"
+    r"|posso\s+oferecer"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _fsm_estado(ctx: Optional[dict]) -> str:
+    if not ctx:
+        return ""
+    fsm = ctx.get("fsm") or {}
+    return str(fsm.get("estado") or "").upper()
+
+
+def _viola_chute_agenda_sem_hora(text: str, ctx: Optional[dict]) -> bool:
+    """C-65: Lia ofereceu dia-da-semana em contexto de agenda MAS sem HH:MM.
+
+    Só dispara se texto tem OFERTA explícita (pergunta preferência ou fala de
+    opções) + 2+ dias diferentes + zero hora concreta.
+    Info genérica ('Karla atende seg/qua/sex') NÃO dispara.
+    """
+    if not text:
+        return False
+
+    # Precisa ter linguagem de OFERTA (não é só info genérica)
+    if not _PALAVRAS_OFERTA_AGENDA.search(text):
+        return False
+
+    # Cita 2+ dias diferentes?
+    dias = _DIAS_SEMANA_MENCAO.findall(text)
+    if not dias:
+        return False
+    dias_unicos = set(d.lower() for d in dias)
+    if len(dias_unicos) < 2:
+        return False
+
+    # Tem alguma hora concreta?
+    if _HORA_CONCRETA.search(text):
+        return False
+
+    # OFERTA + 2+ dias mencionados + zero hora = chute
+    return True
+
+
+def _gerar_fallback_chute_agenda(ctx: Optional[dict]) -> str:
+    """C-65: substituição quando Lia ofertou dia genérico sem hora."""
+    known = (ctx or {}).get("known") or {}
+    nome = str(known.get("nome_contato") or known.get("nome_paciente") or "").strip()
+    primeiro = nome.split()[0] if nome else ""
+    saudacao = f"{primeiro}, " if primeiro else ""
+    return (
+        f"{saudacao}deixa eu reconferir os horários exatos com a agenda do "
+        "Medware pra te passar as opções corretas. Em 1 minuto volto com "
+        "os horários disponíveis (com data e hora)."
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # FILTRO C-61 — Anti-cobertura quando convênio é "Sem Convênio"/particular
 # Origem: Fábio 20/07/2026, lead 24325544 (Patrícia/Maria bebê Amil→particular)
 # Lia disse "pelo seu convênio (Sem Convênio), a consulta é coberta —
@@ -3042,6 +3127,47 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """
     if not text:
         return text
+
+    # === FILTRO C-66 SEMPRE-ON (Fábio 21/07/2026, lead 21329281 Letícia) ===
+    # Se Lia respondeu texto que contradiz pedido de remarcação/cancelamento
+    # (ex: "te espero no dia" quando paciente disse "quero remarcar"), substitui
+    # pela resposta canônica de handoff pra humano.
+    # Detecção: user_text (última msg paciente do ctx) contém padrão remarcação
+    # E resposta gerada NÃO menciona "passar pra equipe" — significa que Lia
+    # ignorou o pedido de remarcação.
+    try:
+        from voice_agent.handoff_humano import (
+            detectar_pedido_remarcacao_ou_cancelamento,
+            resposta_canonica_remarcacao,
+        )
+        _user_text = str((ctx or {}).get("user_text") or "").strip()
+        if _user_text and detectar_pedido_remarcacao_ou_cancelamento(_user_text):
+            _lower_resp = text.lower()
+            # Só substitui se Lia NÃO fez handoff no texto atual
+            fez_handoff = any(t in _lower_resp for t in [
+                "passar seu atendimento", "passar pra nossa equipe",
+                "nossa equipe humana", "particularidades",
+            ])
+            if not fez_handoff:
+                log.error(
+                    "[FILTRO C-66] REMARCAÇÃO ignorada. user=%r texto=%r",
+                    _user_text[:100], text[:200],
+                )
+                _known = (ctx or {}).get("known") or {}
+                _nome = str(_known.get("nome_contato") or _known.get("nome_paciente") or "").strip() or None
+                return resposta_canonica_remarcacao(_nome)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[FILTRO C-66] falhou (fail-open): %s", e)
+
+    # === FILTRO C-65 SEMPRE-ON (Fábio 21/07/2026, lead 21329281 Letícia) ===
+    # Lia ofertou "segunda/quarta/sexta à tarde" sem hora concreta em AGENDA.
+    # Bloqueia oferta genérica + substitui por reconsulta Medware honesta.
+    if _viola_chute_agenda_sem_hora(text, ctx):
+        log.error(
+            "[FILTRO C-65] CHUTE AGENDA (dia sem hora). texto=%r",
+            text[:200],
+        )
+        return _gerar_fallback_chute_agenda(ctx)
 
     # === FILTRO C-62 SEMPRE-ON (Fábio 20/07/2026, lead 24325532 CBMDF) ===
     # Anti-loop outbound. Se mesma mensagem foi enviada 3× em <3min pro

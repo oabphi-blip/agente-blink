@@ -24,6 +24,69 @@ log = logging.getLogger(__name__)
 # PADRÕES — paciente pedindo humano
 # ═══════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════
+# C-66 — Padrões de remarcação/cancelamento/desmarcação (SEMPRE humano)
+# ═══════════════════════════════════════════════════════════════════════
+
+_PADROES_REMARCACAO_CANCELAMENTO = re.compile(
+    r"("
+    # Cancelamento
+    r"(?:quero|vou|posso|preciso|pretendo)\s+cancel(?:ar|amento)"
+    r"|cancel(?:ar|amento)\s+(?:a\s+)?consulta"
+    # Desmarcação
+    r"|(?:quero|vou|posso|preciso)\s+desmarc(?:ar|amento)"
+    r"|desmarc(?:ar|amento)\s+(?:a\s+)?consulta"
+    # Remarcação
+    r"|(?:quero|vou|posso|preciso|pretendo)\s+remarc(?:ar|amento)"
+    r"|remarc(?:ar|amento)\s+(?:a\s+)?consulta"
+    r"|posso\s+remarcar"
+    # Não pode/vai (ampliado)
+    r"|n[aã]o\s+(?:vou|posso|dá|d[aá]|conseguir[eé]|consigo)\s+(?:poder\s+)?(?:ir|comparecer|dar)"
+    r"|n[aã]o\s+(?:vou|posso|d[aá])\s+mais"
+    r"|n[aã]o\s+vai\s+dar"
+    r"|imposs[íi]vel\s+(?:ir|comparecer)"
+    # Mudar/trocar data/dia/horário (ampliado — aceita 'o' ou 'a' antes)
+    r"|(?:quero|posso|preciso)\s+(?:mudar|trocar|alterar)\s+(?:[oa]\s+)?(?:data|dia|hor[áa]rio)"
+    r"|(?:mudar|trocar|alterar)\s+(?:[oa]\s+)?(?:data|dia|hor[áa]rio)\s+(?:da\s+)?consulta"
+    # Faltar / adiar
+    r"|vou\s+faltar"
+    r"|(?:quero|preciso|posso)\s+adiar"
+    r"|adiar\s+(?:a\s+)?consulta"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _ativado_remarcacao() -> bool:
+    return (os.getenv("HANDOFF_REMARCACAO_ATIVADO") or "1").lower() not in (
+        "0", "false", "no", "off",
+    )
+
+
+def detectar_pedido_remarcacao_ou_cancelamento(user_text: str) -> bool:
+    """C-66: detecta se paciente pediu remarcar/desmarcar/cancelar/faltar.
+
+    QUALQUER match → transferir pra humano IMEDIATAMENTE.
+    Fábio 21/07/2026: 'remarcação tem particularidades que a IA não resolve'.
+    """
+    if not _ativado_remarcacao():
+        return False
+    if not user_text or not user_text.strip():
+        return False
+    return bool(_PADROES_REMARCACAO_CANCELAMENTO.search(user_text))
+
+
+def resposta_canonica_remarcacao(nome_paciente: Optional[str] = None) -> str:
+    """Resposta canônica ÚNICA quando paciente pediu remarcação/cancelamento."""
+    saudacao = f"{nome_paciente.split()[0]}, " if nome_paciente else ""
+    return (
+        f"{saudacao}entendi! Vou passar seu atendimento pra nossa equipe "
+        "humana agora. Remarcação/cancelamento tem particularidades que só "
+        "nossa equipe consegue resolver com você. Em instantes uma pessoa "
+        "da Blink responde por aqui. 🤝"
+    )
+
+
 _PADROES_PEDIDO_HUMANO = re.compile(
     r"("
     # Direto — quero/prefiro/preciso com humano/atendente/pessoa/alguém
