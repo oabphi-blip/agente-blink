@@ -800,6 +800,13 @@ _FAKE_AGENDA_LOOKUP = [
     re.compile(r"volto (?:em|com|já com|ja com).{0,25}(minuto|instante|opç|op[çc][õo]es|hor[áa]rio)", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:lentid[ãa]o|inst[áa]vel|fora do ar|indispon[íi]vel).{0,25}(medware|agenda|sistema)", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:puxar|buscar).{0,15}(?:a\s+)?agenda.{0,20}(?:exata|real|aqui)", re.IGNORECASE | re.DOTALL),
+    # Bug C-60 (Caroline 22949500, 21/07/2026) — 4 mensagens IDÊNTICAS em 20 min:
+    # "Deixa eu conferir os dias direito antes de gravar." Regex antigo exigia
+    # 'agenda|horário|disponibilidade' perto de conferir. Nova variação usa
+    # 'dias' + 'antes de gravar'. Cobrindo agora.
+    re.compile(r"(?:deixa eu\s+|vou\s+)?(?:conferir|reconferir|verificar|checar).{0,25}(?:dia|dias|dia da semana|dia certo)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?:conferir|reconferir|verificar|checar).{0,25}antes de\s+(?:gravar|marcar|agendar|confirmar)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"(?:atende\s+)?\*?\*?seg\s*/\s*qua\s*/\s*sex\*?\*?.{0,60}\*?\*?ter\s*/\s*qui\*?\*?", re.IGNORECASE | re.DOTALL),
 ]
 
 _FAKE_AGENDA_LOOKUP_FALLBACK = (
@@ -4148,11 +4155,16 @@ class Responder:
             )
             _ja_agendado = (caller_context or {}).get("ja_agendado", False)
             _force_tool_kwargs: dict = {}
-            # Mapa estado FSM → tool obrigatória
+            # Mapa estado FSM → tool obrigatória.
+            # Bug C-63 (21/07/2026): DADOS e CONVENIO adicionados porque sem
+            # tool_choice forçado o modelo escreve texto livre (stall phrases).
+            # TRIAGEM não entra — saudação inicial precisa ser texto livre.
             _TOOL_POR_ESTADO = {
                 "AGENDA": "oferecer_slot",
                 "CONFIRMACAO": "confirmar_dados_paciente",
                 "GRAVACAO": "gravar_agendamento_medware",
+                "DADOS": "confirmar_dados_paciente",    # C-63: força coleta estruturada
+                "CONVENIO": "confirmar_dados_paciente", # C-63: idem
             }
             _tool_obrigatoria = _TOOL_POR_ESTADO.get(_estado_fsm)
             if _tool_obrigatoria and not _ja_agendado:
@@ -4162,8 +4174,12 @@ class Responder:
                 }
             elif _agenda_ctx and not _ja_agendado:
                 # Fallback: tem agenda real do Medware mas FSM não sinalizou
-                # estado → força qualquer tool (geralmente oferecer_slot).
-                _force_tool_kwargs["tool_choice"] = {"type": "any"}
+                # estado → força ESPECIFICAMENTE oferecer_slot (não "any").
+                # Bug C-63: {"type":"any"} permitia modelo escolher tool errada
+                # ou escrever texto livre após tool falhar.
+                _force_tool_kwargs["tool_choice"] = {
+                    "type": "tool", "name": "oferecer_slot",
+                }
             for _iter in range(4):
                 # Só força tool na 1ª iteração — depois deixa modelo escrever
                 # resposta humana em cima do tool_result.
