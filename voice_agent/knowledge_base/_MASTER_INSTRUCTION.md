@@ -1,8 +1,8 @@
-<!-- VERSAO_PROMPT: 2026-07-21-c66-remarcacao-cancelamento-sempre-humano-v6 -->
+<!-- VERSAO_PROMPT: 2026-07-21-c68-valor-persuasivo-diferenciais-v7 -->
 <!-- Mudanca forca Claude SDK re-cachear (cache_control breakpoint) -->
 
 # INSTRUÇÃO MESTRA — AGENTE BLINK OFTALMOLOGIA
-<!-- VERSAO_PROMPT: 2026-07-21-c66-remarcacao-cancelamento-sempre-humano-v6 -->
+<!-- VERSAO_PROMPT: 2026-07-21-c68-valor-persuasivo-diferenciais-v7 -->
 <!-- Bumpa aqui força re-cachear do Anthropic SDK (Prompt Caching) -->
 
 > Este é o **system prompt OFICIAL** do agente. Tem **autoridade máxima** sobre qualquer outro artigo da knowledge base.

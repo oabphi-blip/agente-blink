@@ -403,7 +403,7 @@ def deve_responder_valor(ctx: Optional[dict], user_text: str) -> Optional[str]:
     nome = _nome_paciente(ctx)
     saudacao = f"{nome}, " if nome else ""
 
-    # Convênio aceito → cobertura
+    # Convênio aceito → confirma sem falar em cobertura (Bug C-61)
     conv_aceito = (
         convenio and
         convenio not in ("não se aplica", "nao se aplica", "particular", "") and
@@ -412,36 +412,61 @@ def deve_responder_valor(ctx: Optional[dict], user_text: str) -> Optional[str]:
     )
     if conv_aceito:
         return (
-            f"{saudacao}pelo seu convênio ({convenio.title()}), "
-            f"a consulta com a {medico} é coberta — você não paga direto "
-            "à clínica (pode ter coparticipação dependendo do plano). "
-            "Quer seguir pro horário?"
+            f"{saudacao}sim, atendemos o {convenio.title()}! 👍\n\n"
+            "Qual unidade fica melhor para você — **Asa Norte** ou **Águas Claras**?"
         )
 
-    # Particular — valor exato por médico + motivo
+    # Particular — determina valor + rótulo do serviço
     motivo = str(known.get("motivo") or known.get("especialidade") or "").lower()
 
     if "karla" in medico.lower():
         if "apv" in motivo or "processamento visual" in motivo or "sdp" in motivo:
-            valor = _VALORES_CANONICOS["karla_apv"]
+            valor_pix = "R$ 800"
+            valor_cartao = "R$ 870"
+            valor_2x = "R$ 435"
             servico = "avaliação do processamento visual"
         else:
-            valor = _VALORES_CANONICOS["karla_particular"]
+            valor_pix = "R$ 611"
+            valor_cartao = "R$ 670"
+            valor_2x = "R$ 335"
             servico = "consulta"
     elif "fabrício" in medico.lower() or "fabricio" in medico.lower():
         if "catarata" in motivo:
-            valor = _VALORES_CANONICOS["fabricio_catarata"]
+            valor_pix = "R$ 445"
+            valor_cartao = "R$ 470"
+            valor_2x = "R$ 235"
             servico = "avaliação de catarata"
         else:
-            valor = _VALORES_CANONICOS["fabricio_50plus"]
+            valor_pix = "R$ 611"
+            valor_cartao = "R$ 670"
+            valor_2x = "R$ 335"
             servico = "consulta"
     else:
         return None  # Médico desconhecido, LLM
 
+    # C-68 v2 (Fábio 21/07/2026, modelo humano lead Layssa):
+    # Copia formato usado pelo atendimento humano — mais claro, mais rico.
+    # Estrutura: intro → exames descritos → especialistas → voucher → valor inline → CTA.
+    nome_apenas = nome.rstrip(",").strip() if nome else ""
+    abertura = f"Olá, {nome_apenas}\n\n" if nome_apenas else ""
     return (
-        f"{saudacao}a {servico} com {medico} no atendimento particular "
-        f"é {valor}. Pagamento pode ser via Pix, cartão ou dinheiro no "
-        "dia. Quer que eu já veja os horários disponíveis?"
+        f"{abertura}"
+        f"Para entender exatamente o que está incluso na {servico}, segue um resumo:\n\n"
+        "✅ **Incluso na consulta os seguintes exames:**\n"
+        "👁️ Tonometria (medir a pressão ocular)\n"
+        "🔍 Avaliação do alinhamento e coordenação dos olhos\n"
+        "🩺 Exame detalhado do fundo do olho (mapeamento de retina)\n\n"
+        "➕ **Se houver indicação do médico, também está incluso:**\n"
+        "👩‍⚕️ Avaliação com especialistas do corpo clínico "
+        "(Catarata, Refrativa, Plástica Ocular, Retina e Vítreo).\n\n"
+        "🪪 **E, se necessário:**\n"
+        "🕶️ voucher para aquisição de óculos.\n\n"
+        f"💳 **O valor da {servico} com a {medico}** tem as seguintes opções: "
+        f"**Primeira Opção: {valor_pix} Pix**, "
+        f"**Segunda Opção: {valor_cartao} (1x Cartão)**, "
+        f"**Terceira Opção: {valor_cartao} (2x Cartão)**, "
+        "para o primeiro paciente.\n\n"
+        "Qual a sua escolha?"
     )
 
 
@@ -465,6 +490,16 @@ def tentar_bypass_deterministico(
         t = deve_orientar_urgencia(ctx, user_text)
         if t:
             return ("urgencia", t)
+
+        # Bug C-60 (20/07/2026): classificador convênio ANTES do valor,
+        # pra pegar CBMDF, GDF, Amil etc antes de LLM inventar "deixa eu verificar"
+        try:
+            from voice_agent.classificador_convenio import deve_responder_convenio
+            t = deve_responder_convenio(ctx, user_text)
+            if t:
+                return ("convenio", t)
+        except Exception as e:  # noqa: BLE001
+            log.warning("bypass convênio falhou: %s", e)
 
         t = deve_responder_valor(ctx, user_text)
         if t:

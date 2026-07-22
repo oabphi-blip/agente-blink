@@ -27,8 +27,8 @@ from typing import Any, Optional
 
 log = logging.getLogger(__name__)
 
-TTL_JANELA_SEG = 180                # 3min — quanto tempo o hash "conta"
-LIMITE_LOOP = 3                     # 3 vezes = loop
+TTL_JANELA_SEG = 300                # 5min (Bug C-68 21/07 Ângela — antes era 3min)
+LIMITE_LOOP = 2                     # 2 vezes = loop (antes 3; Fábio reclamou repetição 2x)
 CHAVE_PREFIXO = "blink:c62_dedup:"  # chave Redis
 CHAVE_LOOP_FLAG = "blink:c62_loop_detectado:"  # flag Redis pra pipeline
 

@@ -87,25 +87,41 @@ o **Formato Humano (Pix sinal 50%)** só é liberado quando o atendente humano
 já enviou mensagem nesse formato no chat (Lia replica o modelo humano) OU
 quando o paciente pergunta explicitamente sobre parcelamento/sinal.
 
-### Formato PADRÃO — 3 opções à vista, sinal só depois da aceitação
+### Formato PADRÃO — Persuasão + Valor (Bug C-68 21/07/2026)
+
+**ORDEM OBRIGATÓRIA da mensagem:** (1) diferenciais → (2) valor → (3) CTA.
+
+**NUNCA cuspir só o valor.** Antes precisa apresentar o que o paciente
+LEVA na consulta — exames inclusos + benefícios do corpo clínico. Isso
+gera valor percebido antes do preço.
 
 Script canônico (Caso 1 — particular / "Sem Convênio" / "Não se aplica"):
 
-> "A consulta com a Dra. Karla Delalíbera tem 3 opções:
+> "[Nome], deixa eu te contar o que a consulta com a **Dra. Karla Delalíbera** já inclui:
 >
-> 📲 **1ª opção — Pix (à vista):** R$ 611
-> 💳 **2ª opção — Cartão 1x:** R$ 670
-> 💳 **3ª opção — Cartão 2x sem juros:** R$ 670 (2x R$ 335)
+> 🔬 **Exames completos no dia:** tonometria, motilidade ocular e mapeamento de retina — sem custo extra
+> 👓 **Voucher para óculos:** se identificarmos necessidade de correção, você sai com um voucher pra aquisição em óticas parceiras
+> 🩺 **Corpo clínico integrado:** se a Dra. Karla identificar necessidade de outro especialista da nossa equipe (retina, córnea, catarata), o encaminhamento é gratuito — você paga só uma consulta
 >
-> A consulta já inclui tonometria, motilidade e mapeamento de retina.
+> 💰 **Investimento:**
+> 📲 **Pix (à vista):** R$ 611
+> 💳 **Cartão 1x:** R$ 670
+> 💳 **Cartão 2x sem juros:** R$ 670 (2x R$ 335)
 >
-> Qual forma de pagamento fica melhor pra você?"
+> Quer que eu já veja os horários disponíveis pra você?"
 
 Depois que paciente aceitar o slot, aí sim entra o sinal 50% na etapa E9
 (agendamento). No PADRÃO, apresentação inicial NÃO menciona sinal.
 
 Para APV (R$ 800/870), encaixe/sábado/mais de 2 (R$ 511/570), Fabrício
-catarata (R$ 445) — usar a linha correspondente da tabela.
+catarata (R$ 445) — mesmo formato (diferenciais → valor → CTA), apenas
+trocar a linha do valor.
+
+**⛔ PROIBIDO** (Bug C-68 Fábio 21/07 — Ângela lead 24331202):
+> "a consulta com Dra. Karla no atendimento particular é R$ 611. Pagamento pode ser via Pix, cartão ou dinheiro no dia. Quer horários?"
+
+Isso é o **anti-padrão**: cuspir valor sem contexto, sem diferencial,
+sem voucher, sem menção ao corpo clínico. Perde persuasão + gera objeção.
 
 ### Formato HUMANO — Pix 50% sinal + Cartão integral no ato
 
