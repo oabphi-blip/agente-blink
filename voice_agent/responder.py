@@ -2939,6 +2939,88 @@ def _texto_despeja_valor(text: str) -> bool:
     return any(_re.search(p, baixo) for p in _C51_VALOR_PATTERNS)
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Bug C-69 (22/07/2026, leads 24335424 Asa Norte / 24334906 Bárbara)
+# ─────────────────────────────────────────────────────────────────────────
+# NÃO-RECONHECIMENTO: paciente informou a unidade ("Asa Norte") e a Lia
+# perguntou a unidade de novo NO MESMO TURNO. Causa: known["unidade"] só é
+# populado a partir do campo Kommo no turno SEGUINTE; o dado que o paciente
+# ACABOU de mandar não era fundido em known antes dos geradores
+# determinísticos. Fix: extrair unidade/convênio do inbound e (a) fundir em
+# known; (b) se a resposta repergunta um dado já conhecido, trocar pela
+# próxima pergunta contextual.
+# ─────────────────────────────────────────────────────────────────────────
+_C69_UNIDADES_INBOUND = (
+    ("águas claras", "Águas Claras"),
+    ("aguas claras", "Águas Claras"),
+    ("asa norte", "Asa Norte"),
+    ("asa sul", "Asa Sul"),
+)
+
+
+def _extrair_unidade_do_inbound(inbound_text: Optional[str]) -> Optional[str]:
+    """Detecta a unidade citada pelo paciente no texto recebido."""
+    if not inbound_text:
+        return None
+    baixo = inbound_text.lower()
+    for chave, nome in _C69_UNIDADES_INBOUND:
+        if chave in baixo:
+            return nome
+    return None
+
+
+def _extrair_convenio_do_inbound(inbound_text: Optional[str]) -> Optional[str]:
+    """Detecta 'sem convênio/particular' explicitado pelo paciente."""
+    if not inbound_text:
+        return None
+    baixo = inbound_text.lower()
+    if "sem convenio" in baixo or "sem convênio" in baixo or "particular" in baixo:
+        return "Sem Convênio"
+    return None
+
+
+def _enriquecer_known_com_inbound(ctx: Optional[dict]) -> None:
+    """Funde no known os dados que o paciente informou NESTE turno (C-69).
+
+    Sem isso, um dado recém fornecido só entra em known no turno seguinte
+    (via campo Kommo), e a Lia repergunta o que já foi respondido.
+    """
+    if not isinstance(ctx, dict):
+        return
+    inbound = (
+        ctx.get("inbound_text")
+        or ctx.get("last_inbound_text")
+        or ctx.get("user_text")
+        or ""
+    )
+    if not inbound:
+        return
+    known = ctx.get("known")
+    if not isinstance(known, dict):
+        known = {}
+        ctx["known"] = known
+    if not known.get("unidade"):
+        uni = _extrair_unidade_do_inbound(inbound)
+        if uni:
+            known["unidade"] = uni
+    if not known.get("convenio"):
+        conv = _extrair_convenio_do_inbound(inbound)
+        if conv:
+            known["convenio"] = conv
+
+
+def _texto_repergunta_unidade(text: str) -> bool:
+    if not text:
+        return False
+    baixo = text.lower()
+    return any(p in baixo for p in (
+        "qual unidade",
+        "unidade fica melhor",
+        "asa norte ou águas claras",
+        "asa norte ou aguas claras",
+    ))
+
+
 def _gerar_proxima_pergunta_sem_convenio(ctx: Optional[dict] = None) -> str:
     """Reconhecimento curto + próxima pergunta (unidade ou preferência)."""
     known = (ctx or {}).get("known") or {}
@@ -3128,6 +3210,14 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     if not text:
         return text
 
+    # === Bug C-69: reconhecer dados informados NESTE turno ===
+    # Funde unidade/convênio do inbound em known ANTES dos geradores
+    # determinísticos, pra Lia não reperguntar o que acabou de ser dito.
+    try:
+        _enriquecer_known_com_inbound(ctx)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[C-69] enriquecer known falhou (fail-open): %s", e)
+
     # === FILTRO C-66 SEMPRE-ON (Fábio 21/07/2026, lead 21329281 Letícia) ===
     # Se Lia respondeu texto que contradiz pedido de remarcação/cancelamento
     # (ex: "te espero no dia" quando paciente disse "quero remarcar"), substitui
@@ -3290,6 +3380,19 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             "antes=%r depois=%r",
             _texto_antes[:150], text[:150],
         )
+
+    # === FILTRO C-69 SEMPRE-ON (Fábio 22/07/2026, leads 24335424 / 24334906) ===
+    # Anti-repergunta de dado já informado. Se a resposta repergunta a
+    # unidade mas ela já está em known (inclusive recém-fundida do inbound),
+    # troca pela próxima pergunta contextual.
+    _known_c69 = (ctx or {}).get("known") or {}
+    if _texto_repergunta_unidade(text) and _known_c69.get("unidade"):
+        log.warning(
+            "[FILTRO C-69] Repergunta de unidade já informada bloqueada. "
+            "unidade=%r texto=%r",
+            _known_c69.get("unidade"), text[:200],
+        )
+        return _gerar_reconhecimento_curto_e_avanca(ctx)
 
     # === FILTRO C-50 SEMPRE-ON (Fábio 02/07/2026 noite, lead 24243754 Ani/Ysis) ===
     # Se paciente forneceu dado estruturado (data/nome/CPF) no inbound
