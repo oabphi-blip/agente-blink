@@ -22,6 +22,28 @@ from .transcribe import Transcriber
 log = logging.getLogger(__name__)
 
 
+# === AGENDA SUSPENSA (kill-switch operacional — Fábio 22/07/2026) ===
+_AGENDA_SUSPENSA_TERMOS = (
+    "horário", "horario", "horarios", "horários", "vaga", "vagas",
+    "disponibilidade", "disponível", "disponivel", "agendar", "marcar",
+    "que dia", "quais dias", "tem para", "tem pra",
+)
+
+
+def _agenda_suspensa_ativa() -> bool:
+    """True se o kill-switch operacional AGENDA_SUSPENSA está ligado."""
+    import os
+    return os.getenv("AGENDA_SUSPENSA", "0").lower() in ("1", "true", "yes", "on")
+
+
+def _texto_pede_agendamento(user_text: Optional[str]) -> bool:
+    """Paciente pediu horário/agendamento (gatilho de handoff c/ agenda suspensa)."""
+    if not user_text:
+        return False
+    baixo = user_text.lower()
+    return any(t in baixo for t in _AGENDA_SUSPENSA_TERMOS)
+
+
 @dataclass
 class PipelineResult:
     transcript: str
@@ -273,6 +295,180 @@ class VoicePipeline:
                 return PipelineResult(
                     transcript=user_text, answer="", sent=False,
                     model_used="", articles_used=[],
+                )
+
+        # 2c-bis) Bug C-68 (22/07/2026, lead 21513059 Natacha/Eduardo).
+        # Paciente em 5-AGENDADO/6-CONFIRMAR/7.CONFIRMADO pediu REMARCAR ou
+        # CANCELAR → Lia ofereceu novos slots em vez de escalar pra humano.
+        # Causa raiz: filtro C-47 apenas substituía o TEXTO; não movia o lead
+        # nem desativava a IA. Agora detectamos cedo no pipeline (antes do
+        # Medware e do LLM) e executamos as 3 ações obrigatórias:
+        #   (1) Enviar mensagem canônica de handoff
+        #   (2) Mover lead → 1-ATENDIMENTO HUMANO (106563343)
+        #   (3) Desativar IA (ATIVADO IA = Desativado)
+        _STATUS_POS_AGENDADO = {101507507, 101109455, 106653499}
+        if (
+            self.kommo is not None
+            and caller_context
+            and caller_context.get("status_id") in _STATUS_POS_AGENDADO
+        ):
+            _user_text_baixo = user_text.lower().strip()
+            _TERMOS_REMARCAR_AGENDADO = (
+                "remarcar", "remarcação", "remarcacao", "reagendar",
+                "cancelar", "cancela", "cancelamento", "desmarcar",
+                "mudar horário", "mudar horario", "trocar horário",
+                "trocar horario", "trocar o horário", "trocar o horario",
+                "mudar data", "trocar data", "trocar dia", "trocar o dia",
+                "mudar o dia", "mudar o horário", "mudar o horario",
+                "não vou conseguir", "nao vou conseguir",
+                "não consigo mais", "nao consigo mais",
+                "queria mudar", "quero mudar",
+            )
+            _pediu_remarcar_pos = any(
+                t in _user_text_baixo for t in _TERMOS_REMARCAR_AGENDADO
+            )
+            if _pediu_remarcar_pos:
+                _lid_pos = caller_context.get("lead_id")
+                _known_pos = caller_context.get("known") or {}
+                _nome_pos = (
+                    (_known_pos.get("nome_contato") or "").split()[0]
+                    if _known_pos.get("nome_contato")
+                    else ""
+                )
+                _msg_handoff = (
+                    f"{_nome_pos + ', p' if _nome_pos else 'P'}"
+                    "asso seu atendimento para nossa equipe agora mesmo — "
+                    "eles vão cuidar da remarcação com você. Um instante! 🙏"
+                )
+                log.error(
+                    "[BUG C-68] REMARCAÇÃO em lead PÓS-AGENDADO. "
+                    "lead=%s status=%s user=%r — forçando handoff.",
+                    _lid_pos, caller_context.get("status_id"), user_text[:100],
+                )
+                # Envia mensagem canônica antes de retornar
+                if reply_to_number:
+                    try:
+                        self.evolution.send_text(
+                            number=reply_to_number,
+                            text=_msg_handoff,
+                            quoted_message_id=quoted_message_id,
+                        )
+                    except Exception as _e_ev:  # noqa: BLE001
+                        log.warning("[C-68] envio evolution falhou: %s", _e_ev)
+                if _lid_pos:
+                    # (3) Desativar IA
+                    try:
+                        self.kommo.update_lead_fields(
+                            _lid_pos, {"ativado_ia": "DESATIVADO"}
+                        )
+                    except Exception as _e_ia:  # noqa: BLE001
+                        log.warning("[C-68] desativar IA falhou: %s", _e_ia)
+                    # (2) Mover pra 1-ATENDIMENTO HUMANO
+                    _status_atual_pos = caller_context.get("status_id")
+                    _ETAPAS_FINAIS_C68 = {142, 143, 91486864, 106563343}
+                    if (
+                        _status_atual_pos
+                        and _status_atual_pos not in _ETAPAS_FINAIS_C68
+                    ):
+                        try:
+                            self.kommo.update_lead_status(_lid_pos, 106563343)
+                            log.info(
+                                "[C-68] lead %s movido → 1-ATENDIMENTO HUMANO",
+                                _lid_pos,
+                            )
+                        except Exception as _e_st:  # noqa: BLE001
+                            log.warning(
+                                "[C-68] mover status falhou lead=%s: %s",
+                                _lid_pos, _e_st,
+                            )
+                    # Nota Kommo registrando o handoff
+                    try:
+                        _nota_c68 = (
+                            f"🔀 [LIA C-68 {__import__('datetime').datetime.now().strftime('%H:%M %d/%m')}] "
+                            f"Paciente pediu remarcação/cancelamento em lead pós-agendado. "
+                            f"IA desativada + lead movido para ATENDIMENTO HUMANO. "
+                            f"Mensagem do paciente: \"{user_text[:200]}\""
+                        )
+                        self.kommo.add_note(_lid_pos, _nota_c68)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return PipelineResult(
+                    transcript=user_text,
+                    answer=_msg_handoff,
+                    sent=bool(reply_to_number),
+                    model_used="c68-handoff",
+                    articles_used=[],
+                )
+
+        # === AGENDA SUSPENSA (kill-switch operacional — Fábio 22/07/2026) ===
+        # Enquanto AGENDA_SUSPENSA=1, a Lia NÃO apresenta disponibilidade de
+        # horários (estava com muitos erros). Quando o paciente chega no
+        # momento de agendar (qualificado: unidade+convênio, OU pediu horários,
+        # OU lead em 3-AGENDAR), faz handoff pra equipe humana confirmar o
+        # horário — mesmo mecanismo do C-68. Reversível: basta remover o env.
+        if (
+            _agenda_suspensa_ativa()
+            and self.kommo is not None
+            and caller_context
+        ):
+            _known_ags = caller_context.get("known") or {}
+            _status_ags = caller_context.get("status_id")
+            _pediu_horarios = _texto_pede_agendamento(user_text)
+            _qualificado = bool(_known_ags.get("unidade")) and bool(_known_ags.get("convenio"))
+            _em_agendar = _status_ags == 102560495
+            _ETAPAS_FINAIS_AGS = {142, 143, 91486864, 106563343}
+            if (
+                (_pediu_horarios or _qualificado or _em_agendar)
+                and _status_ags not in _ETAPAS_FINAIS_AGS
+            ):
+                _lid_ags = caller_context.get("lead_id")
+                _nome_ags = (
+                    (_known_ags.get("nome_contato") or "").split()[0]
+                    if _known_ags.get("nome_contato") else ""
+                )
+                _msg_ags = (
+                    f"{_nome_ags + ', p' if _nome_ags else 'P'}"
+                    "ara garantir o melhor horário pra você, vou passar seu "
+                    "atendimento agora para nossa equipe — eles confirmam a "
+                    "disponibilidade e finalizam o seu agendamento. Um instante! 🙏"
+                )
+                log.warning(
+                    "[AGENDA_SUSPENSA] handoff agendamento. lead=%s status=%s user=%r",
+                    _lid_ags, _status_ags, (user_text or "")[:100],
+                )
+                if reply_to_number:
+                    try:
+                        self.evolution.send_text(
+                            number=reply_to_number,
+                            text=_msg_ags,
+                            quoted_message_id=quoted_message_id,
+                        )
+                    except Exception as _e_ev_ags:  # noqa: BLE001
+                        log.warning("[AGENDA_SUSPENSA] envio evolution falhou: %s", _e_ev_ags)
+                if _lid_ags:
+                    try:
+                        self.kommo.update_lead_fields(_lid_ags, {"ativado_ia": "DESATIVADO"})
+                    except Exception as _e_ia_ags:  # noqa: BLE001
+                        log.warning("[AGENDA_SUSPENSA] desativar IA falhou: %s", _e_ia_ags)
+                    try:
+                        self.kommo.update_lead_status(_lid_ags, 106563343)
+                    except Exception as _e_st_ags:  # noqa: BLE001
+                        log.warning("[AGENDA_SUSPENSA] mover status falhou lead=%s: %s", _lid_ags, _e_st_ags)
+                    try:
+                        _nota_ags = (
+                            f"⏸️ [LIA AGENDA_SUSPENSA {__import__('datetime').datetime.now().strftime('%H:%M %d/%m')}] "
+                            f"Apresentação de agenda suspensa. Lead encaminhado para ATENDIMENTO HUMANO "
+                            f"confirmar o horário. Mensagem do paciente: \"{(user_text or '')[:200]}\""
+                        )
+                        self.kommo.add_note(_lid_ags, _nota_ags)
+                    except Exception:  # noqa: BLE001
+                        pass
+                return PipelineResult(
+                    transcript=user_text,
+                    answer=_msg_ags,
+                    sent=bool(reply_to_number),
+                    model_used="agenda-suspensa-handoff",
+                    articles_used=[],
                 )
 
         # 2d) Agenda Medware: busca horários reais para o agente OFERECER.
@@ -837,17 +1033,27 @@ class VoicePipeline:
                     self._redis.setex(cache_key, 86400, str(lead_id))
                 except Exception as e:  # noqa: BLE001
                     log.debug("[KOMMO SYNC] cache write falhou: %s", e)
-            # Nota da conversa — APENAS resposta da Lia.
-            # Decisão Fábio (01/06/2026 17:39): mensagens do paciente
-            # NÃO precisam virar nota no Kommo (já aparecem no chat
-            # nativo). Antes (commit do dia) gravávamos ambos lados,
-            # mas o feed do Kommo ficou poluído. Mantemos só outbound
-            # da Lia pra observabilidade do agente.
+            # Nota da conversa — grava AMBOS os lados (paciente + Lia).
             #
-            # NOTA: o `user_text` continua disponível pra debugging e
-            # outros usos (extract_lead_fields, FSM, etc), só não vira
-            # nota Kommo.
+            # Histórico de mudanças:
+            # 01/06/2026 17:39 (Fábio): removida gravação INBOUND, "chat
+            #   nativo já mostra a msg". Feed ficou "limpo" mas contexto
+            #   quebrou pra visibilidade humana E pra debug de sessões
+            #   quebradas (ver bug 12/07 lead 24290902: caiu em fallback
+            #   "instabilidade" e não dava pra saber o que o paciente
+            #   respondeu). Task #154, #264, #378.
+            # 12/07/2026 (Fábio): reverter. Voltar a gravar INBOUND.
+            #   "Este é um retrocesso. Estava funcionando."
             #
+            # Inbound do paciente (grava ANTES da Lia pra ordem cronológica correta)
+            if user_text:
+                nota_in = f"💬 Paciente (WhatsApp):\n{user_text.strip()}"
+                try:
+                    self.kommo.add_note(lead_id, nota_in)
+                except Exception as e:  # noqa: BLE001
+                    log.warning(
+                        "Kommo nota INBOUND falhou (%s): %s", phone, e
+                    )
             # Outbound da Lia
             if answer:
                 note = f"🤖 Lia (WhatsApp):\n{answer.strip()}"
