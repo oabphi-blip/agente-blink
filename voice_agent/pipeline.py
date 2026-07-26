@@ -493,15 +493,25 @@ class VoicePipeline:
                 # → consulta SÓ essa janela em vez do default fixo de 90 dias.
                 # Toggle de rollback: MEDWARE_JANELA_PREFERENCIA=0 desliga.
                 _janela = None
-                _janela_fonte = "default_90d"
+                _janela_fonte = "default_10d"
                 if os.getenv("MEDWARE_JANELA_PREFERENCIA", "1") != "0":
                     try:
                         from voice_agent.janela_preferencia import (
                             parse_janela_preferencia,
                         )
-                        _janela = parse_janela_preferencia(
-                            known.get("dia_turno") or ""
-                        )
+                        # Bug C-65 (26/07/2026 — lead 21397921 Renata/Augusto):
+                        # O parser só lia known["dia_turno"] (campo Kommo,
+                        # gravado no turno ANTERIOR). Quando paciente diz
+                        # "outubro" na mensagem ATUAL, dia_turno ainda estava
+                        # vazio → fallback hoje+10d → slots de julho ofertados
+                        # 3x em loop ignorando completamente o mês pedido.
+                        # Fix: combinar dia_turno + user_text para capturar
+                        # preferência do turno atual imediatamente.
+                        _pref_texto = " ".join(filter(None, [
+                            known.get("dia_turno") or "",
+                            user_text or "",
+                        ]))
+                        _janela = parse_janela_preferencia(_pref_texto)
                     except Exception:  # noqa: BLE001
                         _janela = None
                 if _janela:
@@ -510,13 +520,31 @@ class VoicePipeline:
                         data_inicio=_janela[0], data_fim=_janela[1],
                     )
                     _janela_fonte = "preferencia"
-                    # Fallback seguro: se a janela específica veio vazia, cai
-                    # no default 90d pra NÃO regredir (Lia não fica sem slot).
+                    # Bug C-65b: quando a janela é um único dia (ex: paciente
+                    # pede "09/10/2026 às 16:00") e não há slot nesse dia
+                    # exato, expandir para o mês INTEIRO antes de cair no
+                    # default hoje+10d. Evita oferecer slots de julho quando
+                    # paciente quer outubro.
+                    if not slots:
+                        import calendar as _cal
+                        _d = _janela[0]
+                        _ultimo = _cal.monthrange(_d.year, _d.month)[1]
+                        from datetime import date as _date_cls
+                        _di_mes = _date_cls(_d.year, _d.month, 1)
+                        _df_mes = _date_cls(_d.year, _d.month, _ultimo)
+                        # Só tenta expansão se a janela original não era já
+                        # o mês inteiro (evita chamada dupla redundante).
+                        if _di_mes != _janela[0] or _df_mes != _janela[1]:
+                            slots = self.medware.horarios_para_agente(
+                                medico_param, unidade_param,
+                                data_inicio=_di_mes, data_fim=_df_mes,
+                            )
+                            _janela_fonte = "fallback_mes_inteiro"
                     if not slots:
                         slots = self.medware.horarios_para_agente(
                             medico_param, unidade_param,
                         )
-                        _janela_fonte = "fallback_90d_apos_pref_vazia"
+                        _janela_fonte = "fallback_default_apos_pref_vazia"
                 else:
                     slots = self.medware.horarios_para_agente(
                         medico_param, unidade_param,
