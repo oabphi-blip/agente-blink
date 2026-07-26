@@ -603,11 +603,15 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
             )
 
     # Checklist dados mínimos (task #123, origem lead Juliene 24053159).
-    # Se ainda falta dado essencial, INJETA bloco PRÉ-AGENDA antes do
-    # _agenda_block — proíbe oferta de slot até dados completos.
+    # Bug C-73 (26/07/2026): o gate NÃO bloqueia quando já há slots consultados
+    # no ctx. Requisito mínimo pra MOSTRAR agenda = médico + unidade + data.
+    # Nome/data_nasc/convênio só são necessários pra GRAVAR no Medware — e esses
+    # são coletados DEPOIS que o paciente escolher o horário.
+    # O gate só age quando ctx.agenda está vazio (ainda não consultou Medware).
     pre_agenda_block = ""
     checklist = ctx.get("checklist_dados_minimos") if isinstance(ctx, dict) else None
-    if checklist and not checklist.get("pronto_para_oferecer_slot", True):
+    _tem_slots_c73 = bool((ctx or {}).get("agenda"))
+    if checklist and not checklist.get("pronto_para_oferecer_slot", True) and not _tem_slots_c73:
         try:
             from voice_agent.checklist_dados_minimos import (
                 ChecklistResultado,

@@ -547,7 +547,47 @@ class VoicePipeline:
                     except Exception:  # noqa: BLE001
                         pass  # não quebra o fluxo principal
 
-                if _janela:
+                # Bug C-73 (26/07/2026): quando paciente pede 1 data específica,
+                # usar SQL canônico (WITH RECURSIVE + CONTAINING) que é mais
+                # preciso que o REST de agendamentos. Requisito mínimo pra mostrar
+                # agenda: médico + unidade + 1 data. Nome/data_nasc/convênio são
+                # coletados DEPOIS que paciente escolher o slot.
+                slots = None
+                if _janela and _janela[0] == _janela[1]:
+                    try:
+                        from voice_agent.medware_sql import (
+                            horarios_livres_dia as _hld,
+                        )
+                        _DIAS_BR_C73 = [
+                            "Segunda-feira", "Terça-feira", "Quarta-feira",
+                            "Quinta-feira", "Sexta-feira", "Sábado", "Domingo",
+                        ]
+                        _d_sql = _janela[0]
+                        _horarios_sql = _hld(
+                            medico_param or "",
+                            unidade_param or "",
+                            _d_sql.isoformat(),
+                        )
+                        if _horarios_sql:
+                            _ds_c73 = _DIAS_BR_C73[_d_sql.weekday()]
+                            _dbr_c73 = _d_sql.strftime("%d/%m/%Y")
+                            slots = [
+                                {"dia_semana": _ds_c73, "data_br": _dbr_c73, "hora": h}
+                                for h in _horarios_sql
+                            ]
+                            _janela_fonte = "sql_single_date"
+                            log.info(
+                                "[C-73] SQL single-date: %d slots medico=%r unidade=%r data=%s",
+                                len(slots), medico_param, unidade_param,
+                                _d_sql.isoformat(),
+                            )
+                    except Exception as _e_sql:  # noqa: BLE001
+                        log.warning(
+                            "[C-73] SQL single-date falhou, fallback REST: %s", _e_sql
+                        )
+                        slots = None  # força fallback REST abaixo
+
+                if _janela and slots is None:
                     slots = self.medware.horarios_para_agente(
                         medico_param, unidade_param,
                         data_inicio=_janela[0], data_fim=_janela[1],
@@ -578,7 +618,7 @@ class VoicePipeline:
                             medico_param, unidade_param,
                         )
                         _janela_fonte = "fallback_default_apos_pref_vazia"
-                else:
+                elif slots is None:
                     slots = self.medware.horarios_para_agente(
                         medico_param, unidade_param,
                     )
