@@ -35,8 +35,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -525,3 +527,156 @@ def healthcheck() -> dict:
         }
     except MedwareSQLError as e:
         return {"ok": False, "erro": str(e)[:200]}
+
+
+# ============================================================================
+# BUG C-73 (26/07/2026) — SQL CANÔNICO SINGLE-DATE COM CONTAINING
+# Requisitos mínimos pra mostrar agenda: médico + unidade + 1 data específica.
+# Nome/data_nasc/convênio são coletados DEPOIS que paciente escolher o slot.
+# ============================================================================
+
+def _normalizar_para_sql(nome: str) -> str:
+    """Remove acentos, uppercase, tira prefixo 'Dr.'/'Dra.' e retorna o PRIMEIRO nome.
+
+    Usado no CONTAINING do Medware (Firebird é case-insensitive mas acento-sensitive).
+
+    Exemplos:
+        "Dra. Karla Delalíbera" → "KARLA"
+        "Dr. Fabrício Freitas"  → "FABRICIO"
+        "Karla"                 → "KARLA"
+    """
+    if not nome:
+        return ""
+    nfkd = unicodedata.normalize("NFKD", nome)
+    sem_acento = "".join(c for c in nfkd if not unicodedata.combining(c))
+    sem_titulo = re.sub(r"\b(Dra?\.?\s*)", "", sem_acento, flags=re.IGNORECASE).strip()
+    partes = sem_titulo.upper().split()
+    return partes[0] if partes else ""
+
+
+def _normalizar_unidade_para_sql(nome: str) -> str:
+    """Remove acentos e uppercase — mantém o nome COMPLETO da unidade.
+
+    Exemplos:
+        "Águas Claras" → "AGUAS CLARAS"
+        "Asa Norte"    → "ASA NORTE"
+    """
+    if not nome:
+        return ""
+    nfkd = unicodedata.normalize("NFKD", nome)
+    sem_acento = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return sem_acento.strip().upper()
+
+
+_SQL_HORARIOS_LIVRES_DIA = """\
+WITH RECURSIVE HORARIOS (HORARIO) AS (
+    SELECT CAST('08:30:00' AS TIME) FROM RDB$DATABASE
+    UNION ALL
+    SELECT DATEADD(MINUTE, 30, HORARIO)
+    FROM HORARIOS
+    WHERE HORARIO < CAST('17:30:00' AS TIME)
+),
+AGENDAMENTOS AS (
+    SELECT
+        CAST(A.DATAHORAAGENDADA AS TIME) AS HORARIO,
+        MAX(CASE WHEN COALESCE(A.BLOQUEADO, 0) <> 0 THEN 1 ELSE 0 END) AS BLOQUEADO,
+        MAX(CASE WHEN A.STATUS = -1
+                  AND A.CODPACIENTE IS NOT NULL
+                  AND A.DATAHORACANCELADO IS NULL
+                 THEN 1 ELSE 0 END) AS OCUPADO,
+        MAX(CASE WHEN A.STATUS = 0
+                  OR A.DATAHORACANCELADO IS NOT NULL
+                 THEN 1 ELSE 0 END) AS CANCELADO
+    FROM AGENDAMENTO A
+    INNER JOIN (
+        SELECT CODMEDICO FROM MEDICO
+        WHERE NOME CONTAINING '{medico_nome}'
+    ) M ON M.CODMEDICO = A.CODMEDICO
+    INNER JOIN (
+        SELECT CODAGENDA FROM AGENDA
+        WHERE DESCRICAO CONTAINING '{unidade_nome}'
+    ) AG ON AG.CODAGENDA = A.CODAGENDA
+    WHERE CAST(A.DATAHORAAGENDADA AS DATE) = '{data}'
+      AND A.CODAGENDAMENTOPAI IS NULL
+    GROUP BY CAST(A.DATAHORAAGENDADA AS TIME)
+),
+TB_AGENDA AS (
+    SELECT H.HORARIO,
+        CASE
+            WHEN COALESCE(A.BLOQUEADO,0)=1 THEN 'BLOQUEADO'
+            WHEN COALESCE(A.OCUPADO,0)=1 THEN 'OCUPADO'
+            WHEN COALESCE(A.CANCELADO,0)=1 THEN 'CANCELADO'
+            ELSE 'LIVRE'
+        END AS DISPONIBILIDADE
+    FROM HORARIOS H
+    LEFT JOIN AGENDAMENTOS A ON A.HORARIO = H.HORARIO
+)
+SELECT HORARIO FROM TB_AGENDA
+WHERE DISPONIBILIDADE IN ('LIVRE', 'CANCELADO')
+  AND HORARIO NOT BETWEEN CAST('12:00:00' AS TIME) AND CAST('13:00:00' AS TIME)
+ORDER BY HORARIO\
+"""
+
+
+def horarios_livres_dia(
+    medico_nome: str,
+    unidade_nome: str,
+    data_iso: str,
+) -> list[str]:
+    """Horários LIVRES para médico+unidade num único dia via SQL canônico.
+
+    Usa WITH RECURSIVE pra gerar todos os slots 08:30–17:30 de 30 em 30 min,
+    LEFT JOIN com ocupação real (CONTAINING case-insensitive pra médico/unidade),
+    filtra BLOQUEADO/OCUPADO, exclui almoço 12:00–13:00.
+
+    Requisito mínimo C-73: médico + unidade + 1 data específica.
+    Nome/data_nasc/convênio são coletados DEPOIS que paciente escolher o slot.
+
+    Args:
+        medico_nome: nome ou primeiro nome do médico (ex: "Karla", "Dra. Karla Delalíbera").
+                     Apenas o primeiro nome é usado no CONTAINING.
+        unidade_nome: nome ou parte do nome da unidade (ex: "Águas Claras", "Asa Norte").
+                      Acentos são removidos, uppercase aplicado.
+        data_iso:    data no formato 'YYYY-MM-DD'.
+
+    Returns:
+        Lista de strings 'HH:MM' ordenada cronologicamente. Lista vazia se erro ou sem slots.
+
+    Note:
+        C-71: caller deve garantir que unidade_nome é a unidade CORRETA para o dia
+        da semana pedido (_inferir_unidade_por_dia em responder.py).
+    """
+    mn = _normalizar_para_sql(medico_nome)
+    un = _normalizar_unidade_para_sql(unidade_nome)
+    if not mn or not un or not data_iso:
+        log.warning(
+            "horarios_livres_dia: parâmetros inválidos mn=%r un=%r data=%r",
+            mn, un, data_iso,
+        )
+        return []
+    q = _SQL_HORARIOS_LIVRES_DIA.format(
+        medico_nome=mn,
+        unidade_nome=un,
+        data=data_iso,
+    )
+    try:
+        resp = executar(q)
+        result = rows(resp)
+        horarios = []
+        for r in result:
+            h = r.get("HORARIO") or ""
+            if isinstance(h, str) and ":" in h:
+                horarios.append(h[:5])   # "HH:MM:SS" → "HH:MM"
+            elif h:                       # pode ser objeto time
+                horarios.append(str(h)[:5])
+        log.info(
+            "horarios_livres_dia: %d slots para medico=%r unidade=%r data=%s",
+            len(horarios), mn, un, data_iso,
+        )
+        return horarios
+    except MedwareSQLError as e:
+        log.warning(
+            "horarios_livres_dia erro: %s (medico=%r unidade=%r data=%r)",
+            e, mn, un, data_iso,
+        )
+        return []
