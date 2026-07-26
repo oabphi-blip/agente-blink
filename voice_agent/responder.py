@@ -1284,6 +1284,63 @@ _DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE = _DIAS_ATENDIMENTO_POR_MEDICO_UNIDADE_FALL
 _DIAS_ATENDIMENTO_POR_MEDICO = _DIAS_ATENDIMENTO_POR_MEDICO_FALLBACK
 
 
+def _inferir_unidade_por_dia(medico_raw: str, weekday: int) -> Optional[str]:
+    """Bug C-71 (26/07/2026): dado médico e dia-da-semana, retorna a unidade
+    ÚNICA onde esse médico atende nesse dia.
+
+    Se o médico atende em mais de uma unidade no mesmo dia (ambíguo) ou não
+    atende em nenhuma, retorna None.
+
+    Casos canônicos (calendar_atendimento.json):
+      karla + weekday 0/2/4 (seg/qua/sex) → "Asa Norte"
+      karla + weekday 1/3 (ter/qui)        → "Águas Claras"
+      fabricio + qualquer dia              → None (ambíguo — ter/qui em AN e AC)
+
+    Lê calendar_atendimento.json (TTL 60s) como fonte de verdade.
+    As chaves do dict carregado são TUPLAS (medico, unidade), ex:
+      ('karla', 'asa norte') → [0, 2, 4]
+    """
+    if not medico_raw:
+        return None
+    dados = _carregar_calendario_atendimento()
+    medicos_unidades: dict = dados.get("medicos_unidades", {})
+    medicos_fallback: dict = dados.get("medicos_fallback_uniao", {})
+
+    # normalizar pro primeiro nome canônico (igual a _viola_oferta_em_dia_nao_atendido)
+    medico_norm_raw = medico_raw.lower()
+    medico_norm = ""
+    for cand in medicos_fallback:
+        if cand in medico_norm_raw:
+            medico_norm = cand
+            break
+    if not medico_norm:
+        return None
+
+    # mapa unidade_raw → unidade_canonical
+    _canon = {
+        "asa norte": "Asa Norte",
+        "águas claras": "Águas Claras",
+        "aguas claras": "Águas Claras",
+    }
+
+    encontradas: list[str] = []
+    for chave, dias in medicos_unidades.items():
+        # chave é uma tuple (medico, unidade)
+        if not isinstance(chave, tuple) or len(chave) != 2:
+            continue
+        med, unidade_raw = chave
+        if med != medico_norm:
+            continue
+        if weekday in (dias or []):
+            canon = _canon.get(unidade_raw.lower().strip(), unidade_raw.title())
+            if canon not in encontradas:
+                encontradas.append(canon)
+
+    if len(encontradas) == 1:
+        return encontradas[0]
+    return None  # ambíguo ou médico não atende nesse dia
+
+
 # ----- Bug C-53 helper: detectar padrão de OFERTA nova no texto -----
 # Quando ja_agendado=True + texto tem padrão de OFERTA, filtros C-31 rodam
 # assim mesmo. Confirmação/referência a agendamento passado NÃO usa esses
@@ -3843,14 +3900,73 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
         violacao_dia_med = _viola_oferta_em_dia_nao_atendido(text, ctx)
         if violacao_dia_med:
             medico_norm, data_str, dia_real = violacao_dia_med
-            log.error(
-                "[FILTRO C-31b] OFERTA EM DIA NAO ATENDIDO — médico=%r data=%s "
-                "cai em %s. Médico não trabalha nesse dia/unidade. "
-                "ja_agendado=%s padrao_oferta=%s Texto: %r",
-                medico_norm, data_str, dia_real,
-                bool(ctx and ctx.get("ja_agendado")), _padrao_oferta, text[:300],
-            )
-            return _DIA_NAO_ATENDIDO_FALLBACK
+
+            # ── Bug C-71 (26/07/2026) GUARDA 1 — unidade correta no texto ──
+            # Se o ctx.unidade está defasado (ex: Águas Claras de sessão
+            # anterior) mas o LLM corretamente escreveu a unidade certa
+            # (ex: "Asa Norte" pra uma segunda-feira), não bloquear.
+            # Detectamos verificando se a data violada cai num dia que pertence
+            # exclusivamente a outra unidade E o texto menciona essa unidade.
+            try:
+                from datetime import datetime as _dt_cls
+                _data_viol = _dt_cls.strptime(data_str, "%d/%m/%Y").date()
+                _unidade_correta = _inferir_unidade_por_dia(
+                    medico_norm, _data_viol.weekday()
+                )
+                if _unidade_correta:
+                    _u_lower = _unidade_correta.lower()
+                    if _u_lower in text.lower():
+                        log.info(
+                            "[C-71 guarda-1] C-31b detectou conflito ctx.unidade=%r "
+                            "vs data %s (%s), mas LLM escreveu unidade correta %r. "
+                            "Permitindo oferta passar.",
+                            (ctx or {}).get("known", {}).get("unidade"),
+                            data_str, dia_real, _unidade_correta,
+                        )
+                        # Atualiza ctx em memória para downstream
+                        _known = (ctx or {}).get("known") or {}
+                        if isinstance(_known, dict):
+                            _known["unidade"] = _unidade_correta
+                        violacao_dia_med = None  # cancela bloqueio
+            except Exception:  # noqa: BLE001
+                pass
+
+            if violacao_dia_med:
+                # ── Bug C-71 (26/07/2026) GUARDA 2 — anti-loop turno ──
+                # Se a última msg da Lia já era "Qual turno..." E o paciente
+                # respondeu "manhã/tarde" na mensagem ATUAL, não repetir a
+                # mesma pergunta de novo (loop infinito).
+                _ultima_lia = (ctx or {}).get("ultima_msg_outbound") or ""
+                _user_text_c71 = (ctx or {}).get("user_text") or ""
+                _ultima_foi_turno = bool(re.search(
+                    r"turno funciona melhor|manh[aã] ou tarde",
+                    _ultima_lia, re.IGNORECASE,
+                ))
+                _user_ja_respondeu = bool(re.search(
+                    r"\b(manh[aã]|tarde)\b",
+                    _user_text_c71, re.IGNORECASE,
+                ))
+                if _ultima_foi_turno and _user_ja_respondeu:
+                    log.warning(
+                        "[C-71 guarda-2] C-31b disparou mas paciente JÁ "
+                        "respondeu turno (%r). Inibindo repetição de fallback. "
+                        "ctx.unidade=%r data=%s texto=%r",
+                        _user_text_c71[:40],
+                        (ctx or {}).get("known", {}).get("unidade"),
+                        data_str, text[:200],
+                    )
+                    # Deixa o texto passar — melhor oferta imperfeita do que
+                    # loop eterno. O pipeline corrigirá unidade no próximo turno.
+                else:
+                    log.error(
+                        "[FILTRO C-31b] OFERTA EM DIA NAO ATENDIDO — médico=%r "
+                        "data=%s cai em %s. Médico não trabalha nesse dia/unidade. "
+                        "ja_agendado=%s padrao_oferta=%s Texto: %r",
+                        medico_norm, data_str, dia_real,
+                        bool(ctx and ctx.get("ja_agendado")), _padrao_oferta,
+                        text[:300],
+                    )
+                    return _DIA_NAO_ATENDIDO_FALLBACK
 
         # C-54 (13/07/2026 — Ubirata/Lucas 24185000): menção a dia-da-semana
         # SEM data (ex: "quinta ou sexta") + unidade no ctx que não bate.
@@ -4280,6 +4396,37 @@ class Responder:
         except Exception:  # noqa: BLE001
             # Fail-silent: bloco é apenas melhoria, não é obrigatório.
             pass
+
+        # Bug C-72 (26/07/2026) — contexto histórico sem janela de tempo.
+        # Cobre paciente respondendo DIAS depois a template/campanha humana.
+        # Dois caminhos, em ordem de preferência:
+        #   Etapa 2 (primária) — Chats API: pipeline pré-carregou
+        #     caller_context["historico_chat_msgs"] com até 50 mensagens.
+        #     Mostra conversa completa com timestamps reais.
+        #   Etapa 1 (fallback) — campo MENS HUMANO (1261148): só o texto
+        #     do último outbound humano, sem histórico completo.
+        # C-58 (janela 6h) tem prioridade sobre ambos.
+        _bloco_c72 = ""
+        if not _bloco_conv:  # C-58 tem prioridade
+            try:
+                from voice_agent.historico_conversa import (
+                    extrair_chat_id_da_url,
+                    montar_bloco_campo_mens_humano,
+                    montar_bloco_historico_chat,
+                )
+                # Etapa 2 — Chats API (pré-carregada pelo pipeline)
+                _msgs_hist = None
+                if isinstance(caller_context, dict):
+                    _msgs_hist = caller_context.get("historico_chat_msgs")
+                if _msgs_hist:
+                    _bloco_c72 = montar_bloco_historico_chat(_msgs_hist, max_msgs=30)
+                # Etapa 1 — campo MENS HUMANO (fallback se Etapa 2 não produziu)
+                if not _bloco_c72:
+                    _bloco_c72 = montar_bloco_campo_mens_humano(caller_context or {})
+                if _bloco_c72:
+                    bloco_variavel += _bloco_c72
+            except Exception:  # noqa: BLE001
+                pass
 
         # FSM (task #125) — bloco de estado da conversa pra Claude
         # respeitar a transição válida. Persistido em Redis.

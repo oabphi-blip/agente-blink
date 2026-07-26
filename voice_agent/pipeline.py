@@ -514,6 +514,39 @@ class VoicePipeline:
                         _janela = parse_janela_preferencia(_pref_texto)
                     except Exception:  # noqa: BLE001
                         _janela = None
+
+                # Bug C-71 (26/07/2026 — lead 22557778 Adriana):
+                # ctx.unidade pode estar defasado de sessão anterior (ex:
+                # paciente escolheu Águas Claras meses atrás, mas agora pede
+                # "03/08" = segunda = Karla Asa Norte). Se a janela é um único
+                # dia cujo dia-da-semana implica unidade diferente, atualizar
+                # unidade_param + known["unidade"] ANTES de bater o Medware.
+                # Assim C-31b não vê conflito e o LLM recebe slots corretos.
+                if _janela and _janela[0] == _janela[1]:
+                    try:
+                        from voice_agent.responder import (
+                            _inferir_unidade_por_dia as _iupd,
+                        )
+                        _weekday_pedido = _janela[0].weekday()
+                        _unidade_c71 = _iupd(medico_param, _weekday_pedido)
+                        _unidade_atual = (unidade_param or "").lower()
+                        if (
+                            _unidade_c71 and
+                            _unidade_c71.lower() != _unidade_atual
+                        ):
+                            import logging as _log_c71
+                            _log_c71.getLogger(__name__).info(
+                                "[C-71] unidade corrigida %r→%r pela data pedida "
+                                "%s (weekday=%d medico=%r)",
+                                unidade_param, _unidade_c71,
+                                _janela[0].strftime("%d/%m/%Y"),
+                                _weekday_pedido, medico_param,
+                            )
+                            unidade_param = _unidade_c71
+                            known["unidade"] = _unidade_c71
+                    except Exception:  # noqa: BLE001
+                        pass  # não quebra o fluxo principal
+
                 if _janela:
                     slots = self.medware.horarios_para_agente(
                         medico_param, unidade_param,
@@ -782,6 +815,40 @@ class VoicePipeline:
                         caller_context["gravacao_status"] = _json.loads(_val)
             except Exception as _e:  # noqa: BLE001
                 log.debug("consulta status gravacao Redis ignorada: %s", _e)
+
+        # 2f) Bug C-72 Etapa 2 (26/07/2026) — pré-carga do histórico completo
+        # via Chats API Kommo. Quando caller_context.known.url_da_conversa está
+        # preenchido (campo 1260160), extrai chat_id e carrega até 50 mensagens
+        # sem janela de tempo. Injeta como caller_context["historico_chat_msgs"]
+        # pra responder.py usar via montar_bloco_historico_chat().
+        # Cobre paciente respondendo dias depois a campanha/template (o C-58
+        # janela 6h não alcança esse cenário).
+        if caller_context and self.kommo is not None:
+            try:
+                from voice_agent.historico_conversa import extrair_chat_id_da_url
+                _url_conv = (caller_context.get("known") or {}).get("url_da_conversa") or ""
+                _chat_id_etapa2: Optional[int] = None
+                if _url_conv:
+                    _chat_id_etapa2 = extrair_chat_id_da_url(_url_conv)
+                # Fallback: URL sem /chats/ → descobre via API (1 chamada extra)
+                if _chat_id_etapa2 is None and caller_context.get("lead_id"):
+                    _chat_id_etapa2 = self.kommo.get_chat_id_for_lead(
+                        caller_context["lead_id"]
+                    )
+                if _chat_id_etapa2:
+                    _msgs_etapa2 = self.kommo.get_chat_messages_raw(
+                        _chat_id_etapa2, limit=50
+                    )
+                    if _msgs_etapa2:
+                        caller_context["historico_chat_msgs"] = _msgs_etapa2
+                        log.debug(
+                            "[C-72-E2] lead=%s chat=%s msgs=%d",
+                            caller_context.get("lead_id"),
+                            _chat_id_etapa2,
+                            len(_msgs_etapa2),
+                        )
+            except Exception as _e72:  # noqa: BLE001
+                log.debug("[C-72-E2] falha ao carregar historico chat: %s", _e72)
 
         # 3) Resposta com Claude
         try:
