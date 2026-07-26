@@ -1953,6 +1953,77 @@ class KommoClient:
                     })
         return out
 
+    # ------------------------------------------------------------------
+    # Bug C-72 Etapa 2 (26/07/2026) — Chats API Kommo
+    # ------------------------------------------------------------------
+
+    def get_chat_id_for_lead(self, lead_id: int | str) -> Optional[int]:
+        """Descobre o chat_id do lead via GET /api/v4/chats.
+
+        A Chats API do Kommo expõe o histórico completo de mensagens
+        WhatsApp (sem janela de tempo). Para acessá-la, precisamos do
+        chat_id, que pode ser extraído do campo URL DA CONVERSA (1260160)
+        se ele já contiver /chats/{chat_id}/, ou descoberto aqui via API.
+
+        Retorna o chat_id (int) ou None em erro/não-encontrado.
+        """
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.get(
+                    f"{self._base}/chats",
+                    headers=self._headers,
+                    params={
+                        "entity_type": "leads",
+                        "entity_id": int(lead_id),
+                        "limit": 1,
+                    },
+                )
+            if r.status_code != 200:
+                log.debug(
+                    "[C-72] get_chat_id_for_lead %s: HTTP %d",
+                    lead_id, r.status_code,
+                )
+                return None
+            chats = (r.json() or {}).get("_embedded", {}).get("chats", [])
+            if chats:
+                return int(chats[0].get("id") or 0) or None
+            return None
+        except Exception as e:  # noqa: BLE001
+            log.debug("[C-72] get_chat_id_for_lead %s erro: %s", lead_id, e)
+            return None
+
+    def get_chat_messages_raw(
+        self, chat_id: int | str, limit: int = 50,
+    ) -> list[dict]:
+        """Busca mensagens de um chat via GET /api/v4/chats/{chat_id}/messages.
+
+        Retorna lista de dicts com pelo menos:
+          - author: {type: "user"|"bot"|"contact", id: ...}
+          - content: {type: "text", text: "..."} ou attachment
+          - created_at: timestamp UNIX
+          - direction: "in" | "out"
+
+        Retorna [] em erro/chat vazio.
+        """
+        try:
+            with httpx.Client(timeout=self.timeout) as c:
+                r = c.get(
+                    f"{self._base}/chats/{chat_id}/messages",
+                    headers=self._headers,
+                    params={"limit": limit},
+                )
+            if r.status_code != 200:
+                log.debug(
+                    "[C-72] get_chat_messages_raw chat=%s: HTTP %d",
+                    chat_id, r.status_code,
+                )
+                return []
+            msgs = (r.json() or {}).get("_embedded", {}).get("messages", [])
+            return msgs or []
+        except Exception as e:  # noqa: BLE001
+            log.debug("[C-72] get_chat_messages_raw chat=%s erro: %s", chat_id, e)
+            return []
+
     def get_lead(self, lead_id: int | str) -> Optional[dict]:
         """Busca o lead completo (inclui custom_fields_values).
 
@@ -2055,6 +2126,16 @@ class KommoClient:
                 FIELD_ESPECIALIDADE[0]: "especialidade",
                 FIELD_DIA_TURNO_PERIODO: "dia_turno",
                 FIELD_ATIVADO_IA[0]: "ativado_ia",
+                # Bug C-72 (26/07/2026) — texto da última mensagem enviada pelo
+                # humano (atendente) ao paciente. Webhook /admin/kommo-trigger-
+                # msg-humano grava aqui automaticamente quando humano envia msg.
+                # Lido sem custo extra (já vem no GET /leads/{id}?with=contacts).
+                1261148: "mens_humano",
+                # Bug C-72 Etapa 2 (26/07/2026) — URL da conversa no Kommo.
+                # Formato esperado: /chats/{chat_id}/leads/detail/{lead_id}
+                # Quando preenchida com chat_id, chama Chats API para histórico
+                # completo (sem janela de tempo, cobre campanhas de dias atrás).
+                1260160: "url_da_conversa",
             }
             # 1.DIA CONSULTA é tratado separadamente porque é date_time (epoch)
             # e dispara a flag ja_agendado quando aponta para futuro/hoje.

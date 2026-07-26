@@ -213,6 +213,49 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (26/07/2026) Bug C-72 — Histórico chat sem janela de tempo: Chats API Kommo (lead 15321519 Ana Beatriz)
+
+**Origem:** lead 15321519 Ana Beatriz. Humano enviou template em 22/07. Paciente respondeu em 26/07 (96h depois). C-58 tem janela de 6h → não cobria. Etapa 1 (MENS HUMANO field 1261148) só guardava última mensagem outbound humana. Lia não tinha contexto → respondeu como se fosse conversa nova.
+
+**Causa raiz:** C-58 usa `notas_historico` com janela temporal fixa (6h). Para gaps longos (dias) o contexto se perde completamente. Etapa 1 era last-message-only — sem histórico de diálogo.
+
+**Fix — Etapa 2 via Kommo Chats API:**
+
+1. **`voice_agent/kommo.py`** — 2 novos métodos: `get_chat_id_for_lead(lead_id)` (GET /api/v4/chats?entity_type=leads) + `get_chat_messages_raw(chat_id, limit=50)` (GET /api/v4/chats/{chat_id}/messages). Field 1260160 `url_da_conversa` adicionado ao `id_to_label`.
+
+2. **`voice_agent/historico_conversa.py`** — `extrair_chat_id_da_url(url)` (regex `/chats/(\d+)` na URL DA CONVERSA) + `montar_bloco_historico_chat(messages, max_msgs=30)` (formata com `[ATENDENTE HH:MM]` / `[PACIENTE HH:MM]`).
+
+3. **`voice_agent/pipeline.py`** — seção 2f pré-carrega histórico ANTES de `responder.reply()`, injeta em `caller_context["historico_chat_msgs"]`. Fallback: se URL não tem `/chats/`, chama `get_chat_id_for_lead()`.
+
+4. **`voice_agent/responder.py`** — prioridade: C-58 (6h notas Kommo) > Etapa 2 (Chats API completo, sem janela) > Etapa 1 (MENS HUMANO last msg).
+
+**Pytest:** `test_bug_c72_mens_humano.py` — 42/42 verde. Cobre URL parsing, block formatting, pipeline injection, cenário Ana Beatriz (gap 96h).
+
+**Lição arquitetural CRÍTICA:**
+- **Janela de tempo fixa em contexto de retorno é design frágil.** Gap longo (>6h) = Lia esquece quem é o paciente. Solução: Chats API retorna histórico COMPLETO sem janela — cobre 96h, 1 semana, 1 mês.
+- **`chat_id` vem de 2 caminhos**: campo URL DA CONVERSA (1260160) via regex → mais rápido. `GET /api/v4/chats?entity_type=leads` como fallback.
+- **Prioridade importa:** C-58 (janela 6h baseada em notas) tem contexto mais rico e recente → prioridade #1. Chats API é supplemental, não substituto.
+
+### 0. (26/07/2026) Bug C-71 — Unidade defasada no ctx causa loop infinito com C-31b (lead 22557778 Adriana)
+
+**Origem:** lead 22557778 Adriana. Paciente pediu "03/08/2026" (segunda-feira = Karla Asa Norte). `ctx.unidade = "Águas Claras"` (defasado de sessão anterior). LLM gerava oferta correta (Asa Norte + segunda); filtro C-31b bloqueava ("Karla não atende Águas Claras às segundas"); Lia retornava "Qual turno?"; paciente respondia "manhã"; mesmo ciclo indefinidamente.
+
+**Causa raiz:** `_viola_oferta_em_dia_nao_atendido` comparava o dia da oferta com `ctx.known['unidade']` sem verificar se o ctx estava defasado. A unidade CORRETA estava no próprio texto gerado pelo LLM, mas o filtro usava o campo stale.
+
+**Fix em 4 camadas (`responder.py` + `pipeline.py`):**
+
+1. **`_inferir_unidade_por_dia(medico, weekday)`** — lê `calendar_atendimento.json`, retorna a unidade ÚNICA onde o médico atende naquele dia. `None` se ambíguo ou folga.
+2. **Guarda 1 (C-31b)** — se LLM escreveu a unidade correta no texto (baseado em `_inferir_unidade_por_dia`), cancela o bloqueio E atualiza `ctx.known['unidade']`.
+3. **Guarda 2 (anti-loop)** — se última msg da Lia foi "Qual turno?" E user_text contém "manhã"/"tarde" → NÃO repete o mesmo fallback. Quebra o ciclo.
+4. **Inferência proativa no `pipeline.py`** — quando janela é dia único, infere a unidade pelo weekday ANTES de consultar Medware → Medware recebe unidade correta desde o início.
+
+**Pytest:** `test_bug_c71_unidade_stale_loop.py` — 22/22 verde.
+
+**Lição arquitetural CRÍTICA:**
+- **`ctx.known['unidade']` é stale por design** — persiste de sessão anterior. Nunca usar como "verdade" quando o LLM fez dedução determinística (dia → unidade via `calendar_atendimento.json`).
+- **Filtros de defesa não devem usar ctx stale**. Quando LLM e ctx contradizem, preferir LLM quando a dedução é determinística.
+- **Loop infinito = filtro sem condição de saída.** Toda defesa precisa de escape: Guarda 2 detecta que a última resposta da Lia foi o próprio fallback e o paciente já respondeu.
+
 ### 0. (21/07/2026) Bug C-64 — Loop circular: fallbacks C-31/C-54 contêm frases stall que C-60 deveria bloquear
 
 **Origem:** lead 24330790 Lauanne recebeu às 19:03 BRT a frase "Deixa eu reconferir os horários com o calendário aqui. Qual dia da semana..." — um stall clássico do C-60.
@@ -272,40 +315,6 @@ Agenda 30d disponível: 68 livres em 8 dias (Asa Norte) + 105 livres em 12 dias 
 - **Antes de chamar dados de "duplicata", INVESTIGAR o schema.** Deveria ter feito `SELECT CODPROCEDIMENTO, COUNT(*) FROM AGENDAMENTO WHERE CODAGENDAMENTOPAI IS NOT NULL GROUP BY CODPROCEDIMENTO` antes de assumir que 56 registros = 56 duplicatas. Custou uma sessão inteira do Fábio.
 - **Filtros lógicos "óbvios" (CODAGENDAMENTOPAI IS NULL) são frágeis.** Semânticas Firebird/schemas legados nem sempre respeitam a convenção "PAI IS NULL = raiz". Preferir `DISTINCT` sobre chave natural (paciente + data + hora) que é semanticamente robusta.
 - **Validar contra prod (query cega) antes de mudar código pra corrigir "bug" imaginário.** MEDWARE_AGENDA_SQL=1 já em prod pegou o problema real (Lia ofertando ocupados) — só depois disso a causa real virou clara.
-
-### 0. (15/07/2026) Bug auto-detectado C-AUTO-001 — Learning Loop (lead 999)
-
-**Origem:** captura automática via `learning_loop.detectar_correcao_humana` (PADRÃO EXPLÍCITO).
-
-**Resposta da Lia (problemática):**
-> Erro
-
-**Correção/resposta humana (padrão a seguir):**
-> Lia, não é assim
-
-**Contexto:** lead 999, correção humana em janela <15min após Lia.
-
-**Regra:** Lia deve evitar o padrão da resposta problemática e adotar o tom/conteúdo da correção humana quando contexto for similar.
-
-**Ação:** revisar em auditoria semanal se esse padrão recorre. Se sim, promover pra filtro reativo em `responder.py::_scrub_prohibited`.
-
-
-### 0. (15/07/2026) Bug auto-detectado C-AUTO-001 — Learning Loop (lead 999)
-
-**Origem:** captura automática via `learning_loop.detectar_correcao_humana` (PADRÃO EXPLÍCITO).
-
-**Resposta da Lia (problemática):**
-> Resposta problemática
-
-**Correção/resposta humana (padrão a seguir):**
-> Lia, não é assim, o correto é X
-
-**Contexto:** lead 999, correção humana em janela <15min após Lia.
-
-**Regra:** Lia deve evitar o padrão da resposta problemática e adotar o tom/conteúdo da correção humana quando contexto for similar.
-
-**Ação:** revisar em auditoria semanal se esse padrão recorre. Se sim, promover pra filtro reativo em `responder.py::_scrub_prohibited`.
-
 
 ### 0. (15/07/2026 MADRUGADA) Bug C-58 + Task #405 código pronto (pytest 84/84 verde) — 1 push consolidado pendente
 
