@@ -471,6 +471,119 @@ def deve_responder_valor(ctx: Optional[dict], user_text: str) -> Optional[str]:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# BYPASS 6 — FAQ ESPECIALIDADE / MÉDICO (Bug C-74, 26/07/2026)
+# ═══════════════════════════════════════════════════════════════════════
+# Paciente perguntou "tem oftalmologista pediátrico?", "faz estrabismo?",
+# "faz catarata?" etc. — resposta é COMPLETAMENTE determinística (KB).
+# Zero motivo pra chamar LLM. Circuit breaker C-56 nunca será ativado
+# nessas perguntas simples.
+# Toggle: BLINDAGEM_FAQ_ESPECIALIDADE_ATIVADO (default ON)
+# ═══════════════════════════════════════════════════════════════════════
+
+# ── padrões por especialidade ──────────────────────────────────────────
+
+_V = r"(?:tem|têm|temos?|faz(?:em)?|trata(?:m)?|opera(?:m)?(?:[çc][aã]o\s+de)?)"
+
+_FAQ_PEDIATRIA = re.compile(
+    r"("
+    r"(?:tem|têm)\s+oftalmo(?:logista)?[\s\-]*(?:pedi[aá]tri[cao]{1,2}|infantil)"
+    r"|(?:tem|têm)\s+pediatra"
+    r"|atendem?\s+(?:crian[çc]as?|beb[êes]+|crian[çc]inha)"
+    r"|faz(?:em)?\s+(?:consulta\s+)?(?:pedi[aá]tri[cao]{1,2}|infantil)"
+    r"|(?:pedi[aá]tri[cao]{1,2}|infantil).*oftalmo"
+    r"|oftalmo.*(?:pedi[aá]tri[cao]{1,2}|infantil)"
+    r"|(?:consulta|retorno)\s+(?:pra\s+)?(?:crian[çc]a|beb[êe]|minha\s+filha|meu\s+filho)"
+    r")",
+    re.IGNORECASE,
+)
+
+_FAQ_ESTRABISMO = re.compile(
+    r"("
+    + _V + r"\s+estrabismo"
+    r"|estrabismo"
+    r"|olho\s+(?:torto|desviado|cruzado|virando)"
+    r"|olhos?\s+(?:tortos?|desviados?|cruzados?)"
+    r"|desvio\s+(?:do\s+)?ocular"
+    r")",
+    re.IGNORECASE,
+)
+
+_FAQ_CATARATA = re.compile(
+    r"("
+    + _V + r"\s+catarata"
+    r"|cirurgia\s+(?:de\s+)?catarata"
+    r"|opera[çc][aã]o\s+(?:de\s+)?catarata"
+    r")",
+    re.IGNORECASE,
+)
+
+_FAQ_CORNEA = re.compile(
+    r"("
+    + _V + r"\s+pter[íi]gio"
+    r"|carne\s+no\s+olho"
+    r"|(?:tem|têm|faz(?:em)?|trata(?:m)?)\s+(?:c[oó]rnea|ceratocone|transplante\s+(?:de\s+)?c[oó]rnea)"
+    r"|ceratocone"
+    r")",
+    re.IGNORECASE,
+)
+
+# Perguntas gerais sobre "tem oftalmologista" / "tem médico" → não interceptar,
+# deixa LLM responder (pode querer coletar contexto)
+
+
+def deve_responder_faq_especialidade(
+    ctx: Optional[dict], user_text: str,
+) -> Optional[str]:
+    """Retorna resposta canônica para perguntas FAQ sobre especialidades.
+
+    Detecta pergunta → mapeia pra médico correto → retorna texto pronto.
+    Nunca chama LLM. Fail-open (exceção → None).
+
+    Toggle: BLINDAGEM_FAQ_ESPECIALIDADE_ATIVADO (default ON).
+    """
+    if not _ativado("BLINDAGEM_FAQ_ESPECIALIDADE_ATIVADO"):
+        return None
+    if not user_text:
+        return None
+
+    txt = user_text.strip()
+
+    # ── Pediatria → Dra. Karla ─────────────────────────────────────────
+    if _FAQ_PEDIATRIA.search(txt):
+        return (
+            "Sim! 😊 A Dra. Karla Delalíbera é nossa especialista em oftalmopediatria "
+            "e atende crianças de todas as idades.\n\n"
+            "Pra agendar, me passa o nome e a data de nascimento do paciente?"
+        )
+
+    # ── Estrabismo → Dra. Karla ────────────────────────────────────────
+    if _FAQ_ESTRABISMO.search(txt):
+        return (
+            "Sim! A Dra. Karla Delalíbera é nossa especialista em estrabismo. 👁️\n\n"
+            "Me passa o nome e a data de nascimento do paciente pra eu verificar "
+            "os horários disponíveis?"
+        )
+
+    # ── Catarata → Dr. Fabrício ────────────────────────────────────────
+    if _FAQ_CATARATA.search(txt):
+        return (
+            "Sim! O Dr. Fabrício Freitas é nosso especialista em catarata "
+            "(avaliação e cirurgia). 🏥\n\n"
+            "Me passa o nome e a data de nascimento do paciente?"
+        )
+
+    # ── Córnea / Pterígio → Dr. Fabrício ──────────────────────────────
+    if _FAQ_CORNEA.search(txt):
+        return (
+            "Sim! O Dr. Fabrício Freitas é nosso especialista em córnea e pterígio "
+            "(a 'carne no olho'). 👁️\n\n"
+            "Me passa o nome e a data de nascimento do paciente?"
+        )
+
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # PONTO DE ENTRADA — chain of responsibility
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -482,14 +595,22 @@ def tentar_bypass_deterministico(
 
     Ordem tem propósito:
         1. urgência (prioridade absoluta — segurança clínica)
-        2. valor (rápido, curto)
-        3. aceite de slot (fluxo agenda)
-        4. endereço pós-agenda (segunda mensagem obrigatória)
+        2. faq_especialidade (C-74: perguntas simples KB sem LLM)
+        3. convênio (C-60: pegar CBMDF/GDF/Amil antes do LLM)
+        4. valor (rápido, curto)
+        5. aceite de slot (fluxo agenda)
+        6. endereço pós-agenda (segunda mensagem obrigatória)
     """
     try:
         t = deve_orientar_urgencia(ctx, user_text)
         if t:
             return ("urgencia", t)
+
+        # Bug C-74 (26/07/2026): FAQ especialidade/médico — resposta KB pura,
+        # zero LLM. Evita circuit breaker C-56 em perguntas simples.
+        t = deve_responder_faq_especialidade(ctx, user_text)
+        if t:
+            return ("faq_especialidade", t)
 
         # Bug C-60 (20/07/2026): classificador convênio ANTES do valor,
         # pra pegar CBMDF, GDF, Amil etc antes de LLM inventar "deixa eu verificar"
