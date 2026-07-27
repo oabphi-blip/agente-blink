@@ -3255,6 +3255,57 @@ def _gerar_encaminhamento_remarcacao(ctx: Optional[dict] = None) -> str:
     )
 
 
+def _append_link_localizacao(text: str, ctx: Optional[dict]) -> str:
+    """Appenda link de localização quando unidade está definida no ctx.
+
+    Regra (Fábio 27/07/2026): sempre que a unidade for definida em qualquer
+    etapa da conversa, anexar o link Maps da unidade — 1x por lead (dedup Redis 24h).
+    """
+    from voice_agent.templates_ativacao import (  # noqa: PLC0415
+        MAPS_ASA_NORTE,
+        MAPS_AGUAS_CLARAS,
+    )
+
+    known = (ctx or {}).get("known") or {}
+    unidade = (known.get("unidade") or "").strip().lower()
+    if not unidade:
+        return text
+
+    lead_id = (ctx or {}).get("lead_id")
+    if not lead_id:
+        return text
+
+    # Escolhe o link (antes de gastar Redis)
+    if unidade in ("asa norte",):
+        link = MAPS_ASA_NORTE
+        nome_unidade = "Asa Norte"
+    elif unidade in ("águas claras", "aguas claras"):
+        link = MAPS_AGUAS_CLARAS
+        nome_unidade = "Águas Claras"
+    else:
+        return text
+
+    # Dedup Redis — só envia 1x por lead (TTL 24h)
+    redis_key = f"blink:link_loc_enviado:{lead_id}"
+    r = None
+    try:
+        from voice_agent.redis_client import get_redis  # noqa: PLC0415
+        r = get_redis()
+        if r and r.exists(redis_key):
+            return text
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Seta dedup antes de retornar (evita race condition)
+    try:
+        if r:
+            r.setex(redis_key, 86400, "1")
+    except Exception:  # noqa: BLE001
+        pass
+
+    return text + f"\n\n📍 Localização — {nome_unidade}: {link}"
+
+
 def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     """Pós-processamento de segurança aplicado a TODA resposta antes de enviar.
 
@@ -4138,6 +4189,13 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
                 )
     except Exception as e:  # noqa: BLE001
         log.warning("[JUIZ] erro ao executar — passando direto: %s", e)
+
+    # === LINK LOCALIZAÇÃO (Fábio 27/07/2026) ===
+    # Appenda link Maps quando unidade definida — 1x por lead (dedup Redis 24h)
+    try:
+        text = _append_link_localizacao(text, ctx)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[LINK-LOC] erro ao appendar link localização: %s", e)
 
     return text
 
