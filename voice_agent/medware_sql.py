@@ -396,6 +396,7 @@ def listar_slots_livres(
     cod_unidade: int,
     dias: int = 14,
     data_inicio: Optional[str] = None,
+    n_slots: int = 1,
 ) -> list[dict]:
     """Slots LIVRES do médico+unidade nos próximos N dias.
 
@@ -404,13 +405,18 @@ def listar_slots_livres(
     2. Carrega TODOS agendamentos ocupados no período
     3. Expande grade em slots concretos por dia (data + hora)
     4. Filtra ocupados
-    5. Retorna lista ordenada [{data_iso, hora, dia_semana, dow_python}]
+    5. Se n_slots > 1: verifica que os próximos N-1 slots de 30min também
+       estão livres (blocos contíguos para múltiplas consultas seguidas)
+    6. Retorna lista ordenada [{data_iso, hora, dia_semana, dow_python}]
 
     Todas as datas/horas em TZ BRASÍLIA local (Medware é o servidor local
     da clínica, sem conversão). Retorna hora HH:MM formato string.
 
     dias: quantos dias a partir de hoje (default 14).
     data_inicio: opcional 'YYYY-MM-DD'. Padrão: hoje BRT.
+    n_slots: número de slots contíguos de 30min necessários (default 1).
+             Usar 2+ quando o paciente precisa de múltiplas consultas
+             seguidas (ex: avaliação + exames adicionais).
     """
     from datetime import date, datetime, timedelta
     from zoneinfo import ZoneInfo
@@ -451,8 +457,11 @@ def listar_slots_livres(
     except MedwareSQLError as e:
         log.warning("listar_slots_livres ocupados erro: %s", e)
 
-    # Expande grade em slots
-    livres: list[dict] = []
+    # Expande grade em slots — primeiro monta conjunto completo de LIVRES
+    # para permitir verificação de blocos contíguos (n_slots > 1).
+    candidatos: list[dict] = []
+    livres_set: set[tuple[str, str]] = set()  # (data_iso, hora_str)
+
     for offset in range(dias):
         dia = hoje + timedelta(days=offset)
         dw_medware = _isoweekday_para_diasemana_medware(dia.isoweekday())
@@ -476,12 +485,31 @@ def listar_slots_livres(
                     if slot_dt <= agora_brt:
                         continue
 
-                livres.append({
+                candidatos.append({
                     "data_iso": data_iso,
                     "hora": hora_str,
+                    "hora_min": m,
                     "dia_semana": dia.isoweekday(),  # 1=seg..7=dom
                     "diasemana_medware": dw_medware,
                 })
+                livres_set.add((data_iso, hora_str))
+
+    # Filtro de bloco contíguo: n_slots > 1 exige que os próximos N-1
+    # slots de 30min no MESMO DIA também estejam livres.
+    if n_slots <= 1:
+        livres = [{k: v for k, v in c.items() if k != "hora_min"} for c in candidatos]
+    else:
+        livres = []
+        for c in candidatos:
+            data_iso = c["data_iso"]
+            inicio_min = c["hora_min"]
+            # Verifica slots subsequentes (30min cada)
+            bloco_ok = all(
+                (data_iso, _minutos_para_hhmm(inicio_min + 30 * i)) in livres_set
+                for i in range(1, n_slots)
+            )
+            if bloco_ok:
+                livres.append({k: v for k, v in c.items() if k != "hora_min"})
 
     return livres
 
