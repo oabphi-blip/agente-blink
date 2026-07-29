@@ -213,6 +213,49 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (29/07/2026) Bug C-76 — Overflow contexto Claude API em leads com histórico longo (lead 24259380 Fábio Philipe)
+
+**Origem:** lead 24259380 ativo desde 06/07/2026 (~3 semanas, 5 conversas A40337/A40624/A40697/A41822/A42547). Ao responder "Oi" em 29/07, pipeline gerou `BadRequestError 400 'You have reached the maximum context length'` → circuit breaker C-56 moveu lead pra ATENDIMENTO HUMANO.
+
+**Causa raiz:** `get_caller_context_by_lead` (kommo.py linha 2201) chamava `get_lead_notes(lead_id)` sem limite → carregava todas as notas (default 50) sem truncar. Leads com semanas de histórico acumulam dezenas de notas longas → overflow da janela de contexto Claude API.
+
+**Fix em 2 camadas (`kommo.py` commit 68a4114):**
+
+1. **Linha 2201** — `get_lead_notes(lead_id, limit=15)` — limita a 15 notas mais recentes (suficiente para camadas 3-5 de ja_agendado + bloco CONVERSA_ATUAL).
+2. **Linha 2378** — antes de atribuir `notas_historico`, trunca `text` de cada nota a 500 chars: `nota_copy["text"] = txt[:497] + "…"`.
+
+**Push:** `PUSH_C76_LIMIT_NOTAS_CONTEXT_OVERFLOW.command`
+
+**Lição arquitetural CRÍTICA:**
+- **Leads de longa duração acumulam contexto ilimitado** — qualquer lista sem `limit` vira bomba-relógio em leads com semanas de histórico.
+- **`get_lead_notes` já aceitava `limit` (default 50)** — bastava passar `limit=15`. Bug era de omissão, não de arquitetura.
+- **Notas individuais longas são tão perigosas quanto quantidade** — nota de auditoria ou handoff pode ter 2000+ chars. Truncar a 500 é suficiente para contexto sem explodir o token budget.
+- **Regra permanente:** toda chamada que injeta lista no contexto Claude (notas, mensagens, histórico) DEVE ter limite explícito + truncagem de texto. Nunca confiar no default.
+
+### 0. (26/07/2026) Bug C-74 — FAQ especialidade via circuit breaker C-56 (Kenya lead 24348742)
+
+**Origem:** Paciente Kenya perguntou "Tem oftalmologista pediátrico". Resposta esperada: Dra. Karla Delalíbera, oftalmopediatria. Resposta real: "vou te conectar com nossa equipe pra dar continuidade" (circuit breaker C-56).
+
+**Causa raiz:** Pergunta FAQ de especialidade entrava no LLM completo. Se Claude API falha 3× por qualquer motivo → C-56 dispara → paciente recebe escalação em vez de resposta simples. O KB tinha a informação correta (`01_medicos_e_especialidades.md` linha 5), mas o fluxo nunca chegava lá.
+
+**Fix — Bypass determinístico `deve_responder_faq_especialidade()` em `blindagens_deterministicas.py`:**
+
+Intercepta ANTES do LLM. Schema de pergunta → resposta fixa:
+- `tem pediatra` / `oftalmo pediátrico` / `atende crianças/bebê` → Dra. Karla Delalíbera (oftalmopediatria)
+- `faz/tem estrabismo` / `olho torto/desviado` → Dra. Karla Delalíbera (estrabismo)
+- `faz/tem catarata` / `cirurgia de catarata` → Dr. Fabrício Freitas (catarata)
+- `faz pterígio` / `carne no olho` / `córnea` / `ceratocone` → Dr. Fabrício Freitas (córnea)
+
+Toggle: `BLINDAGEM_FAQ_ESPECIALIDADE_ATIVADO` (default ON). Plugado em `tentar_bypass_deterministico()` entre urgência e convênio.
+
+**Pytest:** `test_bug_c74_faq_especialidade.py` — 31/31 verde. Cobre pediatria, estrabismo, catarata, córnea, não-interceptação de perguntas genéricas, toggle, integração com a chain.
+
+**Lição arquitetural CRÍTICA:**
+
+- **Perguntas FAQ sobre especialidade NÃO PRECISAM DO LLM.** São lookups KB determinísticos. Resposta = `pergunta_pattern → (médico, especialidade)`. O LLM só adiciona variabilidade e risco de acionar circuit breaker.
+- **Arquitetura correta: schema de bypass.** Qualquer pergunta com resposta 100% determinística baseada em KB deve virar um bypass em `blindagens_deterministicas.py`, não uma chamada LLM. Perguntas candidatas futuras: horários de funcionamento, endereço da clínica, formas de pagamento, o que está incluso na consulta.
+- **Circuit breaker C-56 é a última linha de defesa — não deve ser acionado em perguntas simples.** Se C-56 está respondendo FAQ de especialidade, é sinal que o pipeline está frágil demais. Cada bypass determinístico reduz a superfície de exposição ao C-56.
+
 ### 0. (26/07/2026) Bug C-72 — Histórico chat sem janela de tempo: Chats API Kommo (lead 15321519 Ana Beatriz)
 
 **Origem:** lead 15321519 Ana Beatriz. Humano enviou template em 22/07. Paciente respondeu em 26/07 (96h depois). C-58 tem janela de 6h → não cobria. Etapa 1 (MENS HUMANO field 1261148) só guardava última mensagem outbound humana. Lia não tinha contexto → respondeu como se fosse conversa nova.
