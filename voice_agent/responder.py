@@ -4550,6 +4550,63 @@ class Responder:
             _zep_ctx + history + [{"role": "user", "content": user_text}]
         )
 
+        # ----------------------------------------------------------------
+        # C-76d (29/07/2026) — Context Guard: estima tokens antes da API.
+        # Causa raiz: Zep sem limite retornava histórico completo de leads
+        # com meses de conversas → BadRequestError 400 'maximum context length'.
+        # Também cobre casos onde KB/system cresceu demais.
+        #
+        # Estimativa conservadora: 4 chars ≈ 1 token (underestimate intencional
+        # pra não truncar desnecessariamente).
+        # Limites: 160K tokens gatilha nível 1 (Zep→10); 170K gatilha nível 2
+        # (history→12). Modelo claude-sonnet-4-5 tem janela de 200K.
+        # ----------------------------------------------------------------
+        def _chars_of(field) -> int:
+            if isinstance(field, list):
+                return sum(len(b.get("text", "")) for b in field)
+            return len(str(field))
+
+        def _chars_msgs(msg_list: list) -> int:
+            total = 0
+            for m in msg_list:
+                c = m.get("content", "")
+                total += len(c) if isinstance(c, str) else sum(len(str(x)) for x in c)
+            return total
+
+        _sys_chars = _chars_of(system_field)
+        _ctx_tokens_est = (_sys_chars + _chars_msgs(messages)) // 4
+        log.info(
+            "[CTX-GUARD] convo=%s system_chars=%d msgs=%d total_tokens_est=%d",
+            conversation_key, _sys_chars, len(messages), _ctx_tokens_est,
+        )
+        _CTX_WARN_TOKENS = 160_000
+        _CTX_CRIT_TOKENS = 170_000
+        if _ctx_tokens_est > _CTX_WARN_TOKENS:
+            # Nível 1: truncar Zep para últimas 10 mensagens
+            _zep_ctx = _zep_ctx[-10:] if _zep_ctx else []
+            messages = _sanitize_messages(
+                _zep_ctx + history + [{"role": "user", "content": user_text}]
+            )
+            _ctx_tokens_lvl1 = (_sys_chars + _chars_msgs(messages)) // 4
+            log.warning(
+                "[CTX-GUARD] overflow nivel1: %d>%d → Zep truncado 10 msgs,"
+                " novo_est=%d tokens",
+                _ctx_tokens_est, _CTX_WARN_TOKENS, _ctx_tokens_lvl1,
+            )
+            if _ctx_tokens_lvl1 > _CTX_CRIT_TOKENS:
+                # Nível 2: truncar Redis history para últimas 12 mensagens (6 turnos)
+                history = history[-12:] if len(history) > 12 else history
+                messages = _sanitize_messages(
+                    _zep_ctx + history + [{"role": "user", "content": user_text}]
+                )
+                log.warning(
+                    "[CTX-GUARD] overflow nivel2: %d>%d → history truncado 12 msgs,"
+                    " novo_est=%d tokens",
+                    _ctx_tokens_lvl1, _CTX_CRIT_TOKENS,
+                    (_sys_chars + _chars_msgs(messages)) // 4,
+                )
+        # ----------------------------------------------------------------
+
         # 4. Decide modelo
         # 4a. Upgrade SELETIVO pra Opus 4.6 em FSM=AGENDA (07/06/2026).
         # Quando paciente já está pronto pra receber slot E ctx tem agenda

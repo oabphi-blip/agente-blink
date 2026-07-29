@@ -35,11 +35,15 @@ def _get_client():
 _client = _get_client()
 
 
-def recuperar_contexto(session_id: str) -> list[dict]:
+def recuperar_contexto(session_id: str, limit: int = 20) -> list[dict]:
   """Busca memoria do paciente no Zep e retorna no formato messages Anthropic.
 
   Chamada ANTES de montar o bloco variavel do system prompt.
   Retorna [] se sessao nova, Zep down ou chave ausente.
+
+  C-76d (29/07/2026): limite hard de `limit` mensagens mais recentes.
+  Sem esse cap, leads com meses de historico no Zep injetavam centenas
+  de mensagens causando BadRequestError 400 'maximum context length'.
   """
   if not _client or not session_id:
     return []
@@ -51,6 +55,12 @@ def recuperar_contexto(session_id: str) -> list[dict]:
       content = (m.content or "").strip()
       if content:
         msgs.append({"role": role, "content": content})
+    if len(msgs) > limit:
+      log.warning(
+        "[ZEP] C-76d: truncando %d→%d msgs (limit=%d) sessao=%s",
+        len(msgs), limit, limit, session_id,
+      )
+      msgs = msgs[-limit:]
     log.info("[ZEP] recuperou %d mensagens para sessao %s", len(msgs), session_id)
     return msgs
   except Exception as exc:
