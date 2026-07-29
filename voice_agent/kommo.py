@@ -2198,7 +2198,12 @@ class KommoClient:
             # Sem essa camada Lia ficava cega e refazia agendamento.
             notas_lead = []
             try:
-                notas_lead = self.get_lead_notes(lead_id) or []
+                # Bug C-76 (29/07/2026): limitar a 15 notas recentes pra
+                # evitar overflow de contexto Claude API (400 "max context
+                # length") em leads com semanas de histórico. A função já
+                # retorna em ordem desc (mais recente primeiro) — 15 é
+                # suficiente pra camadas 3-5 e bloco CONVERSA_ATUAL.
+                notas_lead = self.get_lead_notes(lead_id, limit=15) or []
             except Exception as e:  # noqa: BLE001
                 log.warning(
                     "Kommo: erro lendo notas pra camada 3 lead %s: %s",
@@ -2368,9 +2373,20 @@ class KommoClient:
             # Task #413 (14/07/2026) — expõe notas pra bloco CONVERSA_ATUAL
             # no responder.py. `notas_lead` já foi carregado acima pra camadas
             # 3-5 do ja_agendado. Aqui só re-usa a mesma lista.
+            # Bug C-76 (29/07/2026): truncar texto de cada nota a 500 chars
+            # pra evitar overflow de contexto em leads com histórico longo.
             try:
                 if notas_lead:
-                    out["notas_historico"] = list(notas_lead)
+                    notas_truncadas = []
+                    for n in notas_lead:
+                        if not isinstance(n, dict):
+                            continue
+                        nota_copy = dict(n)
+                        txt = nota_copy.get("text") or ""
+                        if len(txt) > 500:
+                            nota_copy["text"] = txt[:497] + "…"
+                        notas_truncadas.append(nota_copy)
+                    out["notas_historico"] = notas_truncadas
             except Exception:  # noqa: BLE001
                 pass
         except Exception as e:  # noqa: BLE001
