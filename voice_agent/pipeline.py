@@ -876,8 +876,12 @@ class VoicePipeline:
                         caller_context["lead_id"]
                     )
                 if _chat_id_etapa2:
+                    # Bug C-76c (29/07/2026): limit=50 carregava 50 msgs completas
+                    # em memória — responder.py ainda passava max_msgs=30 ao
+                    # formatar (o call site que C-76b esqueceu de corrigir).
+                    # Alinhado com o cap de 15 msgs do historico_conversa.py.
                     _msgs_etapa2 = self.kommo.get_chat_messages_raw(
-                        _chat_id_etapa2, limit=50
+                        _chat_id_etapa2, limit=15
                     )
                     if _msgs_etapa2:
                         caller_context["historico_chat_msgs"] = _msgs_etapa2

@@ -4481,7 +4481,10 @@ class Responder:
                 if isinstance(caller_context, dict):
                     _msgs_hist = caller_context.get("historico_chat_msgs")
                 if _msgs_hist:
-                    _bloco_c72 = montar_bloco_historico_chat(_msgs_hist, max_msgs=30)
+                    # Bug C-76c (29/07/2026): era max_msgs=30 — C-76b mudou o
+                    # DEFAULT mas esqueceu de mudar o call site. Resultado: ainda
+                    # injetava 30 msgs × 500 chars no contexto. Correto: 15.
+                    _bloco_c72 = montar_bloco_historico_chat(_msgs_hist, max_msgs=15)
                 # Etapa 1 — campo MENS HUMANO (fallback se Etapa 2 não produziu)
                 if not _bloco_c72:
                     _bloco_c72 = montar_bloco_campo_mens_humano(caller_context or {})
