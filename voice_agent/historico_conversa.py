@@ -118,7 +118,7 @@ def extrair_chat_id_da_url(url: str) -> Optional[int]:
     return None
 
 
-def montar_bloco_historico_chat(messages: list, max_msgs: int = 30) -> str:
+def montar_bloco_historico_chat(messages: list, max_msgs: int = 15) -> str:
     """Bug C-72 Etapa 2: monta bloco de contexto a partir da Chats API Kommo.
 
     Cada mensagem retornada pela API tem estrutura:
@@ -167,6 +167,11 @@ def montar_bloco_historico_chat(messages: list, max_msgs: int = 30) -> str:
             texto = str(msg.get("text") or "").strip()
         if not texto:
             continue
+
+        # Bug C-76b (29/07/2026): truncar cada mensagem a 500 chars pra
+        # evitar overflow de contexto Claude API em leads com histórico longo.
+        if len(texto) > 500:
+            texto = texto[:497] + "…"
 
         # direction "in"/"incoming"/"0" = paciente; "out"/"outgoing"/"1" = atendente
         if direction in ("out", "outgoing", "1"):
