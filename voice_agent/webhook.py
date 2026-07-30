@@ -742,6 +742,27 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                         log.warning(
                             "C-56 nota escalação falhou (%s): %s", phone, e,
                         )
+                    # Bug C-76e (30/07/2026): C-56 gravava ATIVADO IA=Desativado,
+                    # mas o trigger /admin/kommo-trigger-status-change reativava
+                    # automaticamente quando humano movia o lead de volta pra etapa
+                    # ativa. Isso criava loop infinito: overflow → C-56 → reativar
+                    # → overflow. Fix: flag Redis permanente (30 dias) que o trigger
+                    # verifica antes de reativar. Só endpoint manual /admin/reativar-lead
+                    # limpa o flag. Para reverter pontualmente: DELETE blink:c56:{lead_id}
+                    try:
+                        _redis_c56 = getattr(pipeline, "_redis", None)
+                        if _redis_c56 is not None:
+                            _redis_c56.set(
+                                f"blink:c56:{_lead_id_hint}", "1",
+                                ex=30 * 24 * 3600,  # 30 dias
+                            )
+                            log.info(
+                                "C-56: flag anti-loop gravado para lead %s "
+                                "(expira em 30d — limpar via /admin/reativar-lead/%s)",
+                                _lead_id_hint, _lead_id_hint,
+                            )
+                    except Exception as _e_c56:
+                        log.warning("C-56 flag Redis falhou: %s", _e_c56)
             except Exception as e:  # noqa: BLE001
                 log.warning("C-56 escalada humano ignorada: %s", e)
 
@@ -6685,6 +6706,7 @@ async function submit(dryRun) {
                 lead_id_int, e,
             )
         nota_id = None
+        campo_mens_humano_ok = False
         if msg_texto:
             try:
                 from datetime import datetime, timedelta, timezone
@@ -6703,11 +6725,32 @@ async function submit(dryRun) {
                     "[trigger-msg-humano] add_note falhou lead=%s: %s",
                     lead_id_int, e,
                 )
+            # Bug C-72 (26/07/2026) — gravar texto no campo MENS HUMANO
+            # (field 1261148, textarea). Permite que o agente leia diretamente
+            # via get_caller_context_by_lead() SEM chamadas API extras.
+            # Cobre humanos enviando pelo Kommo; campanhas via Meta Graph usam
+            # C-72 Etapa 2 (Chats API) pra recuperação completa.
+            try:
+                ok_c72, _ = kommo_client.patch_custom_fields_raw(
+                    lead_id_int,
+                    [{"field_id": 1261148, "values": [{"value": txt_trunc}]}],
+                )
+                campo_mens_humano_ok = ok_c72
+                if not ok_c72:
+                    log.warning(
+                        "[C-72] patch MENS HUMANO falhou lead=%s", lead_id_int,
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "[C-72] patch MENS HUMANO exception lead=%s: %s",
+                    lead_id_int, e,
+                )
         return JSONResponse({
             "ok": bool(ok), "lead_id": lead_id_int,
             "ts_ultima_msg_humano": ts_now,
             "texto_capturado": bool(msg_texto),
             "nota_gravada_id": nota_id,
+            "mens_humano_gravado": campo_mens_humano_ok,
         })
 
     # ================================================================
@@ -6906,6 +6949,30 @@ async function submit(dryRun) {
                 "ok": True, "lead_id": lead_id_int, "status_id": status_int,
                 "acao": "ignorado", "motivo": "etapa não está na lista ativa nem inativa",
             })
+
+        # Bug C-76e (30/07/2026): se C-56 desativou este lead por overflow,
+        # NÃO reativar automaticamente — isso criava loop infinito.
+        # Só /admin/reativar-lead/{lead_id} pode limpar esse flag.
+        _redis_gate = getattr(pipeline, "_redis", None)
+        if _redis_gate is not None:
+            try:
+                if _redis_gate.exists(f"blink:c56:{lead_id_int}"):
+                    log.warning(
+                        "trigger-status-change: lead %s tem flag C-56 — "
+                        "BLOQUEANDO reativação automática. "
+                        "Use /admin/reativar-lead/%s para reativar após revisão.",
+                        lead_id_int, lead_id_int,
+                    )
+                    return JSONResponse({
+                        "ok": True, "lead_id": lead_id_int,
+                        "status_id": status_int, "acao": "bloqueado_c56",
+                        "motivo": (
+                            "Lead desativado por circuit breaker C-56 (overflow técnico). "
+                            f"Reativar manualmente: /admin/reativar-lead/{lead_id_int}"
+                        ),
+                    })
+            except Exception as _e_gate:
+                log.warning("C-76e gate Redis falhou: %s", _e_gate)
 
         try:
             ok = kommo_client.update_lead_fields(
@@ -7215,6 +7282,60 @@ async function submit(dryRun) {
             "telefone": contato.get("telefone"),
             "wamid": res.get("wamid"),
             "motivo": res.get("motivo"),
+        })
+
+    @app.post("/admin/reativar-lead/{lead_id}")
+    @app.get("/admin/reativar-lead/{lead_id}")
+    def admin_reativar_lead(lead_id: int, request: Request) -> JSONResponse:
+        """Reativa IA manualmente para lead que foi desativado por C-56 (overflow).
+
+        Remove o flag Redis blink:c56:{lead_id} e seta ATIVADO IA = Ativado.
+        Use após revisar o lead e confirmar que o overflow foi resolvido (ex: C-76d).
+
+        Uso:
+          curl -X POST "https://blink-agent.6prkfn.easypanel.host/admin/reativar-lead/23327112?secret=$WS"
+        """
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                return JSONResponse({"erro": "unauthorized"}, status_code=401)
+        kommo_client = getattr(pipeline, "kommo", None)
+        if not kommo_client:
+            return JSONResponse({"erro": "kommo_indisponivel"}, status_code=500)
+        _redis = getattr(pipeline, "_redis", None)
+
+        # 1. Limpar flag C-56
+        c56_key = f"blink:c56:{lead_id}"
+        tinha_flag = False
+        if _redis is not None:
+            try:
+                tinha_flag = bool(_redis.delete(c56_key))
+                log.info(
+                    "reativar-lead %s: flag C-56 %s",
+                    lead_id, "removido" if tinha_flag else "não existia",
+                )
+            except Exception as e:  # noqa: BLE001
+                log.warning("reativar-lead: delete Redis falhou: %s", e)
+
+        # 2. Setar ATIVADO IA = Ativado no Kommo
+        try:
+            ok = kommo_client.update_lead_fields(lead_id, {"ativado_ia": "Ativado"})
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"erro": f"update Kommo falhou: {e}"}, status_code=500)
+
+        log.info(
+            "reativar-lead %s: IA reativada (flag_c56_removido=%s kommo_ok=%s)",
+            lead_id, tinha_flag, bool(ok),
+        )
+        return JSONResponse({
+            "ok": bool(ok),
+            "lead_id": lead_id,
+            "flag_c56_removido": tinha_flag,
+            "acao": "ia_reativada_manual",
+            "kommo_url": f"https://univeja.kommo.com/leads/detail/{lead_id}",
         })
 
     @app.post("/admin/reativar-ia-batch")
