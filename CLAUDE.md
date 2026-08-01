@@ -213,6 +213,40 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (01/08/2026) Bug C-78 — FAQ "está atendendo hoje?" causou loop stall via sábado sem agenda (lead 23456132)
+
+**Origem:** lead 23456132 João (8-REALIZADO CONSULTA), sábado 02/08/2026. Paciente perguntou "A Dra Karla está atendendo hj?". Pipeline foi ao Medware → retornou vazio (sábado = sem atendimento) → `ctx.agenda=[]` → filtro C-30 pulado (`has_agenda=False`) → filtro C-30A disparou "Medware instável" (ERRADO — Medware estava UP, o problema era o calendário) → LLM entrou em loop stall 3x: "reconferir os horários exatos com a agenda do Medware pra te passar as opções corretas".
+
+**Bug C-78b simultâneo:** regex linha 813 do `_FAKE_AGENDA_LOOKUP` só pegava `correto` (singular masculino) — não pegava `corretas` (plural feminino) nem `Medware` como âncora.
+
+**Fix em 2 camadas (`blindagens_deterministicas.py` + `responder.py`):**
+
+1. **`deve_responder_faq_disponibilidade_hoje(ctx, user_text)`** — intercept ANTES de Medware:
+   - Regex `_FAQ_DISP_HOJE`: detecta "está atendendo hj/hoje", "tem horário hoje", "atende sábado/domingo", etc.
+   - Consulta escala real dos médicos (frozensets por dia da semana PT-BR):
+     - Karla Asa Norte: seg/qua/sex (weekday 0/2/4)
+     - Karla Águas Claras: ter/qui (weekday 1/3)
+     - Fabrício: ter/qui (weekday 1/3)
+   - `_proxima_data_no_plano(hoje, dias_plano)`: itera até próxima data disponível
+   - Se atende hoje → "Sim! Hoje é [dia] — [médico] tem atendimento em [unidade]..."
+   - Se não atende hoje → "Hoje é [dia] — não tem atendimento. Próxima data: [dia/dd/mm]"
+   - Karla sem unidade definida → mostra AMBAS as próximas datas
+   - Médico desconhecido → `None` (fail-open, LLM continua)
+   - Toggle: `BLINDAGEM_FAQ_DISPONIBILIDADE_ATIVADO` (default ON)
+   - Plugado em `tentar_bypass_deterministico()` ANTES de `faq_especialidade`
+
+2. **`responder.py` linha 813 stall regex:**
+   - `correto` → `correto[sa]?` (cobre "corretos" e "corretas")
+   - Adicionado padrão `reconferir.{0,30}(?:horários|calendário|agenda)\s+do\s+medware`
+
+**Pytest:** `test_bug_c78_faq_disponibilidade_hoje.py` — 39/39 verde. Push: `PUSH_C78_FAQ_DISPONIBILIDADE.command`.
+
+**Lição arquitetural CRÍTICA:**
+- **Quando Medware retorna vazio por calendário, C-30 fica cego (gate `has_agenda=False`).** A defesa certa é interceptar ANTES de consultar Medware — não tentar corrigir o que C-30/C-30A fazem com contexto vazio.
+- **C-30A "Medware instável" é mentira quando a razão real é "sábado sem atendimento".** Mensagem errada = paciente confuso + confiança perdida. FAQ bypass evita ambos.
+- **Stall regex com âncora singular falha em PT-BR** onde adjetivos concordam em gênero e número. Sempre usar `[oa]?s?` ou equivalente nas âncoras de stall.
+- **`tentar_bypass_deterministico()` é o lugar certo pra FAQs de calendário.** Padrão estabelecido com C-74 (especialidade) e agora C-78 (disponibilidade). Próximos candidatos: endereço da clínica, formas de pagamento, horário de atendimento.
+
 ### 0. (30/07/2026) Bug C-77 — CTX-GUARD token ratio errado: // 4 nunca disparava (lead 24381272)
 
 **Origem:** lead 24381272 Jose Victor (bebê 1 mês, Oftalmopediatria, Karla Asa Norte, particular). C-56 disparou na PRIMEIRA mensagem ("Bom dia") — lead criado há 23 segundos, zero histórico Zep, zero notas Kommo. C-76d + C-76e deveriam ter evitado, mas não evitaram.
@@ -327,30 +361,6 @@ _CTX_CRIT_TOKENS = 90_000
 - **`get_lead_notes` já aceitava `limit` (default 50)** — bastava passar `limit=15`. Bug era de omissão, não de arquitetura.
 - **Notas individuais longas são tão perigosas quanto quantidade** — nota de auditoria ou handoff pode ter 2000+ chars. Truncar a 500 é suficiente para contexto sem explodir o token budget.
 - **Regra permanente:** toda chamada que injeta lista no contexto Claude (notas, mensagens, histórico) DEVE ter limite explícito + truncagem de texto. Nunca confiar no default.
-
-### 0. (26/07/2026) Bug C-74 — FAQ especialidade via circuit breaker C-56 (Kenya lead 24348742)
-
-**Origem:** Paciente Kenya perguntou "Tem oftalmologista pediátrico". Resposta esperada: Dra. Karla Delalíbera, oftalmopediatria. Resposta real: "vou te conectar com nossa equipe pra dar continuidade" (circuit breaker C-56).
-
-**Causa raiz:** Pergunta FAQ de especialidade entrava no LLM completo. Se Claude API falha 3× por qualquer motivo → C-56 dispara → paciente recebe escalação em vez de resposta simples. O KB tinha a informação correta (`01_medicos_e_especialidades.md` linha 5), mas o fluxo nunca chegava lá.
-
-**Fix — Bypass determinístico `deve_responder_faq_especialidade()` em `blindagens_deterministicas.py`:**
-
-Intercepta ANTES do LLM. Schema de pergunta → resposta fixa:
-- `tem pediatra` / `oftalmo pediátrico` / `atende crianças/bebê` → Dra. Karla Delalíbera (oftalmopediatria)
-- `faz/tem estrabismo` / `olho torto/desviado` → Dra. Karla Delalíbera (estrabismo)
-- `faz/tem catarata` / `cirurgia de catarata` → Dr. Fabrício Freitas (catarata)
-- `faz pterígio` / `carne no olho` / `córnea` / `ceratocone` → Dr. Fabrício Freitas (córnea)
-
-Toggle: `BLINDAGEM_FAQ_ESPECIALIDADE_ATIVADO` (default ON). Plugado em `tentar_bypass_deterministico()` entre urgência e convênio.
-
-**Pytest:** `test_bug_c74_faq_especialidade.py` — 31/31 verde. Cobre pediatria, estrabismo, catarata, córnea, não-interceptação de perguntas genéricas, toggle, integração com a chain.
-
-**Lição arquitetural CRÍTICA:**
-
-- **Perguntas FAQ sobre especialidade NÃO PRECISAM DO LLM.** São lookups KB determinísticos. Resposta = `pergunta_pattern → (médico, especialidade)`. O LLM só adiciona variabilidade e risco de acionar circuit breaker.
-- **Arquitetura correta: schema de bypass.** Qualquer pergunta com resposta 100% determinística baseada em KB deve virar um bypass em `blindagens_deterministicas.py`, não uma chamada LLM. Perguntas candidatas futuras: horários de funcionamento, endereço da clínica, formas de pagamento, o que está incluso na consulta.
-- **Circuit breaker C-56 é a última linha de defesa — não deve ser acionado em perguntas simples.** Se C-56 está respondendo FAQ de especialidade, é sinal que o pipeline está frágil demais. Cada bypass determinístico reduz a superfície de exposição ao C-56.
 
 ### 0. (21/07/2026) Bug C-64 — Loop circular: fallbacks C-31/C-54 contêm frases stall que C-60 deveria bloquear
 

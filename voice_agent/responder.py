@@ -810,7 +810,10 @@ _FAKE_AGENDA_LOOKUP = [
     # 'dias' + 'antes de gravar'. Cobrindo agora.
     re.compile(r"(?:deixa eu\s+|vou\s+)?(?:conferir|reconferir|verificar|checar).{0,60}(?:dia|dias|dia da semana|dia certo)", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:conferir|reconferir|verificar|checar).{0,60}antes de\s+(?:gravar|marcar|agendar|confirmar)", re.IGNORECASE | re.DOTALL),
-    re.compile(r"(?:reconferir|reconferir).{0,30}(?:horários|calendário|agenda).{0,30}(?:aqui|correto)", re.IGNORECASE | re.DOTALL),
+    # Bug C-78 (01/08/2026): "corretas" (plural) não casava com "correto" (singular).
+    # Também expandido para cobrir "Medware" como âncora de stall.
+    re.compile(r"(?:reconferir|reconsultar).{0,30}(?:horários|calendário|agenda).{0,30}(?:aqui|correto[sa]?|medware)", re.IGNORECASE | re.DOTALL),
+    re.compile(r"reconferir.{0,30}(?:horários|calendário|agenda)\s+do\s+medware", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:atende\s+)?\*?\*?seg\s*/\s*qua\s*/\s*sex\*?\*?.{0,60}\*?\*?ter\s*/\s*qui\*?\*?", re.IGNORECASE | re.DOTALL),
 ]
 

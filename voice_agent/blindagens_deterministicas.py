@@ -28,8 +28,9 @@ from __future__ import annotations
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
 
@@ -584,6 +585,157 @@ def deve_responder_faq_especialidade(
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# BUG C-78 (01/08/2026) — FAQ DISPONIBILIDADE HOJE
+#
+# Causa raiz lead 23456132: paciente perguntou "A Dra Karla está atendendo hj?"
+# num sábado. Bot foi ao Medware → vazio (sábado = sem agenda) → ctx.agenda=[] →
+# C-30 não dispara (has_agenda=False) → C-30A trocou por "Medware instável" (ERRADO)
+# → LLM entrou em loop stall 3x com "reconferir os horários exatos".
+#
+# Fix: interceptar ANTES de chegar ao Medware. Resposta 100% determinística
+# baseada em dia-da-semana + escala de atendimento. Zero LLM.
+#
+# Toggle: BLINDAGEM_FAQ_DISPONIBILIDADE_ATIVADO (default ON)
+# ═══════════════════════════════════════════════════════════════════════
+
+_TZ_BRT = ZoneInfo("America/Sao_Paulo")
+
+# weekday(): 0=seg, 1=ter, 2=qua, 3=qui, 4=sex, 5=sab, 6=dom
+_KARLA_ASA_NORTE_DIAS  = frozenset({0, 2, 4})   # seg / qua / sex
+_KARLA_AGUAS_CLARAS_DIAS = frozenset({1, 3})     # ter / qui
+_KARLA_TODOS_DIAS      = frozenset({0, 1, 2, 3, 4})  # fallback sem unidade
+_FABRICIO_DIAS         = frozenset({1, 3})        # ter / qui
+
+_NOMES_DIAS_PT = {
+    0: "segunda-feira", 1: "terça-feira", 2: "quarta-feira",
+    3: "quinta-feira",  4: "sexta-feira", 5: "sábado",       6: "domingo",
+}
+
+_FAQ_DISP_HOJE = re.compile(
+    r"("
+    r"est[áa]\s+atendendo\s+(?:hoje|hj|agora)"
+    r"|tem\s+(?:hor[áa]rio|vaga|consulta|atendimento)\s+(?:hoje|hj)"
+    r"|atende\s+(?:hoje|hj)"
+    r"|(?:hoje|hj)\s+tem\s+(?:hor[áa]rio|vaga|consulta|atendimento)"
+    r"|(?:hoje|hj)\s+est[áa]\s+atendendo"
+    r"|atende\s+(?:s[áa]bado|domingo|nesse\s+s[áa]bado|nesse\s+domingo)"
+    r"|tem\s+(?:hor[áa]rio|vaga)\s+(?:s[áa]bado|domingo|amanh[ãa])"
+    r"|(?:s[áa]bado|domingo)\s+tem\s+(?:hor[áa]rio|vaga|atendimento)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _proxima_data_no_plano(
+    hoje: date, dias_plano: frozenset,
+) -> tuple[date, str]:
+    """Retorna (data, nome_dia) do próximo atendimento no conjunto de dias."""
+    for delta in range(1, 8):
+        prox = hoje + timedelta(days=delta)
+        if prox.weekday() in dias_plano:
+            return prox, _NOMES_DIAS_PT[prox.weekday()]
+    return hoje + timedelta(days=1), "segunda-feira"  # fallback defensivo
+
+
+def deve_responder_faq_disponibilidade_hoje(
+    ctx: Optional[dict], user_text: str,
+) -> Optional[str]:
+    """Resposta determinística para perguntas de disponibilidade no dia.
+
+    Detecta "está atendendo hoje/hj?", "tem horário hoje?", "atende sábado?"
+    e responde baseado no dia-da-semana atual (fuso BRT) + escala dos médicos.
+
+    NUNCA chama Medware. Fail-open (exceção → None, LLM continua).
+
+    Toggle: BLINDAGEM_FAQ_DISPONIBILIDADE_ATIVADO (default ON).
+    """
+    if not _ativado("BLINDAGEM_FAQ_DISPONIBILIDADE_ATIVADO"):
+        return None
+    if not user_text or not _FAQ_DISP_HOJE.search(user_text.strip()):
+        return None
+
+    try:
+        hoje = datetime.now(_TZ_BRT).date()
+        wd = hoje.weekday()
+        nome_hoje = _NOMES_DIAS_PT[wd]
+
+        known = (ctx or {}).get("known") or {}
+        medico_raw  = (known.get("medico") or "").lower()
+        unidade_raw = (known.get("unidade") or "").lower()
+
+        # ── Identificar médico ─────────────────────────────────────────
+        e_karla    = "karla"  in medico_raw
+        e_fabricio = "fabr"   in medico_raw
+        if not e_karla and not e_fabricio:
+            return None   # médico desconhecido — deixa o LLM lidar
+
+        # ── Identificar unidade ────────────────────────────────────────
+        e_asa_norte    = "asa norte" in unidade_raw or "asa_norte" in unidade_raw
+        e_aguas_claras = (
+            "águas claras" in unidade_raw
+            or "aguas claras" in unidade_raw
+            or ("agua" in unidade_raw and "clara" in unidade_raw)
+        )
+
+        if e_karla:
+            medico_str = "Dra. Karla Delalíbera"
+            if e_asa_norte:
+                dias_plano  = _KARLA_ASA_NORTE_DIAS
+                unidade_str: Optional[str] = "Asa Norte"
+            elif e_aguas_claras:
+                dias_plano  = _KARLA_AGUAS_CLARAS_DIAS
+                unidade_str = "Águas Claras"
+            else:
+                dias_plano  = _KARLA_TODOS_DIAS
+                unidade_str = None
+        else:
+            medico_str  = "Dr. Fabrício Freitas"
+            dias_plano  = _FABRICIO_DIAS
+            unidade_str = None
+
+        atende_hoje = (wd in dias_plano)
+
+        if atende_hoje:
+            # Inferir unidade pelo dia quando Karla sem unidade definida
+            if e_karla and not unidade_str:
+                unidade_str = (
+                    "Asa Norte" if wd in _KARLA_ASA_NORTE_DIAS else "Águas Claras"
+                )
+            unidade_msg = f" em {unidade_str}" if unidade_str else ""
+            return (
+                f"Sim! 😊 Hoje é {nome_hoje} — a {medico_str} tem atendimento"
+                f"{unidade_msg}. Me passa o nome e a data de nascimento do "
+                f"paciente pra eu verificar os horários disponíveis?"
+            )
+
+        # ── Não atende hoje — mostrar próxima(s) data(s) ──────────────
+        if e_karla and not unidade_str:
+            # Mostrar ambas as unidades (paciente não definiu)
+            prox_an, prox_an_dia = _proxima_data_no_plano(hoje, _KARLA_ASA_NORTE_DIAS)
+            prox_ac, prox_ac_dia = _proxima_data_no_plano(hoje, _KARLA_AGUAS_CLARAS_DIAS)
+            return (
+                f"Hoje é {nome_hoje} — a {medico_str} não tem atendimento neste dia. 😊\n\n"
+                f"As próximas disponibilidades são:\n"
+                f"• Asa Norte: {prox_an_dia} ({prox_an.strftime('%d/%m')})\n"
+                f"• Águas Claras: {prox_ac_dia} ({prox_ac.strftime('%d/%m')})\n\n"
+                f"Qual unidade fica mais perto de você?"
+            )
+        else:
+            prox, prox_dia = _proxima_data_no_plano(hoje, dias_plano)
+            unidade_msg = f" em {unidade_str}" if unidade_str else ""
+            return (
+                f"Hoje é {nome_hoje} — a {medico_str} não tem atendimento neste dia. 😊\n\n"
+                f"A próxima consulta disponível{unidade_msg} é na "
+                f"{prox_dia} ({prox.strftime('%d/%m')}). "
+                f"Quer que eu verifique os horários?"
+            )
+
+    except Exception as e:  # noqa: BLE001
+        log.warning("[C-78] faq_disponibilidade_hoje falhou: %s", e)
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # PONTO DE ENTRADA — chain of responsibility
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -605,6 +757,14 @@ def tentar_bypass_deterministico(
         t = deve_orientar_urgencia(ctx, user_text)
         if t:
             return ("urgencia", t)
+
+        # Bug C-78 (01/08/2026): FAQ disponibilidade hoje — "está atendendo hj?"
+        # Resposta determinística por dia-da-semana. Zero Medware, zero LLM.
+        # Deve vir ANTES de faq_especialidade para evitar que C-30A diga
+        # "Medware instável" quando a realidade é "não atende neste dia".
+        t = deve_responder_faq_disponibilidade_hoje(ctx, user_text)
+        if t:
+            return ("faq_disponibilidade_hoje", t)
 
         # Bug C-74 (26/07/2026): FAQ especialidade/médico — resposta KB pura,
         # zero LLM. Evita circuit breaker C-56 em perguntas simples.
