@@ -56,8 +56,9 @@ class TestViolaOfertaEmDiaNaoAtendido:
 
     def test_karla_asa_norte_quinta_eh_violacao(self):
         # 18/06/2026 = quinta. Karla Asa Norte só atende seg/qua/sex.
+        # Ano explícito para evitar inferência de ano quando teste roda após 30 dias.
         ctx = {"known": {"medico": "Karla Delalíbera", "unidade": "Asa Norte"}}
-        texto = "Tenho horário 1️⃣ quarta-feira, 18/06 às 08:30"
+        texto = "Tenho horário 1️⃣ quarta-feira, 18/06/2026 às 08:30"
         result = _viola_oferta_em_dia_nao_atendido(texto, ctx)
         assert result is not None, "Quinta-feira deveria ser violação pra Karla Asa Norte"
         medico, data, dia_real = result
@@ -66,38 +67,38 @@ class TestViolaOfertaEmDiaNaoAtendido:
     def test_karla_asa_norte_sabado_eh_violacao(self):
         # 20/06/2026 = sábado. Karla nunca atende sábado.
         ctx = {"known": {"medico": "Karla Delalíbera", "unidade": "Asa Norte"}}
-        texto = "Sexta-feira, 20/06 às 08:00"
+        texto = "Sexta-feira, 20/06/2026 às 08:00"
         result = _viola_oferta_em_dia_nao_atendido(texto, ctx)
         assert result is not None
 
     def test_karla_asa_norte_quarta_eh_ok(self):
         # 17/06/2026 = quarta. Karla Asa Norte atende.
         ctx = {"known": {"medico": "Karla Delalíbera", "unidade": "Asa Norte"}}
-        texto = "Quarta-feira, 17/06 às 09:00"
+        texto = "Quarta-feira, 17/06/2026 às 09:00"
         result = _viola_oferta_em_dia_nao_atendido(texto, ctx)
         assert result is None, "Quarta-feira é OK pra Karla Asa Norte"
 
     def test_karla_aguas_claras_quinta_eh_ok(self):
         # 18/06/2026 = quinta. Karla Águas Claras atende terça/quinta.
         ctx = {"known": {"medico": "Karla", "unidade": "Águas Claras"}}
-        texto = "Quinta-feira, 18/06 às 09:00"
+        texto = "Quinta-feira, 18/06/2026 às 09:00"
         result = _viola_oferta_em_dia_nao_atendido(texto, ctx)
         assert result is None, "Quinta-feira é OK pra Karla Águas Claras"
 
     def test_karla_aguas_claras_segunda_eh_violacao(self):
         # 22/06/2026 = segunda. Águas Claras só atende ter/qui.
         ctx = {"known": {"medico": "Karla", "unidade": "Águas Claras"}}
-        texto = "Segunda-feira, 22/06"
+        texto = "Segunda-feira, 22/06/2026"
         result = _viola_oferta_em_dia_nao_atendido(texto, ctx)
         assert result is not None
 
     def test_sem_unidade_usa_fallback_uniao(self):
         # Sem unidade no ctx: fallback pra mapa antigo (seg-sex)
         ctx = {"known": {"medico": "Karla"}}
-        texto = "Sábado, 21/06"  # 21/06 = domingo na verdade
-        # Domingo não está em {0,1,2,3,4} → violação
+        texto = "Sábado, 20/06/2026"  # 20/06/2026 = sábado (weekday=5)
+        # Sábado não está em {0,1,2,3,4} → violação
         result = _viola_oferta_em_dia_nao_atendido(texto, ctx)
-        # Esperado dispara (domingo fora do permitido)
+        # Esperado dispara (sábado fora do permitido)
         assert result is not None
 
     def test_caso_real_fabio_philipe_24113652(self):
@@ -105,11 +106,11 @@ class TestViolaOfertaEmDiaNaoAtendido:
         ctx = {"known": {"medico": "Dra. Karla Delalibera", "unidade": "Asa Norte"}}
         texto = (
             "Ótimo! Tenho estes horários disponíveis na Asa Norte, manhã, início:\n"
-            "1️⃣ quarta-feira, 18/06 às 08:30\n"
-            "2️⃣ sexta-feira, 20/06 às 08:00\n"
+            "1️⃣ quarta-feira, 18/06/2026 às 08:30\n"
+            "2️⃣ sexta-feira, 20/06/2026 às 08:00\n"
             "Qual prefere?"
         )
-        # Detecta a primeira violação (18/06 = quinta, não atendida)
+        # Detecta a primeira violação (18/06/2026 = quinta, não atendida em Asa Norte)
         result = _viola_oferta_em_dia_nao_atendido(texto, ctx)
         assert result is not None
 
@@ -118,24 +119,24 @@ class TestViolaDiaSemana:
     """Filtro pega divergência entre dia-da-semana citado e data real."""
 
     def test_quarta_18_06_eh_quinta_dispara(self):
-        # 18/06/2026 = quinta, mas Lia disse quarta
-        result = _viola_dia_semana("Quarta-feira, 18/06 às 08:30")
+        # 18/06/2026 = quinta, mas Lia disse quarta. Ano explícito para evitar inferência.
+        result = _viola_dia_semana("Quarta-feira, 18/06/2026 às 08:30")
         assert result is not None
         dia_falado, data_str, dia_real = result
         assert "quarta" in dia_falado.lower()
         assert "quinta" in dia_real.lower()
 
     def test_sexta_20_06_eh_sabado_dispara(self):
-        # 20/06/2026 = sábado, mas Lia disse sexta
-        result = _viola_dia_semana("Sexta-feira, 20/06 às 08:00")
+        # 20/06/2026 = sábado, mas Lia disse sexta. Ano explícito para evitar inferência.
+        result = _viola_dia_semana("Sexta-feira, 20/06/2026 às 08:00")
         assert result is not None
         dia_falado, _, dia_real = result
         assert "sexta" in dia_falado.lower()
         assert "sábado" in dia_real.lower() or "sabado" in dia_real.lower()
 
     def test_quinta_18_06_eh_ok(self):
-        # 18/06/2026 = quinta, Lia disse quinta — bate
-        result = _viola_dia_semana("Quinta-feira, 18/06 às 09:00")
+        # 18/06/2026 = quinta, Lia disse quinta — bate. Ano explícito.
+        result = _viola_dia_semana("Quinta-feira, 18/06/2026 às 09:00")
         assert result is None
 
 

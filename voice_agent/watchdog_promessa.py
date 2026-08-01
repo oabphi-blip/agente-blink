@@ -455,7 +455,10 @@ def tick(
 
 
 def esta_habilitado() -> bool:
-    return os.getenv("WATCHDOG_PROMESSA_ENABLED", "0") == "1"
+    # Bug C-79 (01/08/2026): mudança de default OFF→ON.
+    # Rollback: setar WATCHDOG_PROMESSA_ENABLED=0 no Easypanel.
+    val = (os.getenv("WATCHDOG_PROMESSA_ENABLED") or "1").lower().strip()
+    return val not in ("0", "false", "no", "off")
 
 
 def silencio_min_seg_env() -> int:

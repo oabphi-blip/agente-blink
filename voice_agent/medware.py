@@ -791,8 +791,10 @@ class MedwareClient:
         # - Timezone Brasília local (Firebird sem conversão UTC)
         # - Dedup natural: 56 duplicatas C-59 contam 1 slot ocupado
         # - Dias da semana corretos (mata Bug C-31/C-53 recorrentes)
-        # Default OFF pra rollout gradual. Fábio liga via Easypanel env.
-        if _os.getenv("MEDWARE_AGENDA_SQL", "0") in ("1", "true", "yes", "on"):
+        # Bug C-79 (01/08/2026): mudança de default OFF→ON após validação prod C-59.
+        # Rollback: setar MEDWARE_AGENDA_SQL=0 no Easypanel.
+        _medware_sql_val = (_os.getenv("MEDWARE_AGENDA_SQL") or "1").lower().strip()
+        if _medware_sql_val not in ("0", "false", "no", "off"):
             try:
                 from voice_agent import medware_sql
                 # Janela: usa data_inicio se veio, senão dias_default
