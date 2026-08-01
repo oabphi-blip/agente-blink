@@ -4574,20 +4574,25 @@ class Responder:
             return total
 
         _sys_chars = _chars_of(system_field)
-        _ctx_tokens_est = (_sys_chars + _chars_msgs(messages)) // 4
+        # Bug C-77 (30/07/2026): PT-BR + emojis + JSON = ~1.5-2 chars/token,
+        # NÃO 4 chars/token como assumido originalmente. _MASTER_INSTRUCTION.md
+        # tem 120K chars = ~60-80K tokens reais, mas // 4 estimava só 30K.
+        # Fix: usar // 2 (conservador) e baixar thresholds de 160K/170K → 80K/90K.
+        _ctx_tokens_est = (_sys_chars + _chars_msgs(messages)) // 2
         log.info(
             "[CTX-GUARD] convo=%s system_chars=%d msgs=%d total_tokens_est=%d",
             conversation_key, _sys_chars, len(messages), _ctx_tokens_est,
         )
-        _CTX_WARN_TOKENS = 160_000
-        _CTX_CRIT_TOKENS = 170_000
+        _CTX_WARN_TOKENS = 80_000
+        _CTX_CRIT_TOKENS = 90_000
         if _ctx_tokens_est > _CTX_WARN_TOKENS:
             # Nível 1: truncar Zep para últimas 10 mensagens
             _zep_ctx = _zep_ctx[-10:] if _zep_ctx else []
             messages = _sanitize_messages(
                 _zep_ctx + history + [{"role": "user", "content": user_text}]
             )
-            _ctx_tokens_lvl1 = (_sys_chars + _chars_msgs(messages)) // 4
+            # Bug C-77: usar // 2 aqui também (consistente com estimativa inicial)
+            _ctx_tokens_lvl1 = (_sys_chars + _chars_msgs(messages)) // 2
             log.warning(
                 "[CTX-GUARD] overflow nivel1: %d>%d → Zep truncado 10 msgs,"
                 " novo_est=%d tokens",
@@ -4603,7 +4608,7 @@ class Responder:
                     "[CTX-GUARD] overflow nivel2: %d>%d → history truncado 12 msgs,"
                     " novo_est=%d tokens",
                     _ctx_tokens_lvl1, _CTX_CRIT_TOKENS,
-                    (_sys_chars + _chars_msgs(messages)) // 4,
+                    (_sys_chars + _chars_msgs(messages)) // 2,
                 )
         # ----------------------------------------------------------------
 

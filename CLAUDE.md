@@ -213,6 +213,102 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (30/07/2026) Bug C-77 — CTX-GUARD token ratio errado: // 4 nunca disparava (lead 24381272)
+
+**Origem:** lead 24381272 Jose Victor (bebê 1 mês, Oftalmopediatria, Karla Asa Norte, particular). C-56 disparou na PRIMEIRA mensagem ("Bom dia") — lead criado há 23 segundos, zero histórico Zep, zero notas Kommo. C-76d + C-76e deveriam ter evitado, mas não evitaram.
+
+**Causa raiz — divisor `// 4` sistematicamente errado para PT-BR:**
+- `_MASTER_INSTRUCTION.md` = 120.271 chars
+- Com `// 4`: estimativa = 30.068 tokens (ERRADO)
+- Real tokens PT-BR + emojis + JSON: ~60-80K tokens (ratio ~1.5-2 chars/token)
+- Threshold de 160K tokens = precisaria de 640K chars para disparar → NUNCA acionava
+- System prompt sozinho (~60-80K tokens reais) já come 30-40% da janela de 200K antes de qualquer histórico
+
+**Fix (`voice_agent/responder.py` linhas 4577-4583):**
+```python
+# ANTES (nunca disparava):
+_ctx_tokens_est = (_sys_chars + _chars_msgs(messages)) // 4
+_CTX_WARN_TOKENS = 160_000
+_CTX_CRIT_TOKENS = 170_000
+
+# DEPOIS (corrigido Bug C-77):
+_ctx_tokens_est = (_sys_chars + _chars_msgs(messages)) // 2
+_CTX_WARN_TOKENS = 80_000
+_CTX_CRIT_TOKENS = 90_000
+```
+
+**Push:** `PUSH_C77_CTX_GUARD_TOKEN_RATIO.command`
+
+**Lead 24381272 reativado:** ATIVADO IA = "Ativado" (confirmado GET, enum_id 927031). Nota: campo 1.DIA CONSULTA = ~10/08/2026 já preenchido — lead pode estar em ja_agendado, verificar antes de responder ao paciente.
+
+**Lição arquitetural CRÍTICA:**
+- **`// N` em estimativa de tokens depende do idioma.** EN: ~4 chars/token. PT-BR com emojis, JSON e caracteres especiais: ~1.5-2 chars/token. Assumir 4 foi erro de calibração.
+- **Threshold deve refletir janela real do modelo menos margem.** claude-sonnet-4-5 tem 200K tokens. System prompt real ~60-80K. Margem adequada = threshold em 80K tokens estimados (conservador com `// 2`), não 160K.
+- **CTX-GUARD que NUNCA dispara = não existe.** O guard existia no código mas era ineficaz. Validar sempre: "qual é o pior caso que faz o guard disparar?" Se a resposta é "640K chars de texto" para um sistema com prompt de 120K chars, o guard está errado.
+- **Regra permanente:** todo estimador de tokens em código deve ser calibrado contra o idioma real. Logar `total_tokens_est` em PROD e comparar com tokens reais via tracing sempre que C-56 disparar.
+
+### 0. (30/07/2026) Bug C-76e — Anti-loop C-56: flag Redis permanente bloqueia reativação automática (lead 23327112 Cecília)
+
+**Origem:** lead 23327112 Cecília Pacheco de Souza (Oftalmopediatria, Karla Asa Norte, Sem Convênio, consulta 31/07). C-56 disparou 3x (28/07 ×2, 30/07 ×1) por BadRequestError 400 context overflow. A cada disparo: C-56 desativa IA + move lead pra ATENDIMENTO HUMANO → trigger `kommo-trigger-status-change` detecta mudança de etapa → **reativa IA automaticamente** → próxima mensagem causa overflow → C-56 → loop infinito. Paciente ficou sem resposta às perguntas "Bom dia", "Mas já está marcado, correto?" e "O valor da consulta é essa mesmo?".
+
+**Causa raiz — ciclo perfeito de reativação automática:** o trigger `kommo-trigger-status-change` (Bug C-24a, reativa IA ao mover lead entre etapas ativas) foi desenhado pra recuperar leads de ATENDIMENTO HUMANO. Mas se o C-56 está movendo pra ATENDIMENTO HUMANO POR causa de overflow, e a raiz (overflow) não foi resolvida, a reativação automática apenas reinicia o ciclo imediatamente.
+
+**Fix em 2 camadas (`webhook.py`, commit `daae81a..366d1e8`):**
+
+1. **Quando C-56 dispara** (bloco `_fallback_instabilidade_pipeline` que move o lead e desativa IA): grava flag Redis:
+   ```python
+   redis_client.setex(f"blink:c56:{lead_id}", 30 * 24 * 3600, "1")  # TTL 30 dias
+   ```
+
+2. **`kommo-trigger-status-change` verifica o flag antes de reativar:**
+   ```python
+   flag = redis_client.get(f"blink:c56:{lead_id}")
+   if flag:
+       return {"acao": "bloqueado_c56", "motivo": "lead teve C-56 recente — reativar manualmente via /admin/reativar-lead/{id}"}
+   ```
+
+3. **Novo endpoint `/admin/reativar-lead/{lead_id}`** (GET ou POST + secret):
+   - Limpa `blink:c56:{lead_id}` no Redis
+   - Chama `kommo_client.update_lead_fields(lead_id, {"ativado_ia": "Ativado"})`
+   - Retorna `{ok, flag_c56_removido, acao: "ia_reativada_manual"}`
+   - Usar SOMENTE após confirmar que a causa raiz do overflow foi resolvida (ex: C-76d ativo)
+
+**Resultado para Cecília 23327112:** GET para `/admin/reativar-lead/23327112?secret=...` executado pós-deploy. ATIVADO IA voltou para "Ativado" (confirmado via `kommo_get_lead` field_id 1260817). Consulta hoje 31/07 às 10:00. Nota de alerta humano gravada (note_id 29112894) pedindo resposta à pergunta de valor.
+
+**Resposta às 2 questões pendentes de Fábio:**
+- **"Este deploy resolve o caso específico?"** → SIM: Cecília 23327112 está com IA reativada, C-76d + C-76e protegem futuras mensagens dela.
+- **"Resolve os outros casos posteriores?"** → SIM: qualquer lead que acionar C-56 no futuro vai ter flag Redis por 30 dias, bloqueando o loop. Manual reactivation via endpoint garante que humano revisa antes de reativar. C-76d (context guard) previne o overflow desde a raiz — C-76e é a rede de segurança se o overflow acontecer mesmo assim.
+
+**Lição arquitetural CRÍTICA:**
+- **Automação de recuperação pode criar loops perversos.** C-24a (reativa IA ao mudar etapa) + C-56 (move pra ATENDIMENTO HUMANO quando falha) são dois mecanismos corretos individualmente que em combinação criaram loop infinito.
+- **Regra permanente: qualquer automação de reativação deve verificar se a CAUSA DA DESATIVAÇÃO foi resolvida.** Flag Redis com TTL 30d é o mecanismo canônico: C-56 grava o flag → trigger lê o flag → bloqueia → humano confirma resolução → chama endpoint de reativação manual.
+- **Para reativar qualquer lead com C-56 histórico:** `curl -X POST "https://blink-agent.6prkfn.easypanel.host/admin/reativar-lead/{LEAD_ID}?secret=blink_a3f9c2e1b8d47f6e905a2b4c8d1e7f3a"`. Só chamar após confirmar C-76d ativo em prod.
+
+### 0. (29/07/2026) Bug C-76d — Context Guard + Zep limit=20 (lead 24374118 novo lead ainda overflow após C-76c)
+
+**Origem:** após fixes C-76 (limit=15 notas) e C-76c (chat msgs limit=15), lead 24374118 (novo, primeira mensagem, chatId=null, zero notas Kommo) AINDA causava `BadRequestError 400 'maximum context length'`. Paradoxo: lead novo não deveria ter histórico suficiente para overflow.
+
+**Causa raiz — `zep_adapter.recuperar_contexto()` sem limite:** função retornava TODOS os mensagens do Zep para o `session_id` (= `conversation_key` = derivado do número do telefone). Se o número de telefone foi usado em sessões anteriores (paciente retornando, lead duplicado, teste), o Zep tem o histórico completo de TODAS as sessões. 80-500 mensagens de histórico Zep = 24K-150K chars extras = 6K-37K tokens de surpresa.
+
+**Fix em 2 camadas (`zep_adapter.py` + `responder.py`):**
+
+1. **`zep_adapter.py::recuperar_contexto(limit=20)`** — hard cap: `msgs = msgs[-limit:]`. Se Zep retornar 500 msgs, só os últimas 20 passam. Loga WARNING quando trunca.
+
+2. **`responder.py` CTX-GUARD** (após assembly de messages, antes do loop API):
+   - Estima total de tokens: `(_sys_chars + _chars_msgs) // 4`
+   - Loga SEMPRE: `[CTX-GUARD] system_chars=... msgs=... total_tokens_est=...` → diagnóstico permanente
+   - Nível 1 (>160K tokens): trunca Zep para últimas 10 msgs, reconstrói messages
+   - Nível 2 (>170K tokens): trunca Redis history para últimas 12 msgs, reconstrói
+   - Modelo `claude-sonnet-4-5` tem 200K janela; thresholds dão margem de ~30-40K
+
+**Pytest:** `test_bug_c76d_context_guard.py` — 24/24 verde. Push: `PUSH_C76D_CONTEXT_GUARD.command`.
+
+**Lição arquitetural CRÍTICA:**
+- **`conversation_key` é derivado do TELEFONE, não do lead_id.** Um número de telefone que apareceu em múltiplos leads ou sessões de teste acumula histórico Zep ilimitado sob a mesma session_id. Lead "novo" no Kommo pode ser um número ANTIGO no Zep.
+- **Toda fonte de histórico injetada em messages[] precisa de limite explícito:** Zep (fix C-76d), notas (fix C-76), chat msgs (fix C-76c), Redis history (store.py max_turns=12 via append). O Redis é o único que já tinha cap por design; os outros precisaram de fix.
+- **CTX-GUARD com logging sempre-on é diagnóstico de baixo custo.** `[CTX-GUARD] total_tokens_est=42000` em todo lead — custo zero, revela imediatamente quando o contexto está crescendo perigosamente antes de estourar.
+- **Regra permanente:** qualquer `for m in lista_externa_sem_limite` que injeta em messages[] = bomba-relógio. Sempre passar `limit` explícito ou aplicar `[-N:]` no resultado.
+
 ### 0. (29/07/2026) Bug C-76 — Overflow contexto Claude API em leads com histórico longo (lead 24259380 Fábio Philipe)
 
 **Origem:** lead 24259380 ativo desde 06/07/2026 (~3 semanas, 5 conversas A40337/A40624/A40697/A41822/A42547). Ao responder "Oi" em 29/07, pipeline gerou `BadRequestError 400 'You have reached the maximum context length'` → circuit breaker C-56 moveu lead pra ATENDIMENTO HUMANO.
@@ -255,49 +351,6 @@ Toggle: `BLINDAGEM_FAQ_ESPECIALIDADE_ATIVADO` (default ON). Plugado em `tentar_b
 - **Perguntas FAQ sobre especialidade NÃO PRECISAM DO LLM.** São lookups KB determinísticos. Resposta = `pergunta_pattern → (médico, especialidade)`. O LLM só adiciona variabilidade e risco de acionar circuit breaker.
 - **Arquitetura correta: schema de bypass.** Qualquer pergunta com resposta 100% determinística baseada em KB deve virar um bypass em `blindagens_deterministicas.py`, não uma chamada LLM. Perguntas candidatas futuras: horários de funcionamento, endereço da clínica, formas de pagamento, o que está incluso na consulta.
 - **Circuit breaker C-56 é a última linha de defesa — não deve ser acionado em perguntas simples.** Se C-56 está respondendo FAQ de especialidade, é sinal que o pipeline está frágil demais. Cada bypass determinístico reduz a superfície de exposição ao C-56.
-
-### 0. (26/07/2026) Bug C-72 — Histórico chat sem janela de tempo: Chats API Kommo (lead 15321519 Ana Beatriz)
-
-**Origem:** lead 15321519 Ana Beatriz. Humano enviou template em 22/07. Paciente respondeu em 26/07 (96h depois). C-58 tem janela de 6h → não cobria. Etapa 1 (MENS HUMANO field 1261148) só guardava última mensagem outbound humana. Lia não tinha contexto → respondeu como se fosse conversa nova.
-
-**Causa raiz:** C-58 usa `notas_historico` com janela temporal fixa (6h). Para gaps longos (dias) o contexto se perde completamente. Etapa 1 era last-message-only — sem histórico de diálogo.
-
-**Fix — Etapa 2 via Kommo Chats API:**
-
-1. **`voice_agent/kommo.py`** — 2 novos métodos: `get_chat_id_for_lead(lead_id)` (GET /api/v4/chats?entity_type=leads) + `get_chat_messages_raw(chat_id, limit=50)` (GET /api/v4/chats/{chat_id}/messages). Field 1260160 `url_da_conversa` adicionado ao `id_to_label`.
-
-2. **`voice_agent/historico_conversa.py`** — `extrair_chat_id_da_url(url)` (regex `/chats/(\d+)` na URL DA CONVERSA) + `montar_bloco_historico_chat(messages, max_msgs=30)` (formata com `[ATENDENTE HH:MM]` / `[PACIENTE HH:MM]`).
-
-3. **`voice_agent/pipeline.py`** — seção 2f pré-carrega histórico ANTES de `responder.reply()`, injeta em `caller_context["historico_chat_msgs"]`. Fallback: se URL não tem `/chats/`, chama `get_chat_id_for_lead()`.
-
-4. **`voice_agent/responder.py`** — prioridade: C-58 (6h notas Kommo) > Etapa 2 (Chats API completo, sem janela) > Etapa 1 (MENS HUMANO last msg).
-
-**Pytest:** `test_bug_c72_mens_humano.py` — 42/42 verde. Cobre URL parsing, block formatting, pipeline injection, cenário Ana Beatriz (gap 96h).
-
-**Lição arquitetural CRÍTICA:**
-- **Janela de tempo fixa em contexto de retorno é design frágil.** Gap longo (>6h) = Lia esquece quem é o paciente. Solução: Chats API retorna histórico COMPLETO sem janela — cobre 96h, 1 semana, 1 mês.
-- **`chat_id` vem de 2 caminhos**: campo URL DA CONVERSA (1260160) via regex → mais rápido. `GET /api/v4/chats?entity_type=leads` como fallback.
-- **Prioridade importa:** C-58 (janela 6h baseada em notas) tem contexto mais rico e recente → prioridade #1. Chats API é supplemental, não substituto.
-
-### 0. (26/07/2026) Bug C-71 — Unidade defasada no ctx causa loop infinito com C-31b (lead 22557778 Adriana)
-
-**Origem:** lead 22557778 Adriana. Paciente pediu "03/08/2026" (segunda-feira = Karla Asa Norte). `ctx.unidade = "Águas Claras"` (defasado de sessão anterior). LLM gerava oferta correta (Asa Norte + segunda); filtro C-31b bloqueava ("Karla não atende Águas Claras às segundas"); Lia retornava "Qual turno?"; paciente respondia "manhã"; mesmo ciclo indefinidamente.
-
-**Causa raiz:** `_viola_oferta_em_dia_nao_atendido` comparava o dia da oferta com `ctx.known['unidade']` sem verificar se o ctx estava defasado. A unidade CORRETA estava no próprio texto gerado pelo LLM, mas o filtro usava o campo stale.
-
-**Fix em 4 camadas (`responder.py` + `pipeline.py`):**
-
-1. **`_inferir_unidade_por_dia(medico, weekday)`** — lê `calendar_atendimento.json`, retorna a unidade ÚNICA onde o médico atende naquele dia. `None` se ambíguo ou folga.
-2. **Guarda 1 (C-31b)** — se LLM escreveu a unidade correta no texto (baseado em `_inferir_unidade_por_dia`), cancela o bloqueio E atualiza `ctx.known['unidade']`.
-3. **Guarda 2 (anti-loop)** — se última msg da Lia foi "Qual turno?" E user_text contém "manhã"/"tarde" → NÃO repete o mesmo fallback. Quebra o ciclo.
-4. **Inferência proativa no `pipeline.py`** — quando janela é dia único, infere a unidade pelo weekday ANTES de consultar Medware → Medware recebe unidade correta desde o início.
-
-**Pytest:** `test_bug_c71_unidade_stale_loop.py` — 22/22 verde.
-
-**Lição arquitetural CRÍTICA:**
-- **`ctx.known['unidade']` é stale por design** — persiste de sessão anterior. Nunca usar como "verdade" quando o LLM fez dedução determinística (dia → unidade via `calendar_atendimento.json`).
-- **Filtros de defesa não devem usar ctx stale**. Quando LLM e ctx contradizem, preferir LLM quando a dedução é determinística.
-- **Loop infinito = filtro sem condição de saída.** Toda defesa precisa de escape: Guarda 2 detecta que a última resposta da Lia foi o próprio fallback e o paciente já respondeu.
 
 ### 0. (21/07/2026) Bug C-64 — Loop circular: fallbacks C-31/C-54 contêm frases stall que C-60 deveria bloquear
 
