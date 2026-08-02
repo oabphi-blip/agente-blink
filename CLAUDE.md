@@ -213,6 +213,34 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (02/08/2026) Bug C-82 — Urgência priority detectada pelo C-81 mas NUNCA chegava ao LLM (3 conflitos arquiteturais)
+
+**Origem:** auditoria arquitetural pós-C-81. O classificador C-81 detectava corretamente urgência "priority" (olho inchado, remela, vermelho) e injetava `urgency_level=priority` + `skip_convenio=True` em `ctx.known`. Porém o LLM continuava executando triagem normal de convênio — a detecção existia, o path não.
+
+**3 conflitos simultâneos (todos bloqueantes):**
+
+1. **`responder.py::_caller_context_block()` nunca lia `urgency_level`** — flags injetados pelo C-81 ficavam em `ctx.known` mas o system prompt montado para o LLM não tinha nenhum bloco de urgência. LLM recebia prompt normal de 120K chars sem nenhuma instrução de urgência.
+
+2. **Checklist gate bloqueava oferta de encaixe** — `voice_agent/checklist_dados_minimos.py` exigia convênio definido antes de apresentar slots. Com `skip_convenio=True` no ctx, o gate deveria ser bypassado, mas não havia lógica para isso.
+
+3. **FSM sem atalho TRIAGEM→AGENDA para urgência** — `inferir_estado_inicial()` ignorava `urgency_level`. Lead priority com slots disponíveis ainda começava em TRIAGEM, que proíbe oferta de slot. FSM vencia a instrução de urgência.
+
+**Fix em 3 arquivos (commit C-82):**
+
+1. **`voice_agent/responder.py::_caller_context_block()`** — novo bloco `urgency_block`: quando `known["urgency_level"] == "priority"`, injeta bloco `🚨 URGÊNCIA PRIORITÁRIA — MODO ENCAIXE IMEDIATO` com 5 regras (pula convênio, pula turno, oferta imediata, escala se sem slots, coleta dados depois).
+
+2. **`voice_agent/responder.py` (checklist gate linha 614)** — adiciona condição `and not _skip_convenio_c82` ao gate: quando `known["skip_convenio"] = True`, bypassa coleta de convênio e vai direto para agenda.
+
+3. **`voice_agent/fsm_conversa.py::inferir_estado_inicial()`** — novo atalho: `urgency_level == "priority"` AND `caller_context["agenda"]` populado → retorna `EstadoConversa.AGENDA` diretamente. Funciona tanto para leads novos (`found=False`) quanto existentes.
+
+**Pytest:** `tests/test_bug_c82_urgency_llm_path.py` — 23/23 verde. 126/126 combinado (C-80 + C-81 + C-82).
+**Push:** `PUSH_C82_URGENCY_LLM_PATH.command`
+
+**Lição arquitetural CRÍTICA:**
+- **Detectar ≠ agir.** C-81 detectava urgência e injetava flags. C-82 é a ponte entre detecção e ação. Sem C-82, a detecção era uma no-op. Padrão: sempre rastrear cada flag injetado em ctx até o lugar onde ele é CONSUMIDO. Se ninguém consome, a detecção não existe.
+- **Auditoria de flags não consumidos deve ser tarefa recorrente.** Qualquer flag injetado em `ctx.known` que não tem grep em `responder.py` ou `fsm_conversa.py` é suspeito.
+- **System prompt assembly é o ponto de integração.** A cola entre classificação (C-81) e comportamento LLM é o `_caller_context_block()`. Qualquer novo módulo que altera decisão de roteamento DEVE injetar bloco no system prompt via essa função.
+
 ### 0. (02/08/2026) Bug C-81 — Pipeline monolítico: Isabella teve olhos inchados + remelando e recebeu triagem de convênio em vez de encaixe urgente
 
 **Origem:** lead 22335902 Isabella — "olho do meu filho está inchado e remelando desde ontem". Lia foi para triagem normal (convênio, dados) em vez de oferecer encaixe urgente imediatamente.

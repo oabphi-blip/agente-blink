@@ -611,7 +611,8 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
     pre_agenda_block = ""
     checklist = ctx.get("checklist_dados_minimos") if isinstance(ctx, dict) else None
     _tem_slots_c73 = bool((ctx or {}).get("agenda"))
-    if checklist and not checklist.get("pronto_para_oferecer_slot", True) and not _tem_slots_c73:
+    _skip_convenio_c82 = bool(known.get("skip_convenio"))  # Bug C-82: urgência pula checklist
+    if checklist and not checklist.get("pronto_para_oferecer_slot", True) and not _tem_slots_c73 and not _skip_convenio_c82:
         try:
             from voice_agent.checklist_dados_minimos import (
                 ChecklistResultado,
@@ -661,6 +662,46 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
             "\n----------------------------------------------------------------"
         )
 
+    # === Bug C-82 — Bloco de urgência injetado pelo classificador C-81 ===
+    # C-81 detecta urgência por regex ANTES do LLM e injeta urgency_level +
+    # skip_convenio em ctx.known. Sem esse bloco, o LLM nunca recebe a
+    # instrução de urgência e segue triagem normal (Bug C-81 causa raiz Fix 1).
+    urgency_block = ""
+    _urgency = known.get("urgency_level")
+    if _urgency in ("priority", "critical"):
+        if _urgency == "priority":
+            urgency_block = (
+                "\n\n================================================================"
+                "\n🚨 URGÊNCIA PRIORITÁRIA — MODO ENCAIXE IMEDIATO"
+                "\n================================================================"
+                "\nO paciente descreveu sintoma OFTÁLMICO URGENTE detectado pelo"
+                "\nclassificador C-81 (olho inchado, vermelho, remela, conjuntivite,"
+                "\ndor, ardor, fotofobia ou necessidade de atendimento hoje/urgente)."
+                "\n"
+                "\nREGRAS OBRIGATÓRIAS (NÃO NEGOCIÁVEIS):"
+                "\n  1. PULE coleta de convênio — não pergunte 'tem convênio?'."
+                "\n  2. PULE pergunta de turno e período antes de ofertar."
+                "\n  3. OFEREÇA ENCAIXE IMEDIATO — os 2 slots mais próximos disponíveis."
+                "\n  4. Se não houver slots na agenda abaixo, escale para humano AGORA."
+                "\n  5. Somente APÓS o paciente escolher o slot, colete dados para gravar."
+                "\n"
+                "\nFRASE INICIAL SUGERIDA (adaptar ao contexto):"
+                '\n  "Entendi — sintoma que precisa de atenção rápida. Já verificando'
+                ' encaixe urgente... Tenho disponibilidade [SLOT 1] ou [SLOT 2].'
+                ' Qual prefere?"'
+                "\n================================================================"
+            )
+        else:  # critical — pipeline retorna early normalmente, mas belt+suspenders
+            urgency_block = (
+                "\n\n================================================================"
+                "\n🚨 URGÊNCIA CRÍTICA — EMERGÊNCIA OFTÁLMICA"
+                "\n================================================================"
+                "\nTrauma ocular, perda de visão súbita ou corpo estranho detectados."
+                "\nORIENTE: Pronto-socorro imediatamente + SAMU 192."
+                "\nNÃO ofereça agendamento eletivo — isso é emergência médica."
+                "\n================================================================"
+            )
+
     return (
         "\n\n================================================================"
         "\nONBOARDING — CONTATO JÁ CONHECIDO PELO CRM"
@@ -670,6 +711,7 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
         f"\n{dados}"
         f"{alerta}"
         f"{trava_medico}"
+        f"{urgency_block}"
         f"{saudacao_sugerida_block}"
         "\n"
         "\nREGRA: É PROIBIDO reperguntar qualquer dado já listado acima. Trate-os"

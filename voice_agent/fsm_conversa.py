@@ -152,10 +152,19 @@ def inferir_estado_inicial(
       - default → TRIAGEM
     """
     if not caller_context or not caller_context.get("found"):
+        # Bug C-82: novo lead com urgência priority vai direto pra AGENDA se há slots
+        _known_new = (caller_context or {}).get("known") or {} if caller_context else {}
+        if _known_new.get("urgency_level") == "priority" and caller_context and caller_context.get("agenda"):
+            return EstadoConversa.AGENDA
         return EstadoConversa.TRIAGEM
 
     if caller_context.get("ja_agendado"):
         return EstadoConversa.POS_GRAVACAO
+
+    # Bug C-82: urgência priority pula triagem/dados/convenio — vai direto pra AGENDA
+    _known_c82 = (caller_context.get("known") or {})
+    if _known_c82.get("urgency_level") == "priority" and caller_context.get("agenda"):
+        return EstadoConversa.AGENDA
 
     status_id = caller_context.get("status_id")
     if status_id in {101507507, 101109455, 106653499}:  # AGENDADO/CONFIRMAR/CONFIRMADO
