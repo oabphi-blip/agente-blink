@@ -471,6 +471,93 @@ class VoicePipeline:
                     articles_used=[],
                 )
 
+        # === BUG C-81 — Classificador de intenção pré-LLM (02/08/2026) ===
+        # Caso Isabella (lead 22335902): "olhos inchados e remelando" →
+        # Lia fez triagem normal de convênio em vez de oferecer encaixe urgente.
+        # Causa raiz: pipeline monolítico não distinguia urgência antes do LLM.
+        # Fix: classificação determinística por regex ANTES do Medware lookup.
+        # Benefícios:
+        #   1. Urgência: oferta de encaixe + alerta humano sem esperar LLM
+        #   2. Pré-extração: unidade/n_patients/day_pref/turno injetados em
+        #      ctx.known → Medware já recebe parâmetros corretos → menos perguntas
+        #   3. Zero custo de API (apenas regex, sem Haiku/Sonnet)
+        # Toggle: INTENT_CLASSIFIER_ENABLED=0 desliga (default ON).
+        _intent_result = None
+        import os as _os_c81  # noqa: PLC0415
+        if (
+            _os_c81.environ.get("INTENT_CLASSIFIER_ENABLED", "1") not in ("0", "false", "no", "off")
+            and caller_context
+            and user_text
+        ):
+            try:
+                from voice_agent.intent_classifier import (
+                    classify_intent as _classify_intent,
+                    gerar_msg_urgencia as _gerar_msg_urgencia,
+                    injetar_pre_slots as _injetar_pre_slots,
+                )
+                _intent_result = _classify_intent(
+                    user_text,
+                    caller_context=caller_context,
+                )
+                # Injeta pré-slots em ctx.known ANTES do Medware lookup
+                _injetar_pre_slots(caller_context, _intent_result)
+
+                # Urgência CRÍTICA → resposta canônica + escalar + sem LLM
+                if _intent_result.escalate_human:
+                    _lid_c81 = caller_context.get("lead_id")
+                    _known_c81 = caller_context.get("known") or {}
+                    _nome_c81 = (
+                        (_known_c81.get("nome_contato") or "").split()[0]
+                        if _known_c81.get("nome_contato") else ""
+                    )
+                    _msg_c81 = _gerar_msg_urgencia(_intent_result, _nome_c81)
+                    log.error(
+                        "[C-81 CRITICAL] urgência crítica detectada. lead=%s user=%r",
+                        _lid_c81, user_text[:100],
+                    )
+                    if reply_to_number and _msg_c81:
+                        try:
+                            self.evolution.send_text(
+                                number=reply_to_number,
+                                text=_msg_c81,
+                                quoted_message_id=quoted_message_id,
+                            )
+                        except Exception as _e_c81:  # noqa: BLE001
+                            log.warning("[C-81] envio evolution falhou: %s", _e_c81)
+                    if _lid_c81:
+                        try:
+                            _nota_c81 = (
+                                f"🚨 [LIA C-81 CRÍTICO {__import__('datetime').datetime.now().strftime('%H:%M %d/%m')}] "
+                                f"Emergência ocular detectada. Lead encaminhado URGENTE. "
+                                f"Razão: {_intent_result.reasoning[:200]}. "
+                                f"Mensagem: \"{user_text[:200]}\""
+                            )
+                            self.kommo.add_note(_lid_c81, _nota_c81)
+                        except Exception:  # noqa: BLE001
+                            pass
+                        try:
+                            self.kommo.update_lead_status(_lid_c81, 106563343)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    return PipelineResult(
+                        transcript=user_text,
+                        answer=_msg_c81,
+                        sent=bool(reply_to_number and _msg_c81),
+                        model_used="c81-critical-urgency",
+                        articles_used=[],
+                    )
+
+                # Urgência PRIORITÁRIA → flag em ctx para responder adaptar o prompt
+                # (não retorna ainda — deixa LLM ofertar encaixe com contexto certo)
+                if _intent_result.urgency_level == "priority":
+                    log.warning(
+                        "[C-81 PRIORITY] urgência prioritária. lead=%s reason=%r",
+                        caller_context.get("lead_id"), _intent_result.reasoning,
+                    )
+
+            except Exception as _e_c81_outer:  # noqa: BLE001
+                log.warning("[C-81] classificador falhou (fail-open): %s", _e_c81_outer)
+
         # 2d) Agenda Medware: busca horários reais para o agente OFERECER.
         # ANTES: só consultava se caller_context.known.medico estava
         # preenchido. Resultado: lead novo (paciente recém-chegado, médico

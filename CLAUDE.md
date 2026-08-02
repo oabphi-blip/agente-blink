@@ -213,6 +213,41 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (02/08/2026) Bug C-81 — Pipeline monolítico: Isabella teve olhos inchados + remelando e recebeu triagem de convênio em vez de encaixe urgente
+
+**Origem:** lead 22335902 Isabella — "olho do meu filho está inchado e remelando desde ontem". Lia foi para triagem normal (convênio, dados) em vez de oferecer encaixe urgente imediatamente.
+
+**Causa raiz — prompt de 120K chars para TUDO:** pipeline carregava `_MASTER_INSTRUCTION.md` completo para toda mensagem, sem distinguir urgência antes do LLM. Resultado: casos prioritários como conjuntivite/olho vermelho/remela esperavam o mesmo fluxo de um agendamento de rotina.
+
+**Fix — `voice_agent/intent_classifier.py` (novo módulo, Zero custo API):**
+
+1. **Classificação determinística por regex** ANTES do Medware lookup (pipeline.py ~linha 474):
+   - `critical`: perda visão / trauma / bateu no olho / perfuração / descolamento → escala humano imediato + PS
+   - `priority`: inchado / remela / vermelho / ardor / dor / conjuntivite / urgente → encaixe + skip_convenio
+   - `routine`: fluxo normal
+
+2. **Pré-extração de slots da 1ª mensagem** → injetado em `ctx.known` ANTES do Medware:
+   - `unidade` ("Asa Norte" / "Águas Claras") — reduz 1 pergunta
+   - `n_patients` ("2 filhos", "nós dois") — reduz 1 pergunta
+   - `day_pref` ("segunda", "amanhã", "semana que vem") — reduz 1 pergunta
+   - `turno` ("manhã" / "tarde") — reduz 1 pergunta
+   - `medico` (Karla / Fabrício mencionado explicitamente) — reduz 1 pergunta
+   **Efeito:** fluxo que precisava de 4-5 turnos de coleta cai para 0-2.
+
+3. **Urgência CRÍTICA**: sem LLM, responde canônico ("emergência — vá ao PS + SAMU") + move para ATENDIMENTO HUMANO + nota Kommo.
+4. **Urgência PRIORITÁRIA**: flag `urgency_level=priority` + `skip_convenio=True` injetados em ctx → Lia salta coleta de convênio e vai direto para encaixe.
+
+**Toggle**: `INTENT_CLASSIFIER_ENABLED=0` desliga (default ON). **Fail-open**: se classificador falhar, pipeline continua normalmente.
+
+**Pytest:** `tests/test_intent_classifier.py` — 70/70 verde. Suites chave C-80 + master regressão: 138/138.
+**Push:** `PUSH_C81_INTENT_CLASSIFIER.command`
+
+**Lição arquitetural CRÍTICA:**
+- **Prompt monolítico 120K chars = cegueira para urgência.** Solução não é mais filtro reativo — é classificação upfront que altera o caminho antes do LLM.
+- **Regex é mais confiável que LLM para detecção de urgência.** Zero custo, zero alucinação, zero latência. Haiku/Sonnet para urgência é pior — pode dizer "não é urgente" por contexto.
+- **Pré-extração em toda 1ª mensagem.** "Quero consultar na Asa Norte segunda de manhã" já dá unidade + dia + turno. Perguntar de novo é fricção desnecessária.
+- **Padrão estabelecido:** classificar → sub-caminho → prompt focado. Próximos candidatos: FAQ (valor/local/convênio) → resposta determinística sem Medware, cancelamento → C-68 direto.
+
 ### 0. (02/08/2026) Bug C-80 — Lia ofertava slots já ocupados por race-condition + re-ofertava mesmo slot ao mesmo paciente
 
 **Origem:** Fábio 02/08/2026: "já erro ao passar horários errados, o foco agora é verificar como blindar o agente, para não passar horários equivocados. O que falta para apresentar 100% de forma correta a agenda?"
