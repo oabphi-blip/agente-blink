@@ -708,3 +708,74 @@ def horarios_livres_dia(
             e, mn, un, data_iso,
         )
         return []
+
+
+def slot_ainda_disponivel_sql(
+    medico_nome: str,
+    unidade_nome: str,
+    data_iso: str,
+    hora: str,
+    dias_alternativos: int = 10,
+) -> tuple[bool, list[dict]]:
+    """Re-verifica em tempo real se slot ainda está livre via SQL (anti race-condition).
+
+    Problema: Lia consulta Medware → oferta slot → paciente demora horas → outro
+    agendamento ocupa o slot → Lia tentava gravar slot inexistente, causando
+    agendamento em horário ocupado (Bug 02/08/2026, leads 24400924 Danielle e outros).
+
+    Solução: antes de gravar, consulta horarios_livres_dia para a data específica
+    e confirma se a hora ainda aparece na lista. Se não, busca alternativas.
+
+    Args:
+        medico_nome: nome do médico (ex: "Karla", "Dra. Karla Delalíbera").
+        unidade_nome: nome da unidade (ex: "Asa Norte", "Águas Claras").
+        data_iso: data no formato 'YYYY-MM-DD'.
+        hora: hora no formato 'HH:MM'.
+        dias_alternativos: quantos dias buscar alternativas se slot ocupado (default 10).
+
+    Returns:
+        (True, []) — slot disponível, pode gravar.
+        (False, alternativas[:4]) — slot ocupado, lista com próximos disponíveis
+            [{data_iso, data_br, dia_semana, hora}].
+
+    Fail-open: se SQL falhar, assume disponível para não bloquear conversas.
+    """
+    from datetime import date as _date, timedelta as _td
+
+    hora_norm = hora[:5]
+
+    # 1. Verificar se o slot específico ainda existe
+    horas_livres = horarios_livres_dia(medico_nome, unidade_nome, data_iso)
+    if hora_norm in horas_livres:
+        return True, []
+
+    log.warning(
+        "[SLOT-CHECK-SQL] OCUPADO: medico=%r unidade=%r data=%s hora=%s",
+        medico_nome, unidade_nome, data_iso, hora_norm,
+    )
+
+    # 2. Slot ocupado — buscar alternativas nos próximos N dias
+    _DIAS_PT = [
+        "segunda-feira", "terça-feira", "quarta-feira",
+        "quinta-feira", "sexta-feira", "sábado", "domingo",
+    ]
+    alternativas: list[dict] = []
+    try:
+        data_inicio = _date.fromisoformat(data_iso)
+        for offset in range(dias_alternativos):
+            dia = data_inicio + _td(days=offset)
+            dia_iso = dia.isoformat()
+            horas = horarios_livres_dia(medico_nome, unidade_nome, dia_iso)
+            for h in horas:
+                alternativas.append({
+                    "data_iso": dia_iso,
+                    "data_br": dia.strftime("%d/%m/%Y"),
+                    "dia_semana": _DIAS_PT[dia.weekday()],
+                    "hora": h,
+                })
+            if len(alternativas) >= 4:
+                break
+    except Exception as exc:
+        log.warning("[SLOT-CHECK-SQL] busca alternativas falhou: %s", exc)
+
+    return False, alternativas[:4]

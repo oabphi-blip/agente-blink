@@ -213,6 +213,34 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (02/08/2026) Bug C-80 — Lia ofertava slots já ocupados por race-condition + re-ofertava mesmo slot ao mesmo paciente
+
+**Origem:** Fábio 02/08/2026: "já erro ao passar horários errados, o foco agora é verificar como blindar o agente, para não passar horários equivocados. O que falta para apresentar 100% de forma correta a agenda?"
+
+**Dois problemas simultâneos resolvidos:**
+
+**C-80a — Race-condition ao gravar:** Lia consulta Medware em T, oferece slot ao paciente, paciente demora horas para confirmar. Entre T e T+N, outro agendamento ocupa o slot. Lia tentava gravar slot inexistente → Medware rejeitava ou gravava horário errado.
+
+**Fix C-80a em 3 arquivos:**
+1. `medware.py::slot_ainda_disponivel()` — SQL-first quando `MEDWARE_AGENDA_SQL=1` (padrão ON) + `medico_nome`/`unidade_nome` fornecidos; fallback REST
+2. `medware_sql.py::slot_ainda_disponivel_sql()` — usa `horarios_livres_dia()` já existente + busca alternativas nos próximos 10 dias. Fix: IndentationError linha 782 (stray `return []`)
+3. `tools_lia.py::handle_gravar_agendamento_medware` — passa `medico_nome` + `unidade_nome` para ativar caminho SQL. Re-valida slot ANTES de chamar `criar_agendamento()`
+
+**C-80b — Re-oferta do mesmo slot (regra de escassez):** Lia re-apresentava o mesmo horário ao mesmo paciente em turnos sucessivos. Novo módulo `voice_agent/slot_rotation.py`:
+- Slot ofertado → `blink:slots_oferecidos:{lead_id}` (Redis SET, TTL 24h) + timestamp (TTL 5 min)
+- 2ª+ rodada: Lia NUNCA re-oferta mesmo slot, mesmo que ainda esteja vago. Sempre apresenta slot diferente + prefixo de escassez ("os horários anteriores foram preenchidos — agenda muito disputada")
+- Após 3 rodadas sem confirmação → `gerar_msg_escalar_humano()` + flag `blink:slot_escalar:{lead_id}`
+- `handle_oferecer_slot` integra: filtra slots propostos pelo LLM, detecta re-proposta, busca novos da agenda automaticamente
+
+**Pytest:** `tests/test_bug_c80_slot_rotation.py` — 33/33 verde.
+**Push:** `PUSH_C80_SLOT_ROTATION.command`
+
+**Lição arquitetural CRÍTICA:**
+- **Contexto de agenda é stale por definição.** `ctx.agenda` é consultado quando a conversa começa. Até a confirmação, horas se passam. A única defesa é re-consultar em tempo real ANTES de gravar. Nunca confiar no cache.
+- **Princípio da escassez melhora conversão.** Comunicar "agenda dinâmica, horários preenchidos rapidamente" cria urgência real e honesta (a agenda de fato muda). Não é manipulação — é transparência sobre o que acontece com slots populares.
+- **Nunca re-ofertar o mesmo slot ao mesmo lead** = regra de UX fundamental. O paciente que não confirmou em 5 min viu o slot "desaparecer" — isso comunica valor e cria urgência pra próxima decisão.
+- **Fallback fail-open.** Se Redis cair, slot_rotation retorna slots sem filtro. Se Medware cair na re-validação, assume slot disponível e prossegue. Downtime do infra nunca bloqueia conversa.
+
 ### 0. (01/08/2026) Bug C-78 — FAQ "está atendendo hoje?" causou loop stall via sábado sem agenda (lead 23456132)
 
 **Origem:** lead 23456132 João (8-REALIZADO CONSULTA), sábado 02/08/2026. Paciente perguntou "A Dra Karla está atendendo hj?". Pipeline foi ao Medware → retornou vazio (sábado = sem atendimento) → `ctx.agenda=[]` → filtro C-30 pulado (`has_agenda=False`) → filtro C-30A disparou "Medware instável" (ERRADO — Medware estava UP, o problema era o calendário) → LLM entrou em loop stall 3x: "reconferir os horários exatos com a agenda do Medware pra te passar as opções corretas".

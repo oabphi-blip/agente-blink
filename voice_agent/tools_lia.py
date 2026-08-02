@@ -267,7 +267,13 @@ def handle_oferecer_slot(
     caller_context: Optional[dict],
     redis_client=None,
 ) -> ResultadoTool:
-    """Valida slots oferecidos contra AGENDA REAL + grava oferta em Redis."""
+    """Valida slots + aplica rotação de escassez (C-80b, 02/08/2026).
+
+    Regra:
+    - Slot ofertado nunca é re-ofertado ao mesmo lead (janela 5 min de escassez).
+    - Após 3 rodadas sem confirmação → escalação para humano.
+    - Mensagem comunica dinamismo da agenda ("horários muito disputados").
+    """
     slots = inputs.get("slots") or []
     msg = (inputs.get("mensagem_humana") or "").strip()
     if not slots:
@@ -277,7 +283,74 @@ def handle_oferecer_slot(
             tool_name="oferecer_slot",
         )
 
-    # Validar slots contra agenda real no ctx
+    lead_id = str((caller_context or {}).get("lead_id") or "")
+    efeitos: list[str] = []
+    rodada_atual = 0
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # ROTAÇÃO DE ESCASSEZ (C-80b) — anti-repetição de slot
+    # ═══════════════════════════════════════════════════════════════════════
+    if lead_id and redis_client:
+        try:
+            from .slot_rotation import (
+                deve_escalar,
+                filtrar_slots_novos,
+                selecionar_2_slots_novos,
+                contar_rodadas,
+                marcar_slots_oferecidos,
+                incrementar_rodada,
+                marcar_escalar,
+                gerar_prefixo_escassez,
+                gerar_msg_escalar_humano,
+            )
+
+            # 3 rodadas sem confirmação → escalar humano
+            if deve_escalar(redis_client, lead_id):
+                marcar_escalar(redis_client, lead_id)
+                return ResultadoTool(
+                    texto_para_paciente=gerar_msg_escalar_humano(),
+                    erro="escalar_humano:3_rounds_sem_confirmacao",
+                    efeitos_colaterais=["slot_rotation: escalar humano após 3 rodadas"],
+                    tool_name="oferecer_slot",
+                )
+
+            rodada_atual = contar_rodadas(redis_client, lead_id)
+
+            # Filtrar slots propostos pelo LLM — excluir já ofertados
+            slots_filtrados = filtrar_slots_novos(redis_client, lead_id, slots)
+
+            if not slots_filtrados:
+                # LLM re-propôs slots já ofertados — buscar novos da agenda completa
+                agenda_real = (caller_context or {}).get("agenda") or []
+                slots_filtrados = selecionar_2_slots_novos(redis_client, lead_id, agenda_real)
+                if not slots_filtrados:
+                    # Agenda esgotou todos os slots disponíveis para esse lead
+                    marcar_escalar(redis_client, lead_id)
+                    return ResultadoTool(
+                        texto_para_paciente=gerar_msg_escalar_humano(),
+                        erro="escalar_humano:agenda_esgotada_para_lead",
+                        efeitos_colaterais=["slot_rotation: todos slots ofertados, escalar"],
+                        tool_name="oferecer_slot",
+                    )
+                efeitos.append(f"slot_rotation: LLM re-propôs slots usados, selecionei {len(slots_filtrados)} novos da agenda")
+
+            slots = slots_filtrados
+
+            # A partir da 2ª rodada, prefixar mensagem com escassez
+            if rodada_atual > 0:
+                prefixo = gerar_prefixo_escassez(rodada_atual)
+                if prefixo:
+                    msg = prefixo + msg if msg else prefixo.rstrip()
+                efeitos.append(f"slot_rotation: rodada {rodada_atual + 1}, prefixo escassez aplicado")
+
+            marcar_slots_oferecidos(redis_client, lead_id, slots)
+            incrementar_rodada(redis_client, lead_id)
+            efeitos.append(f"slot_rotation: {len(slots)} slots marcados como ofertados")
+
+        except Exception as e:  # noqa: BLE001
+            log.warning("[SLOT-ROT] rotação falhou, continuando sem: %s", e)
+
+    # Validar slots contra agenda real no ctx (invariante duro)
     agenda_real = (caller_context or {}).get("agenda") or []
     if agenda_real:
         agenda_set = {(s.get("data_iso"), s.get("hora")) for s in agenda_real}
@@ -292,8 +365,9 @@ def handle_oferecer_slot(
                 tool_name="oferecer_slot",
             )
 
-    # Grava oferta em Redis pra rastreio
-    efeitos = [f"ofertou {len(slots)} slots"]
+    efeitos.insert(0, f"ofertou {len(slots)} slots")
+
+    # Grava oferta em Redis pra rastreio de conversa
     if redis_client is not None and caller_context:
         try:
             convo_key = caller_context.get("conversation_key", "")
@@ -449,6 +523,57 @@ def handle_gravar_agendamento_medware(
 
             # data_hora "YYYY-MM-DDTHH:MM" — medware.criar_agendamento já aceita esse formato
             data_hora = f"{data_iso}T{hora}" if "T" not in data_iso else data_iso
+
+            # === RE-VALIDAÇÃO EM TEMPO REAL (Anti race-condition 02/08/2026) ===
+            # Problema: Lia consulta Medware → oferta slot → paciente demora horas
+            # → outro agendamento ocupa o slot → Lia tentava gravar slot inexistente.
+            # Fix: verificar se slot ainda existe AGORA antes de gravar.
+            # Fail-open: se Medware falhar na checagem, prossegue (não bloqueia).
+            if hasattr(medware_client, "slot_ainda_disponivel") and data_iso and hora:
+                try:
+                    slot_ok, slots_alt = medware_client.slot_ainda_disponivel(
+                        data_iso=data_iso,
+                        hora=hora,
+                        cod_medico=cod_med or 12080,
+                        cod_unidade=cod_uni or 5,
+                        medico_nome=medico_nome,    # habilita caminho SQL (C-80)
+                        unidade_nome=unidade_nome,  # habilita caminho SQL (C-80)
+                    )
+                    if not slot_ok:
+                        log.warning(
+                            "[GRAVAR-MEDWARE] RACE CONDITION detectada: slot %s %s "
+                            "não existe mais. Alternativas: %d",
+                            data_iso, hora, len(slots_alt),
+                        )
+                        # Formatar até 2 slots alternativos pra re-oferta
+                        emojis = ["1️⃣", "2️⃣"]
+                        linhas_alt = []
+                        for i, s in enumerate(slots_alt[:2]):
+                            d_br = s.get("data_br") or s.get("data_iso", "")
+                            dia_s = s.get("dia_semana", "")
+                            h_s = s.get("hora", "")
+                            if d_br and h_s:
+                                dia_fmt = f"{dia_s} ({d_br})" if dia_s else d_br
+                                linhas_alt.append(f"{emojis[i]} {dia_fmt} às {h_s}")
+                        if linhas_alt:
+                            txt_alt = "\n".join(linhas_alt)
+                            msg_slot_ocupado = (
+                                "Esse horário acabou de ser preenchido por outro paciente. 😔\n\n"
+                                f"Tenho outras opções agora:\n{txt_alt}\n\n"
+                                "Algum desses serve?"
+                            )
+                        else:
+                            msg_slot_ocupado = (
+                                "Esse horário foi preenchido por outro paciente enquanto aguardava "
+                                "sua confirmação. Posso verificar outras datas disponíveis?"
+                            )
+                        return ResultadoTool(
+                            texto_para_paciente=msg_slot_ocupado,
+                            erro=f"slot_ocupado_race_condition:{data_iso}T{hora}",
+                            tool_name="gravar_agendamento_medware",
+                        )
+                except Exception as _e_check:
+                    log.warning("[GRAVAR-MEDWARE] re-validação de slot falhou: %s — prosseguindo", _e_check)
 
             # MODO DRY-RUN (ambiente de teste, 06/06/2026 — task #183 follow-up)
             # Quando LIA_GRAVACAO_DRY_RUN=1, faz TODAS validações + log estruturado

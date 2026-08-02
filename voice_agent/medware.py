@@ -738,6 +738,107 @@ class MedwareClient:
             return data
         return []
 
+    def slot_ainda_disponivel(
+        self,
+        data_iso: str,
+        hora: str,
+        cod_medico: int,
+        cod_unidade: int,
+        medico_nome: str = "",
+        unidade_nome: str = "",
+    ) -> tuple[bool, list[dict]]:
+        """Re-verifica em tempo real se slot ainda está livre (anti race-condition).
+
+        Problema: Lia consulta Medware → oferta slot → paciente demora horas →
+        outro agendamento ocupa o slot → Lia tenta gravar um slot inexistente.
+
+        Solução: antes de gravar, re-consulta o Medware para o dia específico
+        e confirma se a hora ainda aparece como livre.
+
+        Returns:
+            (True, []) — slot disponível, pode gravar
+            (False, alternativas[:4]) — slot ocupado, retorna próximos disponíveis
+
+        Fail-open: se Medware falhar na verificação, assume disponível
+        para não bloquear conversas em downtime do Medware.
+        """
+        # Caminho SQL-first (mais preciso, usa COUNT DISTINCT CODPACIENTE)
+        import os as _os
+        _sql_val = (_os.getenv("MEDWARE_AGENDA_SQL") or "1").lower().strip()
+        if _sql_val not in ("0", "false", "no", "off") and medico_nome and unidade_nome:
+            try:
+                from voice_agent.medware_sql import slot_ainda_disponivel_sql
+                return slot_ainda_disponivel_sql(
+                    medico_nome=medico_nome,
+                    unidade_nome=unidade_nome,
+                    data_iso=data_iso,
+                    hora=hora,
+                )
+            except Exception as _e_sql:
+                import logging as _lg_sql
+                _lg_sql.getLogger(__name__).warning(
+                    "[SLOT-CHECK] SQL falhou (%s) — fallback REST", _e_sql
+                )
+        from datetime import datetime as _dt, timedelta as _td
+        import logging as _lg
+        _log = _lg.getLogger(__name__)
+        try:
+            data_br = _dt.strptime(data_iso, "%Y-%m-%d").strftime("%d/%m/%Y")
+            slots_dia = self.listar_horarios_livres(
+                data_inicio=data_br,
+                data_fim=data_br,
+                cod_medico=cod_medico,
+                cod_unidade=cod_unidade,
+            )
+            horas_livres = {(s.get("hora") or "")[:5] for s in slots_dia}
+            if hora[:5] in horas_livres:
+                return True, []
+
+            # Slot ocupado — buscar alternativas nos próximos 10 dias
+            data_busca = _dt.strptime(data_iso, "%Y-%m-%d")
+            data_fim_busca = data_busca + _td(days=10)
+            alternativos_raw = self.listar_horarios_livres(
+                data_inicio=data_busca.strftime("%d/%m/%Y"),
+                data_fim=data_fim_busca.strftime("%d/%m/%Y"),
+                cod_medico=cod_medico,
+                cod_unidade=cod_unidade,
+            )
+            # Normalizar para formato agente (data_iso, hora, dia_semana)
+            alternativos: list[dict] = []
+            _DIAS_PT = ["segunda-feira","terça-feira","quarta-feira",
+                        "quinta-feira","sexta-feira","sábado","domingo"]
+            seen: set[tuple] = set()
+            for s in alternativos_raw:
+                h = (s.get("hora") or "")[:5]
+                d = s.get("dataHora") or s.get("data") or ""
+                # Tentar extrair YYYY-MM-DD de dataHora
+                try:
+                    d_iso = d[:10] if len(d) >= 10 else ""
+                    if d_iso:
+                        dt_obj = _dt.strptime(d_iso, "%Y-%m-%d")
+                        dia_sem = _DIAS_PT[dt_obj.weekday()]
+                        key = (d_iso, h)
+                        if key not in seen:
+                            seen.add(key)
+                            alternativos.append({
+                                "data_iso": d_iso,
+                                "data_br": dt_obj.strftime("%d/%m/%Y"),
+                                "dia_semana": dia_sem,
+                                "hora": h,
+                            })
+                except Exception:
+                    pass
+            _log.warning(
+                "[SLOT-CHECK] OCUPADO: %s %s. Alternativas encontradas: %d",
+                data_iso, hora, len(alternativos),
+            )
+            return False, alternativos[:4]
+        except Exception as exc:
+            _lg.getLogger(__name__).warning(
+                "[SLOT-CHECK] falhou: %s — fail-open (prossegue gravação)", exc
+            )
+            return True, []  # fail-open: não bloqueia se Medware falhou
+
     def horarios_para_agente(
         self, medico_nome: str, unidade_nome: Optional[str] = None,
         dias: int = 10, max_retries: int = 1,
