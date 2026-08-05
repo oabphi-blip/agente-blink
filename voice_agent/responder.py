@@ -3423,6 +3423,49 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     except Exception as e:  # noqa: BLE001
         log.warning("[C-69] enriquecer known falhou (fail-open): %s", e)
 
+    # === FILTRO C-86c SEMPRE-ON (Bug C-86c 05/08/2026 — valor proativo pré-slot) ===
+    # Quando Lia oferta slot pra paciente PARTICULAR (convênio vazio ou "Não se
+    # aplica") sem mencionar o valor, injeta o valor ANTES da oferta de slot.
+    # Garante que o paciente SEMPRE vê o preço antes de confirmar o horário —
+    # independente de o LLM "lembrar" de mencionar.
+    # Fail-open: qualquer exception → segue sem alteração.
+    try:
+        _known_c86c = (ctx or {}).get("known") or {}
+        _conv_c86c = str(_known_c86c.get("convenio") or "").strip().lower()
+        _PARTICULAR_CONVS = {"", "não se aplica", "nao se aplica", "particular",
+                              "sem convênio", "sem convenio"}
+        _med_c86c = str(_known_c86c.get("medico") or "").lower()
+        # Só atua quando: convênio=particular + médico definido + resposta tem slot
+        # + resposta NÃO menciona valor
+        if (
+            _conv_c86c in _PARTICULAR_CONVS
+            and _med_c86c
+            and re.search(r"1️⃣|2️⃣|\b\d{1,2}[h:]\d{2}\b", text)
+            and not re.search(r"R\$\s*\d{3}", text)
+        ):
+            _motivo_c86c = str(_known_c86c.get("motivo") or "").lower()
+            if "fabricio" in _med_c86c or "fabrício" in _med_c86c:
+                if "catarata" in _motivo_c86c:
+                    _valor_c86c = "💰 Consulta: R$ 445 (Pix) | R$ 470 (cartão 1x)\n\n"
+                else:
+                    _valor_c86c = "💰 Consulta: R$ 611 (Pix) | R$ 670 (cartão 1x)\n\n"
+            elif "karla" in _med_c86c:
+                if any(k in _motivo_c86c for k in ("apv", "processamento visual", "sdp")):
+                    _valor_c86c = "💰 Avaliação: R$ 800 (Pix) | R$ 870 (cartão 1x)\n\n"
+                else:
+                    _valor_c86c = "💰 Consulta: R$ 611 (Pix) | R$ 670 (1x cartão) | R$ 335/parcela (2x)\n\n"
+            else:
+                _valor_c86c = None
+            if _valor_c86c:
+                log.info(
+                    "[FILTRO C-86c] Slot sem valor pra particular — injetando preço. "
+                    "medico=%r motivo=%r",
+                    _med_c86c[:40], _motivo_c86c[:40],
+                )
+                text = _valor_c86c + text
+    except Exception as e:  # noqa: BLE001
+        log.warning("[C-86c] falhou (fail-open): %s", e)
+
     # === FILTRO C-66 SEMPRE-ON (Fábio 21/07/2026, lead 21329281 Letícia) ===
     # Se Lia respondeu texto que contradiz pedido de remarcação/cancelamento
     # (ex: "te espero no dia" quando paciente disse "quero remarcar"), substitui

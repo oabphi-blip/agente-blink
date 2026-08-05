@@ -213,6 +213,38 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (05/08/2026) Bug C-86 — "Valores" standalone ignorado pelo bypass + C-56 "sem exc" (lead 24413976)
+
+**Origem:** lead 24413976 Cecília/Cristina, 04/08/2026. Paciente digitou "Valores" (palavra única) 2 vezes → Lia ignorou e continuou pedindo preferência de slot. Na 3ª mensagem ("Quero saber valores") o `responder.reply()` retornou vazio (sem exception) → C-56 moveu pra 1-ATENDIMENTO HUMANO.
+
+**2 causas simultâneas:**
+
+1. **`_PADROES_PERGUNTA_VALOR` regex incompleto:** exigia frases compostas ("qual o valor", "quanto custa", "quanto pago"). Standalone `"Valores"` ou `"Preço"` não casava com nenhum padrão → `deve_responder_valor()` retornava None → bypass não ativava → LLM (em FSM=AGENDA) interpretou "Valores" como input de agendamento → respondeu "Anotado. Qual dia da semana e turno funcionam melhor pra vocês?".
+
+2. **C-56 "sem exc" = `responder.reply()` retornou answer vazio sem exception:** o loop `for _tent in range(3)` faz `break` após a 1ª chamada bem-sucedida de `responder.reply()` — mesmo com answer vazio. Então o "Claude API falhou 3x" na nota é hardcoded enganoso (foi 1 tentativa). A causa do answer vazio pode ser filtro (C-30/C-60) scrubbing a resposta pra empty string quando o LLM gerou algo que ativou um stall detector.
+
+**Fix em `voice_agent/blindagens_deterministicas.py`:**
+```python
+# ANTES (não capturava standalone):
+r"|(?:tem|qual)\s+desconto"
+r")"
+
+# DEPOIS (Bug C-86 — 3 padrões adicionados):
+r"|(?:tem|qual)\s+desconto"
+r"|\bvalor(?:es)?\b"      # "Valor"/"Valores" standalone
+r"|\bpre[cç]os?\b"        # "Preço"/"Preços" standalone
+r"|\bpagamento\b"         # "formas de pagamento"
+r")"
+```
+
+**Pytest:** `tests/test_bug_c86_valores_standalone.py` — 19/19 verde. Master regressão: 54/54 verde.
+**Push:** `PUSH_C86_VALORES_STANDALONE.command`
+
+**Lição arquitetural CRÍTICA:**
+- **FAQ bypass de valor estava cego para perguntas de 1 palavra.** Em PT-BR informal, "Valores" sozinho é a forma mais comum de perguntar preço — mais comum que "qual o valor". Regex FAQ deve sempre incluir a forma mais curta/direta.
+- **"sem exc" em C-56 ≠ "Claude API falhou".** Quando `responder.reply()` retorna `{"answer": ""}` sem exception, o loop quebra na 1ª tentativa — não 3. O texto "falhou 3x" na nota Kommo é hardcoded e enganoso. A causa real é algum filtro pós-geração scrubbing a resposta pra string vazia.
+- **LLM em FSM=AGENDA não pivota para FAQ espontaneamente.** Quando em AGENDA, o LLM trata qualquer input como preferência de horário. A defesa correta é bypass deterministico ANTES do LLM — não instruções no prompt.
+
 ### 0. (04/08/2026) Bug C-84 — Loop 11x + paciente pediu atendente e Lia ignorou (lead 24413852 Juliana)
 
 **Origem:** lead 24413852 Juliana. Lia perguntou "Qual turno funciona melhor pra você — manhã ou tarde?" 11 vezes seguidas (39 minutos) mesmo depois da paciente responder "Manhã" e "Segunda ou quarta de manhã" múltiplas vezes. Paciente disse "Não sai disso / Meu Deus" e depois "Desisto." + "Falar com atendente".
