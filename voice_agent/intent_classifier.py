@@ -441,3 +441,171 @@ def injetar_pre_slots(caller_context: dict, result: IntentResult) -> dict:
         known["skip_convenio"] = result.skip_convenio
 
     return caller_context
+
+
+# ---------------------------------------------------------------------------
+# Bug C-94 (05/08/2026) — Inferência determinística de especialidade + médico
+# Resolve: agente qualifica médico + unidade ANTES de oferecer slots
+# ---------------------------------------------------------------------------
+
+import datetime as _dt
+
+
+def calcular_idade_anos(data_nasc) -> Optional[int]:
+    """Calcula idade em anos a partir de data de nascimento (int/date/str).
+
+    Aceita:
+    - int: timestamp Unix (formato Kommo)
+    - date/datetime: diretamente
+    - str: ISO "YYYY-MM-DD" ou BR "DD/MM/YYYY" ou "DD/MM/YY"
+    Retorna None se não conseguir calcular.
+    """
+    today = _dt.date.today()
+    try:
+        if isinstance(data_nasc, (int, float)) and data_nasc > 0:
+            dt = _dt.datetime.utcfromtimestamp(float(data_nasc)).date()
+        elif hasattr(data_nasc, "year"):
+            dt = data_nasc if (isinstance(data_nasc, _dt.date) and not isinstance(data_nasc, _dt.datetime)) else (
+                data_nasc.date() if isinstance(data_nasc, _dt.datetime) else data_nasc
+            )
+        elif isinstance(data_nasc, str):
+            s = data_nasc.strip()
+            if re.match(r"^\d{4}-\d{1,2}-\d{1,2}$", s):
+                y, m, d = (int(x) for x in s.split("-"))
+                dt = _dt.date(y, m, d)
+            elif re.match(r"^\d{1,2}/\d{1,2}/\d{2,4}$", s):
+                parts = s.split("/")
+                d2, m2, y2 = int(parts[0]), int(parts[1]), int(parts[2])
+                if y2 < 100:
+                    y2 += 2000
+                dt = _dt.date(y2, m2, d2)
+            else:
+                return None
+        else:
+            return None
+        age = today.year - dt.year - ((today.month, today.day) < (dt.month, dt.day))
+        return age if 0 <= age <= 120 else None
+    except Exception:
+        return None
+
+
+# Padrões de motivo para especialidade/médico
+_MOT_CATARATA = re.compile(r"\bcatarata\b", re.IGNORECASE)
+_MOT_CORNEA = re.compile(
+    r"\bpt[eé]r[íi]gio\b|\bcarne\s+no\s+olho\b|\bc[oó]rnea\b|\bceratocone\b",
+    re.IGNORECASE,
+)
+_MOT_ESTRABISMO = re.compile(
+    r"\bestrabismo\b|\bolho\s+torto\b|\bolhos?\s+desviado[as]?\b",
+    re.IGNORECASE,
+)
+_MOT_APV = re.compile(
+    r"\bsdp\b|\bapv\b|\bprocessamento\s+visual\b|\bprisma\b"
+    r"|\bcansac[eo]\s+(?:ao\s+)?ler\b|\bcansac[eo]\s+(?:com\s+)?tela\b"
+    r"|\bcefalei[a]\b|\bdificuldade\s+de\s+concentra[çc][aã]o\b"
+    r"|\bdificuldade\s+(?:de\s+)?leitura\b|\btontura\b",
+    re.IGNORECASE,
+)
+_MOT_PEDIATRICO = re.compile(
+    r"\bbeb[êe]\b|\bnasceu\b|\brec[eé]m[-\s]?nascid[oa]\b"
+    r"|\bfilh[oa]\s+(?:tem|de)\s+\d+\s+(?:m[eê]s|ano)\b"
+    r"|\b\d+\s+(?:m[eê]ses?|meses)\s+de\s+(?:vida|idade)\b",
+    re.IGNORECASE,
+)
+
+
+def inferir_especialidade(
+    age_years: Optional[int],
+    motivo_text: Optional[str],
+    medico_known: Optional[str] = None,
+) -> Optional[str]:
+    """Infere especialidade Kommo por idade + motivo + médico.
+
+    Retorna um dos 3 valores válidos do FIELD_ESPECIALIDADE:
+    - "Oftalmopediatria"
+    - "Oftalmologia Geral"
+    - "Avaliação do Processamento Visual"
+    - None se catarata/córnea (Fabrício) ou incerteza
+
+    Regras (em ordem de prioridade):
+    1. Fabrício → None (catarata/córnea não têm enum neste campo)
+    2. Idade < 13 → Oftalmopediatria
+    3. APV/SDP/Processamento → APV
+    4. Estrabismo → Oftalmopediatria (Karla faz estrabismo)
+    5. Catarata / Córnea → None (Fabrício, sem enum de especialidade)
+    6. Adulto definido → Oftalmologia Geral
+    7. Incerto → None
+    """
+    motivo = (motivo_text or "").lower()
+    medico = (medico_known or "").lower()
+
+    # Fabrício já definido → não inferir especialidade pelo enum
+    if "fabr" in medico:
+        return None
+
+    # Pediátrico por idade
+    if age_years is not None and age_years < 13:
+        return "Oftalmopediatria"
+
+    # APV/SDP
+    if _MOT_APV.search(motivo):
+        return "Avaliação do Processamento Visual"
+
+    # Estrabismo
+    if _MOT_ESTRABISMO.search(motivo):
+        return "Oftalmopediatria"
+
+    # Catarata ou Córnea → Fabrício, sem enum de especialidade
+    if _MOT_CATARATA.search(motivo) or _MOT_CORNEA.search(motivo):
+        return None
+
+    # Adulto com idade definida
+    if age_years is not None and age_years >= 13:
+        return "Oftalmologia Geral"
+
+    # Pediátrico por motivo (sem data de nascimento)
+    if _MOT_PEDIATRICO.search(motivo):
+        return "Oftalmopediatria"
+
+    return None
+
+
+def inferir_medico(
+    age_years: Optional[int],
+    motivo_text: Optional[str],
+    especialidade: Optional[str] = None,
+) -> Optional[str]:
+    """Infere médico por idade + motivo + especialidade.
+
+    Retorna "Karla" | "Fabrício" | None (incerto → agent vai perguntar).
+
+    Regras:
+    - Catarata / Pterígio / Córnea / Ceratocone → Fabrício
+    - Bebê/criança < 13 → Karla
+    - APV / SDP / Processamento → Karla
+    - Estrabismo → Karla
+    - Default: None (não inferir para não errar)
+    """
+    motivo = (motivo_text or "").lower()
+    esp = (especialidade or "").lower()
+
+    # Por especialidade já inferida
+    if "processamento" in esp or "oftalmopediatria" in esp:
+        return "Karla"
+
+    # Por motivo — Fabrício
+    if _MOT_CATARATA.search(motivo) or _MOT_CORNEA.search(motivo):
+        return "Fabrício"
+
+    # Pediátrico — Karla
+    if age_years is not None and age_years < 13:
+        return "Karla"
+    if _MOT_PEDIATRICO.search(motivo):
+        return "Karla"
+
+    # APV / Estrabismo → Karla
+    if _MOT_APV.search(motivo) or _MOT_ESTRABISMO.search(motivo):
+        return "Karla"
+
+    # Adulto sem sinal claro → não inferir
+    return None

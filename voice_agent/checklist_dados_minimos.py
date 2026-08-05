@@ -93,6 +93,26 @@ def convenio_definido_ok(convenio: Optional[str]) -> bool:
     return True
 
 
+def medico_ok(medico: Optional[str]) -> bool:
+    """Médico precisa estar definido (Karla ou Fabrício)."""
+    if not medico:
+        return False
+    m = str(medico).strip().lower()
+    if m in ("", "selecionar", "selecione", "—", "-"):
+        return False
+    return True
+
+
+def unidade_ok(unidade: Optional[str]) -> bool:
+    """Unidade precisa estar definida (Asa Norte ou Águas Claras)."""
+    if not unidade:
+        return False
+    u = str(unidade).strip().lower()
+    if u in ("", "selecionar", "selecione", "—", "-"):
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Checklist agregado
 # ---------------------------------------------------------------------------
@@ -141,6 +161,8 @@ class ChecklistResultado:
     cpf_ok: bool
     convenio_definido_ok: bool
     cpf_exigido: bool = True  # default True pra retrocompat; verificar_dados_minimos seta corretamente
+    medico_ok: bool = True       # default True pra retrocompat
+    unidade_ok: bool = True      # default True pra retrocompat
     campos_pendentes: tuple[str, ...] = field(default_factory=tuple)
 
     @property
@@ -148,6 +170,10 @@ class ChecklistResultado:
         if not (self.nome_completo_ok and self.data_nascimento_ok and self.convenio_definido_ok):
             return False
         if self.cpf_exigido and not self.cpf_ok:
+            return False
+        if not self.medico_ok:
+            return False
+        if not self.unidade_ok:
             return False
         return True
 
@@ -198,6 +224,12 @@ def verificar_dados_minimos(known: Optional[dict]) -> ChecklistResultado:
     # Convênio definido E NÃO-particular => CPF dispensável (Fábio 02/06/2026).
     cpf_exigido = bool(conv_ok and _eh_particular(conv))
 
+    med = k.get("medico")
+    med_ok = medico_ok(med)
+
+    uni = k.get("unidade")
+    uni_ok = unidade_ok(uni)
+
     # Monta lista de pendentes em ordem de coleta natural
     pendentes = []
     if not nome_ok:
@@ -208,6 +240,10 @@ def verificar_dados_minimos(known: Optional[dict]) -> ChecklistResultado:
         pendentes.append("convênio (particular ou nome da operadora)")
     if cpf_exigido and not c_ok:
         pendentes.append("CPF do paciente (ou do responsável, se for menor)")
+    if not med_ok:
+        pendentes.append("médico (Dra. Karla Delalíbera ou Dr. Fabrício Freitas)")
+    if not uni_ok:
+        pendentes.append("unidade de atendimento (Asa Norte ou Águas Claras)")
 
     return ChecklistResultado(
         nome_completo_ok=nome_ok,
@@ -215,6 +251,8 @@ def verificar_dados_minimos(known: Optional[dict]) -> ChecklistResultado:
         cpf_ok=c_ok,
         convenio_definido_ok=conv_ok,
         cpf_exigido=cpf_exigido,
+        medico_ok=med_ok,
+        unidade_ok=uni_ok,
         campos_pendentes=tuple(pendentes),
     )
 
