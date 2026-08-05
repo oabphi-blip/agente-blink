@@ -238,8 +238,9 @@ class TestValor:
         ctx = _ctx_com_medico_karla_asa_norte(convenio="Saúde Caixa")
         texto = deve_responder_valor(ctx, "quanto custa?")
         assert texto is not None
-        assert "coberta" in texto.lower() or "cobre" in texto.lower()
+        # Bug C-61: não fala mais "coberta" — fala "atendemos o {convênio}"
         assert "Saúde Caixa" in texto or "saúde caixa" in texto.lower()
+        assert "atendem" in texto.lower() or "coberta" in texto.lower() or "cobre" in texto.lower()
 
     def test_particular_karla_valor_correto(self):
         ctx = _ctx_com_medico_karla_asa_norte(convenio="Particular")

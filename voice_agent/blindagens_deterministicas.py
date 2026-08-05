@@ -365,10 +365,38 @@ def deve_orientar_urgencia(ctx: Optional[dict], user_text: str) -> Optional[str]
 
 _PADROES_PERGUNTA_VALOR = re.compile(
     r"("
+    # ── Frases compostas ──────────────────────────────────────────────
     r"(?:quanto|qual|qto)\s+(?:custa|é|e|vale|fica|sai|paga)"
     r"|(?:qual|qto|quanto)\s+(?:o\s+)?(?:valor|pre[cç]o|custo)"
-    r"|quanto\s+(?:eu\s+)?(?:vou\s+)?pag(?:o|ar|amos)"  # relaxado: "eu" opcional
+    r"|quanto\s+(?:eu\s+)?(?:vou\s+)?pag(?:o|ar|amos)"
     r"|(?:tem|qual)\s+desconto"
+    r"|(?:tem|qual|como)\s+(?:[eé]\s+)?(?:o\s+)?pix"   # "tem pix?", "qual o pix?"
+    r"|aceita[m]?\s+cart[aã]o"                          # "aceitam cartão?"
+    r"|aceita[m]?\s+(?:todas?\s+)?as\s+bandeiras"       # "aceita as bandeiras?"
+    r"|cobr[ao]\s+quanto"                               # "cobram quanto?"
+    r"|me\s+passa\s+(?:o\s+)?(?:valor|pre[cç]o|tabela)" # "me passa o valor"
+    r"|qual\s+(?:a\s+)?tabela"                          # "qual a tabela?"
+    # ── Standalone — Bug C-86 ─────────────────────────────────────────
+    r"|\bvalor(?:es)?\b"      # "Valor"/"Valores"
+    r"|\bpre[cç]os?\b"        # "Preço"/"Preços"
+    r"|\bpagamento\b"         # "pagamento"
+    # ── Sinônimos PT-BR informal — Bug C-86b ─────────────────────────
+    r"|\bcusto[s]?\b"         # "custo"/"custos"
+    r"|\binvestimento\b"       # "investimento" (comum em clínicas premium)
+    r"|\bcobr[ao]m?\b"         # "cobra"/"cobro"/"cobram"
+    r"|\btabela\b"             # "tabela" (tabela de preços)
+    r"|\bpromo[cç][aã]o\b"   # "promoção"
+    r"|\bparcela(?:[rs]|d[oa])?\b"  # "parcela/s/r/do/da"
+    r"|\b[àa]\s*vista\b"     # "à vista"/"a vista"
+    r"|\bpix\b"               # "pix" standalone
+    r"|\bcart[aã]o\b"        # "cartão"
+    r"|\bboleto\b"            # "boleto"
+    r"|\bgratuito\b"          # "gratuito?"
+    r"|\bgr[áa]tis\b"        # "grátis?"
+    r"|\bbarato\b"            # "é barato?"
+    r"|\bcaro\b"              # "é caro?"
+    r"|\bform[as]?\s+de\s+pag"      # "forma(s) de pagamento"
+    r"|\bmeio\s+de\s+pagamento\b"   # "meio de pagamento"
     r")",
     re.IGNORECASE,
 )
@@ -381,12 +409,85 @@ _VALORES_CANONICOS = {
 }
 
 
+def _inferir_medico_por_motivo(known: dict) -> str:
+    """Tenta deduzir médico pelo motivo/especialidade/perfil etário do ctx.known.
+
+    Retorna 'karla', 'fabricio' ou '' (não foi possível inferir).
+    Usado quando ctx.known.medico está vazio mas a pergunta de valor chegou.
+    """
+    motivo = str(known.get("motivo") or known.get("especialidade") or "").lower()
+
+    # Pediátrico / crianças → Karla Delalíbera
+    for kw in (
+        "criança", "bebê", "bebe", "pediátri", "pediatri", "infantil",
+        "filho", "filha", "recém-nascido", "recem-nascido",
+    ):
+        if kw in motivo:
+            return "karla"
+
+    # Estrabismo, APV, rotina, óculos → Karla
+    for kw in (
+        "estrabismo", "olho torto", "desvio", "ambliopia", "preguiça",
+        "apv", "processamento visual", "sdp",
+        "rotina", "óculos", "oculos", "grau", "refração", "refracao",
+        "oftalmopediatria",
+    ):
+        if kw in motivo:
+            return "karla"
+
+    # Catarata, córnea, adulto 50+ → Fabrício
+    for kw in (
+        "catarata", "córnea", "cornea", "pterígio", "pterigio",
+        "ceratocone", "cirurgia", "transplante",
+    ):
+        if kw in motivo:
+            return "fabricio"
+
+    # Idade registrada no ctx
+    try:
+        idade = int(str(known.get("idade") or known.get("age") or 0).split()[0])
+        if 0 < idade < 18:
+            return "karla"
+        if idade >= 50:
+            return "fabricio"
+    except (ValueError, TypeError, IndexError):
+        pass
+
+    return ""  # não foi possível inferir — mostrar tabela geral
+
+
+def _resposta_tabela_geral_valores(nome: str) -> str:
+    """Retorna tabela geral de valores (ambos médicos) quando médico não é conhecido.
+
+    Nunca retorna None — SEMPRE responde a pergunta de valor do paciente.
+    """
+    saudacao = f"Olá, {nome}!\n\n" if nome else ""
+    return (
+        f"{saudacao}"
+        "Aqui estão nossos valores para consulta particular:\n\n"
+        "👩‍⚕️ *Dra. Karla Delalíbera*\n"
+        "(Oftalmopediatria, estrabismo, rotina, avaliação do processamento visual)\n"
+        "• 💰 Pix: R$ 611\n"
+        "• 💳 1x Cartão: R$ 670\n"
+        "• 💳 2x Cartão: R$ 335/parcela\n\n"
+        "👨‍⚕️ *Dr. Fabrício Freitas*\n"
+        "(Saúde ocular adulto 50+, catarata, córnea)\n"
+        "• 💰 Pix: R$ 445 (catarata) · R$ 611 (outros)\n"
+        "• 💳 1x Cartão: R$ 470 (catarata) · R$ 670 (outros)\n\n"
+        "Qual médico é o seu atendimento? 😊"
+    )
+
+
 def deve_responder_valor(ctx: Optional[dict], user_text: str) -> Optional[str]:
     """Se paciente perguntou valor, retorna resposta canônica.
 
-    Se convênio aceito no ctx: fala "coberta pelo seu plano".
-    Se particular: fala valor exato da tabela.
-    Se não tem médico definido: retorna None (LLM triaga primeiro).
+    Fluxo:
+      1. ctx.known.medico definido → resposta específica (convênio ou valor exato).
+      2. Sem médico → tenta inferir por motivo/idade → resposta específica.
+      3. Não conseguiu inferir → tabela geral (NUNCA retorna None aqui).
+
+    IMPORTANTE: qualquer pergunta de valor DEVE ser respondida deterministicamente.
+    Retornar None significa jogar para o LLM, que pode ignorar ou inventar valor.
     """
     if not _ativado("BLINDAGEM_VALOR_ATIVADO"):
         return None
@@ -396,12 +497,27 @@ def deve_responder_valor(ctx: Optional[dict], user_text: str) -> Optional[str]:
         return None
 
     known = (ctx or {}).get("known") or {}
-    if not known.get("medico"):
-        return None  # Sem médico, LLM triaga
-
-    medico = _nome_medico_canonico(ctx)
-    convenio = _convenio_str(ctx).lower()
     nome = _nome_paciente(ctx)
+
+    # ── Resolve médico: ctx → inferência por motivo → tabela geral ────
+    medico_raw = (known.get("medico") or "").strip()
+    if not medico_raw:
+        medico_raw = _inferir_medico_por_motivo(known)
+    if not medico_raw:
+        # NUNCA retornar None em pergunta de valor — sempre responder
+        return _resposta_tabela_geral_valores(nome)
+
+    # Garante nome canônico mesmo quando medico_raw veio da inferência
+    # (ex: "karla" → "Dra. Karla Delalíbera")
+    medico = _nome_medico_canonico(ctx)
+    if medico == "a médica":
+        # ctx.known.medico estava vazio; usamos o nome do inferido
+        if "karla" in medico_raw.lower():
+            medico = "Dra. Karla Delalíbera"
+        elif "fabricio" in medico_raw.lower() or "fabrício" in medico_raw.lower():
+            medico = "Dr. Fabrício Freitas"
+
+    convenio = _convenio_str(ctx).lower()
     saudacao = f"{nome}, " if nome else ""
 
     # Convênio aceito → confirma sem falar em cobertura (Bug C-61)
@@ -443,7 +559,8 @@ def deve_responder_valor(ctx: Optional[dict], user_text: str) -> Optional[str]:
             valor_2x = "R$ 335"
             servico = "consulta"
     else:
-        return None  # Médico desconhecido, LLM
+        # Médico não reconhecido (não deve chegar aqui após os fixes acima)
+        return _resposta_tabela_geral_valores(nome)
 
     # C-68 v2 (Fábio 21/07/2026, modelo humano lead Layssa):
     # Copia formato usado pelo atendimento humano — mais claro, mais rico.
