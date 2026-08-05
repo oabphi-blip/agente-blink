@@ -10,8 +10,10 @@ COPY voice_agent /app/voice_agent
 COPY voice_agent/watchdog_promessa.py /app/watchdog_promessa.py
 # CI gate — bloqueia deploy se master regressão falhar (Task #437)
 COPY tests /app/tests
-RUN python -m pytest tests/test_bugs_indexados_regressao_master.py -x -q \
+RUN pip install pytest -q \
+    && python -m pytest tests/test_bugs_indexados_regressao_master.py -x -q \
     && echo "CI gate passed ✓" \
+    && pip uninstall pytest -yq \
     && rm -rf /app/tests
 EXPOSE 8000
 CMD ["uvicorn","voice_agent.webhook:app","--host","0.0.0.0","--port","8000"]
