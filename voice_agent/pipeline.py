@@ -549,11 +549,28 @@ class VoicePipeline:
 
                 # Urgência PRIORITÁRIA → flag em ctx para responder adaptar o prompt
                 # (não retorna ainda — deixa LLM ofertar encaixe com contexto certo)
+                # Task #436: alerta humano paralelo via nota Kommo (C-85)
                 if _intent_result.urgency_level == "priority":
+                    _lid_c81_pr = caller_context.get("lead_id")
                     log.warning(
                         "[C-81 PRIORITY] urgência prioritária. lead=%s reason=%r",
-                        caller_context.get("lead_id"), _intent_result.reasoning,
+                        _lid_c81_pr, _intent_result.reasoning,
                     )
+                    # Alerta visível na timeline Kommo — equipe pode intervir se Lia travar
+                    if _lid_c81_pr and self.kommo is not None:
+                        try:
+                            import datetime as _dt_pr
+                            _nota_pr = (
+                                f"🟡 [LIA C-81 PRIORITY {_dt_pr.datetime.now().strftime('%H:%M %d/%m')}] "
+                                f"Urgência oftálmica detectada — Lia está tentando encaixe imediato. "
+                                f"Verificar se precisa intervenção humana. "
+                                f"Razão: {str(_intent_result.reasoning)[:200]}. "
+                                f"Msg: \"{user_text[:150]}\""
+                            )
+                            self.kommo.add_note(_lid_c81_pr, _nota_pr)
+                            log.info("[C-81 PRIORITY] nota Kommo gravada. lead=%s", _lid_c81_pr)
+                        except Exception as _e_pr:  # noqa: BLE001
+                            log.warning("[C-81 PRIORITY] falha ao gravar nota: %s", _e_pr)
 
             except Exception as _e_c81_outer:  # noqa: BLE001
                 log.warning("[C-81] classificador falhou (fail-open): %s", _e_c81_outer)
