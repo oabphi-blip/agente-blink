@@ -6788,10 +6788,10 @@ async function submit(dryRun) {
     )
 
     if _POLITICA_SIMPLIFICADA:
-        # POLÍTICA NOVA — todas as etapas ATENDE ativas exceto ATENDIMENTO HUMANO.
+        # POLÍTICA NOVA — todas as etapas ATENDE ativas exceto ATENDIMENTO HUMANO
+        # e 0-COMPROMISSO COM DATA (05/08/2026 — Fábio).
         _STATUS_ATIVOS_IA = {
             96441724,   # 0-ETAPA ENTRADA
-            106919911,  # 0-a classificar/EXCLUIR DUPLICADO
             101508307,  # 2.LEADS FRIO
             108749463,  # 2.1 campanha agosto (Bug C-43 Mariana Lopes 22617170, 12/07/2026)
             102560495,  # 3-AGENDAR
@@ -6807,13 +6807,13 @@ async function submit(dryRun) {
         }
         _STATUS_INATIVOS_IA = {
             106563343,  # 1-ATENDIMENTO HUMANO
+            106919911,  # 0-COMPROMISSO COM DATA (05/08/2026 — Fábio)
         }
     else:
         # POLÍTICA ANTIGA (rollback Bug C-42) — desativa também
         # AGENDADO/CONFIRMAR/CONFIRMADO.
         _STATUS_ATIVOS_IA = {
             96441724,   # 0-ETAPA ENTRADA
-            106919911,  # 0-a classificar/EXCLUIR DUPLICADO
             101508307,  # 2.LEADS FRIO
             108749463,  # 2.1 campanha agosto (Bug C-43)
             102560495,  # 3-AGENDAR
@@ -6826,6 +6826,7 @@ async function submit(dryRun) {
         }
         _STATUS_INATIVOS_IA = {
             106563343,  # 1-ATENDIMENTO HUMANO
+            106919911,  # 0-COMPROMISSO COM DATA (05/08/2026 — Fábio)
             101507507,  # 6-AGENDADO (Bug C-42 — rollback)
             101109455,  # 7-CONFIRMAR (Bug C-42 — rollback)
             106653499,  # 8.CONFIRMADO (Bug C-42 — rollback)

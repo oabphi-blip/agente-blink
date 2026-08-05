@@ -28,11 +28,12 @@ from .kommo import FIELD_ATIVADO_IA
 
 log = logging.getLogger(__name__)
 
-# ATUALIZADO 30/06/2026 22:30 (Fábio) — política simplificada:
-# IA desligada APENAS em 1-ATENDIMENTO HUMANO. Revoga Bug C-42 + C-24a.
-# Segurança em runtime é dos filtros ja_agendado + regras prompt.
+# ATUALIZADO 05/08/2026 (Fábio) — IA desligada em ATENDIMENTO HUMANO + COMPROMISSO COM DATA.
+# 0-COMPROMISSO COM DATA (106919911) adicionado — lead com data comprometida
+# não deve ser tocado pela IA.
 ST_AGENT_OFF = frozenset({
     106563343,  # 1-ATENDIMENTO HUMANO — humano assumiu de propósito
+    106919911,  # 0-COMPROMISSO COM DATA — lead com data, IA não interfere
 })
 
 

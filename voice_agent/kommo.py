@@ -379,6 +379,7 @@ FIELD_EXAMES_PACIENTES: dict[int, tuple[int, dict[str, int]]] = {
 # Segurança em runtime é dos filtros ja_agendado (5 camadas) + regras prompt.
 ST_AGENT_OFF = frozenset({
     106563343,  # 1-ATENDIMENTO HUMANO — atendente assumiu de propósito
+    106919911,  # 0-COMPROMISSO COM DATA — lead com data, IA não interfere
 })
 
 # Nomes legíveis das etapas do funil ATENDE (status_id → nome).
