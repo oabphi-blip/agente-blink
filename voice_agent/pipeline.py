@@ -997,6 +997,64 @@ class VoicePipeline:
                 error=f"claude: {e}",
             )
 
+        # 3a-bis) Bug C-84b (04/08/2026 Juliana 24413852) — paciente pediu atendente.
+        # Filtro C-84b em responder.py já substituiu o texto e gravou flag Redis.
+        # Aqui: mover lead pra 1-ATENDIMENTO HUMANO + desativar IA.
+        try:
+            _redis_c84 = getattr(self, "_redis", None)
+            _lid_c84_pipe = (
+                caller_context.get("lead_id") if isinstance(caller_context, dict) else None
+            )
+            if _redis_c84 and _lid_c84_pipe:
+                _flag_c84 = _redis_c84.get(f"blink:c84_pede_atendente:{_lid_c84_pipe}")
+                if _flag_c84:
+                    log.error(
+                        "[C-84b PIPELINE] paciente pediu atendente lead=%s — "
+                        "movendo pra ATENDIMENTO HUMANO + desativando IA",
+                        _lid_c84_pipe,
+                    )
+                    # Limpa o flag imediatamente (evita re-trigger)
+                    _redis_c84.delete(f"blink:c84_pede_atendente:{_lid_c84_pipe}")
+                    if self.kommo is not None:
+                        _status_c84 = (
+                            caller_context.get("status_id")
+                            if isinstance(caller_context, dict) else None
+                        )
+                        _ETAPAS_FINAIS_C84 = {142, 143, 91486864, 106563343}
+                        # (1) Desativar IA
+                        try:
+                            self.kommo.update_lead_fields(
+                                _lid_c84_pipe, {"ativado_ia": "DESATIVADO"}
+                            )
+                        except Exception as _e_c84_ia:  # noqa: BLE001
+                            log.warning("[C-84b] desativar IA falhou: %s", _e_c84_ia)
+                        # (2) Mover pra 1-ATENDIMENTO HUMANO
+                        if _status_c84 and _status_c84 not in _ETAPAS_FINAIS_C84:
+                            try:
+                                self.kommo.update_lead_status(_lid_c84_pipe, 106563343)
+                                log.info(
+                                    "[C-84b] lead %s movido → 1-ATENDIMENTO HUMANO",
+                                    _lid_c84_pipe,
+                                )
+                            except Exception as _e_c84_st:  # noqa: BLE001
+                                log.warning(
+                                    "[C-84b] mover status falhou lead=%s: %s",
+                                    _lid_c84_pipe, _e_c84_st,
+                                )
+                        # (3) Nota Kommo
+                        try:
+                            import datetime as _dt_c84
+                            _nota_c84 = (
+                                f"🤝 [LIA C-84b {_dt_c84.datetime.now().strftime('%H:%M %d/%m')}] "
+                                "Paciente pediu falar com atendente. IA desativada + "
+                                f"lead movido pra ATENDIMENTO HUMANO. Msg: \"{user_text[:200]}\""
+                            )
+                            self.kommo.add_note(_lid_c84_pipe, _nota_c84)
+                        except Exception:  # noqa: BLE001
+                            pass
+        except Exception as _e_c84_pipe:  # noqa: BLE001
+            log.warning("[C-84b PIPELINE] check falhou (fail-open): %s", _e_c84_pipe)
+
         # 4) Envio (se houver destino)
         if not reply_to_number:
             return PipelineResult(

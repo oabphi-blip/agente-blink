@@ -3367,6 +3367,54 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     if not text:
         return text
 
+    # === FILTRO C-84b SEMPRE-ON (Bug C-84 04/08/2026 Juliana 24413852) ===
+    # Paciente pediu atendente explicitamente → escalação IMEDIATA, independente
+    # de qualquer outro filtro ou estado FSM. Lia continuou em loop mesmo após
+    # "Atendente", "Falar com atendente", "Nenhum / Atendente" (4x).
+    # Detecção: user_text contém padrão de pedido de humano →
+    # substituir resposta pela frase canônica de handoff + flag Redis escalação.
+    try:
+        _user_inbound_c84 = str((ctx or {}).get("user_text") or "").strip().lower()
+        _PEDE_ATENDENTE_RE = re.compile(
+            r"\batendente\b|falar\s+com\s+(um\s+)?atendente|"
+            r"quero\s+atendente|chamar\s+atendente|"
+            r"falar\s+com\s+(um\s+)?humano|falar\s+com\s+pessoa|"
+            r"quero\s+falar\s+com\s+algu[eé]m|"
+            r"me\s+passa\s+pra\s+(um\s+)?atendente|"
+            r"\bhumano\b.*\bpor\s+favor\b|\bpor\s+favor\b.*\bhumano\b",
+            re.IGNORECASE,
+        )
+        if _user_inbound_c84 and _PEDE_ATENDENTE_RE.search(_user_inbound_c84):
+            _known_c84 = (ctx or {}).get("known") or {}
+            _nome_c84 = str(
+                _known_c84.get("nome_contato") or _known_c84.get("nome_paciente") or ""
+            ).strip()
+            _saud_c84 = (f"{_nome_c84.split()[0]}, " if _nome_c84 else "")
+            _resp_c84 = (
+                f"{_saud_c84}entendido! Vou passar para um dos nossos atendentes "
+                "agora. Em instantes alguém da Blink responde por aqui. 🤝"
+            )
+            # Grava flag Redis pra pipeline mover lead pra 1-ATENDIMENTO HUMANO
+            try:
+                _lead_c84 = (ctx or {}).get("lead") or {}
+                _lid_c84 = _lead_c84.get("id") or (ctx or {}).get("lead_id")
+                if _lid_c84:
+                    from voice_agent.settings import get_redis
+                    _r_c84 = get_redis()
+                    if _r_c84:
+                        _r_c84.setex(f"blink:c84_pede_atendente:{_lid_c84}", 86400, "1")
+            except Exception:  # noqa: BLE001
+                pass
+            log.error(
+                "[FILTRO C-84b] PACIENTE PEDIU ATENDENTE — user=%r. "
+                "Escalando imediatamente. lead_id=%s",
+                _user_inbound_c84[:60],
+                (ctx or {}).get("lead_id") or ((ctx or {}).get("lead") or {}).get("id"),
+            )
+            return _resp_c84
+    except Exception as e:  # noqa: BLE001
+        log.warning("[C-84b] falhou (fail-open): %s", e)
+
     # === Bug C-69: reconhecer dados informados NESTE turno ===
     # Funde unidade/convênio do inbound em known ANTES dos geradores
     # determinísticos, pra Lia não reperguntar o que acabou de ser dito.
@@ -4073,13 +4121,38 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
         violacao_dia_sem_data = _viola_dia_sem_data_incompativel_unidade(text, ctx)
         if violacao_dia_sem_data:
             dia_men, medico_norm, unidade_norm = violacao_dia_sem_data
-            log.error(
-                "[FILTRO C-54] DIA SEM DATA INCOMPATIVEL UNIDADE — "
-                "texto menciona %r mas ctx tem medico=%s unidade=%s "
-                "(dias permitidos nessa unidade não incluem %r). Texto: %r",
-                dia_men, medico_norm, unidade_norm, dia_men, text[:300],
-            )
-            return _DIA_SEM_DATA_FALLBACK
+            # ── Bug C-84a (04/08/2026 Juliana 24413852) GUARDA C-54 anti-loop ──
+            # Se última msg da Lia já era pergunta de turno E paciente
+            # respondeu "manhã/tarde" na msg ATUAL, NÃO repetir o fallback.
+            # Mesmo padrão do C-71 guarda-2, mas aplicado ao caminho C-54 (sem data).
+            _ultima_lia_c54 = (ctx or {}).get("ultima_msg_outbound") or ""
+            _user_text_c54 = (ctx or {}).get("user_text") or ""
+            _ultima_foi_turno_c54 = bool(re.search(
+                r"turno funciona melhor|manh[aã] ou tarde",
+                _ultima_lia_c54, re.IGNORECASE,
+            ))
+            _user_respondeu_turno_c54 = bool(re.search(
+                r"\b(manh[aã]|tarde)\b",
+                _user_text_c54, re.IGNORECASE,
+            ))
+            if _ultima_foi_turno_c54 and _user_respondeu_turno_c54:
+                log.warning(
+                    "[C-84a guarda-C54] C-54 disparou mas paciente JÁ "
+                    "respondeu turno (%r). Inibindo loop de fallback. "
+                    "ctx.unidade=%r dia_men=%r texto=%r",
+                    _user_text_c54[:40],
+                    (ctx or {}).get("known", {}).get("unidade"),
+                    dia_men, text[:200],
+                )
+                # Deixa o texto passar — melhor oferta imperfeita do que loop eterno
+            else:
+                log.error(
+                    "[FILTRO C-54] DIA SEM DATA INCOMPATIVEL UNIDADE — "
+                    "texto menciona %r mas ctx tem medico=%s unidade=%s "
+                    "(dias permitidos nessa unidade não incluem %r). Texto: %r",
+                    dia_men, medico_norm, unidade_norm, dia_men, text[:300],
+                )
+                return _DIA_SEM_DATA_FALLBACK
     else:
         # Log preventivo: paciente já agendado E texto NÃO parece oferta nova
         # → tratamos como confirmação/referência. Se Lia disse algo errado,

@@ -27,7 +27,7 @@ from typing import Any, Optional
 
 log = logging.getLogger(__name__)
 
-TTL_JANELA_SEG = 300                # 5min (Bug C-68 21/07 Ângela — antes era 3min)
+TTL_JANELA_SEG = 1800               # 30min (Bug C-84 04/08 Juliana — loop durou 39min, TTL 5min resetou o contador 7x)
 LIMITE_LOOP = 2                     # 2 vezes = loop (antes 3; Fábio reclamou repetição 2x)
 CHAVE_PREFIXO = "blink:c62_dedup:"  # chave Redis
 CHAVE_LOOP_FLAG = "blink:c62_loop_detectado:"  # flag Redis pra pipeline

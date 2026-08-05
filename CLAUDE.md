@@ -213,6 +213,38 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (04/08/2026) Bug C-84 — Loop 11x + paciente pediu atendente e Lia ignorou (lead 24413852 Juliana)
+
+**Origem:** lead 24413852 Juliana. Lia perguntou "Qual turno funciona melhor pra você — manhã ou tarde?" 11 vezes seguidas (39 minutos) mesmo depois da paciente responder "Manhã" e "Segunda ou quarta de manhã" múltiplas vezes. Paciente disse "Não sai disso / Meu Deus" e depois "Desisto." + "Falar com atendente".
+
+**3 causas simultâneas (todos bloqueantes):**
+
+1. **TTL dedup anti-loop muito curto (5min):** `dedup_outbound.py::TTL_JANELA_SEG = 300`. Loop durou 39 min → contador Redis resetou 7+ vezes sem nunca acumular ≥ LIMITE_LOOP (2). Resultado: C-62 nunca detectou o loop.
+
+2. **Filtro C-54 sem guarda anti-loop (equivalente ao C-71):** `_viola_dia_sem_data_incompativel_unidade` (C-54) disparava quando paciente dizia dia da semana sem DD/MM. Quando C-54 retornava `_DIA_NAO_ATENDIDO_FALLBACK` = "Qual turno funciona melhor...", e paciente respondia "Manhã", nenhuma guarda impedia C-54 de disparar de novo. O C-71 (Bug C-71 22/07) tinha adicionado guarda equivalente só no C-31b (com DD/MM), não no C-54.
+
+3. **Nenhum filtro detectava inbound "Atendente" / "Falar com atendente":** Filtro C-66 só pegava remarcação/cancelamento. Filtro C-47 bloqueava Lia de DIZER "atendente humano" no outbound — mas não detectava o PACIENTE pedindo atendente no inbound. Resultado: Juliana pediu atendente e Lia continuou normalmente.
+
+**Fix em 3 arquivos:**
+
+1. **`voice_agent/dedup_outbound.py`** — `TTL_JANELA_SEG: 300 → 1800` (30min). Loop de 39min agora cabe dentro de uma janela.
+
+2. **`voice_agent/responder.py` (C-54 block)** — guarda C-84a: quando `_ultima_msg_outbound` contém "turno funciona melhor|manhã ou tarde" AND `user_text` contém "manhã|tarde" → suprime o fallback C-54 (deixa texto passar) em vez de criar loop infinito.
+
+3. **`voice_agent/responder.py` (início de `_scrub_prohibited`)** — novo FILTRO C-84b SEMPRE-ON: detecta inbound do paciente pedindo atendente via regex (`\batendente\b`, `falar\s+com\s+(um\s+)?atendente`, `falar\s+com\s+pessoa`, etc.) → retorna mensagem canônica de handoff + grava flag Redis `blink:c84_pede_atendente:{lead_id}` (TTL 86400).
+
+4. **`voice_agent/pipeline.py` (pós-responder, pré-envio)** — verifica flag `blink:c84_pede_atendente:{lead_id}`: se ativo, move lead pra 1-ATENDIMENTO HUMANO (106563343) + desativa IA + adiciona nota Kommo + limpa o flag.
+
+**Pytest:** `tests/test_bug_c84_loop_escalar_atendente.py` — 126/126 verde (combinado).
+**Push:** `PUSH_C84_LOOP_ESCALAR_ATENDENTE.command`
+
+**Lição arquitetural CRÍTICA:**
+
+- **TTL de dedup precisa ser ≥ duração esperada do loop.** `300s` (5min) era razoável pra loops rápidos (bug Ângela), mas não pra loops que duram 39min com paciente respondendo devagar. Regra: calibrar TTL pela duração do caso extremo real observado, não pelo caso feliz.
+- **Guarda anti-loop precisa existir EM CADA FILTRO que retorna fallback repetível.** C-71 adicionou guarda no C-31b mas esqueceu o C-54 (mesma família de filtro, mesmo tipo de fallback). Regra permanente: ao adicionar guarda em um filtro X, verificar todos os filtros irmãos com o mesmo padrão de fallback.
+- **Inbound do paciente pedindo atendente é sinal de emergência social** — não é informação para processar, é sinal para PARAR e escalar. Nenhum filtro existente pegava isso. C-84b resolve: qualquer "atendente"/"falar com humano" no inbound → handoff imediato, sem processar o turno.
+- **"Vergonha" do agente = escalação proativa.** Fábio perguntou "porque o agente não tem vergonha?". Resposta arquitetural: o agente precisa detectar insatisfação acumulada (loop detectado + paciente pedindo humano) e escalar proativamente — sem esperar que a conversa quebre completamente.
+
 ### 0. (02/08/2026) Bug C-82 — Urgência priority detectada pelo C-81 mas NUNCA chegava ao LLM (3 conflitos arquiteturais)
 
 **Origem:** auditoria arquitetural pós-C-81. O classificador C-81 detectava corretamente urgência "priority" (olho inchado, remela, vermelho) e injetava `urgency_level=priority` + `skip_convenio=True` em `ctx.known`. Porém o LLM continuava executando triagem normal de convênio — a detecção existia, o path não.
