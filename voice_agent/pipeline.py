@@ -207,42 +207,11 @@ class VoicePipeline:
                 log.warning("Onboarding lookup falhou: %s", e)
                 caller_context = None
 
-        # 2b-bis) Bug C-49 (Fábio 02/07/2026 noite, lead 23054210 Laís).
-        # Quando lead sai de 1-ATENDIMENTO HUMANO pra uma etapa ativa
-        # (ex: 6-AGENDADO), o campo ATIVADO IA fica travado em "Desativado"
-        # porque o webhook Kommo Automation não foi configurado em todas
-        # as etapas ainda. Auto-reset inline no pipeline: se o status_id
-        # está em ATIVOS mas o campo diz Desativado, reativa.
-        _STATUS_ATIVOS_IA_PIPELINE = {
-            96441724, 106919911, 101508307, 102560495, 107084255,
-            106184631, 101507507, 101109455, 106653499, 91486864,
-            106157327, 142, 143,
-        }
-        if self.kommo is not None and caller_context:
-            _lid = caller_context.get("lead_id")
-            _st = caller_context.get("status_id")
-            _known = caller_context.get("known") or {}
-            _ativado = (_known.get("ativado_ia") or "").strip().lower()
-            if (
-                _lid
-                and _st
-                and _st in _STATUS_ATIVOS_IA_PIPELINE
-                and _ativado == "desativado"
-            ):
-                try:
-                    self.kommo.update_lead_fields(
-                        _lid, {"ativado_ia": "Ativado"}
-                    )
-                    log.info(
-                        "[C-49] Auto-reset ATIVADO IA=Ativado (lead %s "
-                        "em etapa ativa %s, campo estava Desativado)",
-                        _lid, _st,
-                    )
-                except Exception as e:  # noqa: BLE001
-                    log.warning(
-                        "[C-49] Auto-reset ATIVADO IA falhou lead %s: %s",
-                        _lid, e,
-                    )
+        # REMOVIDO Bug C-49 (05/08/2026 — Bug C-90 P0).
+        # C-49 auto-resetava ATIVADO IA=Desativado → Ativado a cada mensagem,
+        # tornando impossível desativar a IA manualmente. O webhook
+        # /admin/kommo-trigger-status-change já cuida de reativar quando o lead
+        # muda de etapa legitimamente. Desativação manual DEVE ser respeitada.
 
         # 2c) Convivência humano × agente: fica em silêncio se o lead está
         # em cirurgias ou se um humano assumiu o chat há pouco (handoff).
