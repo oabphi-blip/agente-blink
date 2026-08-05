@@ -648,6 +648,26 @@ _FAQ_CORNEA = re.compile(
 # Perguntas gerais sobre "tem oftalmologista" / "tem médico" → não interceptar,
 # deixa LLM responder (pode querer coletar contexto)
 
+# ── Bug C-87 (05/08/2026): FAQ endereço ────────────────────────────────
+_FAQ_ENDERECO = re.compile(
+    r"("
+    r"onde\s+fica"
+    r"|qual\s+(?:é\s+o?\s*|o\s+)?endere[cç]o"
+    r"|fica\s+no\s+felicit{1,2}[aá]?"
+    r"|felicit{1,2}[aá]?\s+shopping"
+    r"|\bendere[cç]o\b"
+    r"|\blocali(?:za[çc][aã]o|dade)\b"
+    r"|como\s+(?:ch[ae]g[ao]r?|ir)\b"
+    r"|tem\s+estacionamento"
+    r"|onde\s+(?:é|fica)\s+(?:a|o)\s+(?:cl[íi]nica|consultório|unidade)"
+    r"|qual\s+(?:é\s+)?(?:a\s+)?unidade"
+    r"|shin\s+qi"
+    r"|lago\s+norte"
+    r"|(?:a\s+)?cl[íi]nica\s+(?:é|fica)\s+(?:aonde|onde)"
+    r")",
+    re.IGNORECASE,
+)
+
 
 def deve_responder_faq_especialidade(
     ctx: Optional[dict], user_text: str,
@@ -853,6 +873,70 @@ def deve_responder_faq_disponibilidade_hoje(
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Bug C-87 (05/08/2026) — FAQ ENDEREÇO
+# ═══════════════════════════════════════════════════════════════════════
+_ENDERECO_ASA_NORTE = (
+    "nossa unidade Asa Norte fica na "
+    "SHIN QI 5 Bloco J Loja 22, Lago Norte 📍\n"
+    "https://maps.app.goo.gl/jPfjSsXA1bHhsyw56"
+)
+_ENDERECO_AGUAS_CLARAS = (
+    "nossa unidade Águas Claras fica no Felicittá Shopping — "
+    "R. 36 Norte, 05 - Bloco 11, Loja 48, 1º Andar 📍\n"
+    "https://maps.app.goo.gl/FRbkUtg4U4xG55q18"
+)
+_ENDERECO_AMBAS = (
+    "Temos 2 unidades 📍\n\n"
+    "🏥 *Asa Norte* — SHIN QI 5 Bloco J Loja 22, Lago Norte\n"
+    "https://maps.app.goo.gl/jPfjSsXA1bHhsyw56\n\n"
+    "🏥 *Águas Claras* — Felicittá Shopping, R. 36 Norte, Bloco 11, Loja 48\n"
+    "https://maps.app.goo.gl/FRbkUtg4U4xG55q18\n\n"
+    "Qual fica mais perto de você?"
+)
+
+
+def deve_responder_faq_endereco(
+    ctx: Optional[dict], user_text: str,
+) -> Optional[str]:
+    """Resposta determinística para perguntas de endereço/localização.
+
+    Usa ctx.known.unidade para escolher qual endereço mostrar.
+    Se unidade desconhecida, mostra as duas e pergunta qual é mais perto.
+    Toggle: BLINDAGEM_FAQ_ENDERECO_ATIVADO (default ON).
+    """
+    if not _ativado("BLINDAGEM_FAQ_ENDERECO_ATIVADO"):
+        return None
+    if not user_text or not _FAQ_ENDERECO.search(user_text.strip()):
+        return None
+
+    try:
+        known = (ctx or {}).get("known") or {}
+        unidade_raw = str(known.get("unidade") or "").lower()
+        e_asa_norte = "asa norte" in unidade_raw or "lago norte" in unidade_raw
+        e_aguas_claras = (
+            ("água" in unidade_raw and "clara" in unidade_raw)
+            or "aguas claras" in unidade_raw
+            or "felicit" in unidade_raw
+        )
+
+        nome = _nome_paciente(ctx)
+        saud = f"{nome}, " if nome else ""
+
+        if e_asa_norte and not e_aguas_claras:
+            return f"{saud}{_ENDERECO_ASA_NORTE}"
+        elif e_aguas_claras and not e_asa_norte:
+            return f"{saud}{_ENDERECO_AGUAS_CLARAS}"
+        else:
+            # unidade não definida ou ambas → mostra as duas
+            return (f"{saud}{_ENDERECO_AMBAS}" if not nome else
+                    f"{nome}, {_ENDERECO_AMBAS}")
+
+    except Exception as e:  # noqa: BLE001
+        log.warning("[C-87] faq_endereco falhou: %s", e)
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # PONTO DE ENTRADA — chain of responsibility
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -882,6 +966,12 @@ def tentar_bypass_deterministico(
         t = deve_responder_faq_disponibilidade_hoje(ctx, user_text)
         if t:
             return ("faq_disponibilidade_hoje", t)
+
+        # Bug C-87 (05/08/2026): FAQ endereço — "onde fica?", "qual o endereço?"
+        # Resposta determinística com link Maps. Zero Medware, zero LLM.
+        t = deve_responder_faq_endereco(ctx, user_text)
+        if t:
+            return ("faq_endereco", t)
 
         # Bug C-74 (26/07/2026): FAQ especialidade/médico — resposta KB pura,
         # zero LLM. Evita circuit breaker C-56 em perguntas simples.

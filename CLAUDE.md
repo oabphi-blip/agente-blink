@@ -213,6 +213,28 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (05/08/2026) Bug C-90 — P0: agente respondia mesmo com ATIVADO IA = Desativado ou 1-ATENDIMENTO HUMANO
+
+**Origem:** Fábio 05/08/2026: "por favor resolver agora quando transferir para atendimento humano ou preencher o campo desativar. O agente nao responder. Isto é mandatorio." Qualquer mensagem nova após atendente desativar IA → Lia respondia na 2ª mensagem.
+
+**Causa raiz — bloco C-49 em `pipeline.py` (linhas 210-245):**
+- C-49 foi criado em 02/07/2026 para recuperar leads que ficavam presos com `Desativado` quando o webhook `/admin/kommo-trigger-status-change` não estava configurado em todas as etapas.
+- O bloco rodava em CADA mensagem, ANTES de `agent_paused_for_lead()`: se `status_id ∈ _STATUS_ATIVOS_IA_PIPELINE` AND `ativado_ia == "desativado"` → chamava `update_lead_fields(lid, {"ativado_ia": "Ativado"})`.
+- Sequência do bug: (1) Atendente seta Desativado. (2) Paciente manda mensagem. (3) Pipeline lê ctx: `ativado_ia="Desativado"`. (4) **C-49 grava "Ativado" no Kommo imediatamente.** (5) `agent_paused_for_lead()` ainda vê o ctx antigo → Lia fica silenciosa DESTA VEZ. (6) Paciente manda 2ª mensagem. (7) Pipeline lê ctx novo: `ativado_ia="Ativado"` (C-49 já sobrescreveu). (8) **Lia responde — bug.**
+
+**Fix — remoção completa do bloco C-49 (`pipeline.py`):**
+- O webhook `/admin/kommo-trigger-status-change` já está configurado e cuida de reativar IA quando o lead muda de etapa legitimamente.
+- Desativação manual por atendente DEVE ser respeitada permanentemente.
+- Para reativar: atendente move lead para etapa ativa no Kommo → webhook dispara automaticamente → ATIVADO IA volta a "Ativado".
+
+**Pytest:** `tests/test_bug_c90_ia_desativada_respeita.py` — 16/16 verde. Cobre: bloco C-49 ausente no arquivo, ST_AGENT_OFF correto, variantes Desativado/DESATIVADO/off, decay 30min humano-recente.
+**Push:** `PUSH_C90_IA_DESATIVADA_RESPEITA.command`
+
+**Lição arquitetural CRÍTICA:**
+- **Mecanismo de auto-recuperação pode destruir mecanismo de controle manual.** C-49 era um workaround para webhook não configurado — correto no contexto de 02/07. Mas com o webhook em prod, C-49 passou a combater o controle explícito do atendente.
+- **Regra permanente: NUNCA sobrescrever campo de controle manual sem verificar se a operação foi iniciada por um humano.** Auto-reset de campos "Desativado" é sempre perigoso. O correto é: humano desativa → permanece desativado até humano reativar (ou webhook de mudança de etapa).
+- **Verificar sempre se workaround antigo ainda é necessário.** C-49 tinha comentário "webhook não configurado em todas as etapas". Quando o webhook ficou configurado (tarefa completada), C-49 deveria ter sido removido imediatamente. Não foi — e virou bug meses depois.
+
 ### 0. (05/08/2026) Bug C-86 — "Valores" standalone ignorado pelo bypass + C-56 "sem exc" (lead 24413976)
 
 **Origem:** lead 24413976 Cecília/Cristina, 04/08/2026. Paciente digitou "Valores" (palavra única) 2 vezes → Lia ignorou e continuou pedindo preferência de slot. Na 3ª mensagem ("Quero saber valores") o `responder.reply()` retornou vazio (sem exception) → C-56 moveu pra 1-ATENDIMENTO HUMANO.
