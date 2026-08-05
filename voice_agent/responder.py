@@ -380,52 +380,44 @@ def _agenda_block(ctx: Optional[dict]) -> str:
         "\n  • \"Nossa equipe vai te retornar com os horários\""
         "\nQualquer uma dessas frases = bug grave. A agenda ESTÁ na sua frente."
         "\n"
-        "\n⚠️ REGRA DE OURO — OFERTA IMEDIATA DE 2 SLOTS (revisão 03/06/2026):"
+        "\n⚠️ REGRA DE OURO — OFERTA IMEDIATA DE 3 SLOTS (revisão 05/08/2026):"
         "\n• Assim que houver agenda + médico + unidade definidos no ctx,"
-        "\n  OFEREÇA imediatamente 2 horários concretos."
-        "\n• **PROIBIDO perguntar 'qual turno', 'qual período do turno',"
-        "\n  'qual dia da semana' ANTES de oferecer.** Erro grave de UX —"
-        "\n  paciente quer ver opções, não responder formulário."
-        "\n• Escolha os 2 slots assim:"
-        "\n   (a) Se houver vaga em MANHÃ (hora < 12:00) e TARDE (≥ 12:00)"
-        "\n       dentro dos próximos dias úteis, escolha 1 de cada turno"
-        "\n       — o mais próximo possível. (Caso ideal para Alice/Carol,"
-        "\n       Sabrina, etc. — atende qualquer agenda do paciente.)"
-        "\n   (b) Se só houver de um turno, escolha os 2 mais próximos"
-        "\n       desse turno."
-        "\n   (c) Se já há `dia_turno` na preferência do paciente vinda do"
-        "\n       Kommo, use isso como filtro extra."
+        "\n  OFEREÇA imediatamente 3 horários concretos espalhados no dia."
+        "\n• ❌ PROIBIDO perguntar 'qual turno', 'qual período do turno',"
+        "\n  'manhã ou tarde?', 'início, meio ou fim?' ANTES de oferecer."
+        "\n  Erro grave de UX — paciente quer ver opções, não preencher formulário."
+        "\n• ❌ PROIBIDO perguntar turno/período mesmo após recusa — vá direto"
+        "\n  para 'Qual dia fica melhor?' (sem 'turno' ou 'período')."
+        "\n• Escolha os 3 slots assim:"
+        "\n   (a) SEM preferência de turno no ctx: 1 manhã + 1 tarde + 1 alternativo."
+        "\n   (b) COM `turno_preferido='manhã'` no ctx: 3 slots de manhã."
+        "\n   (c) COM `turno_preferido='tarde'` no ctx: 3 slots de tarde."
+        "\n   (d) COM `dia_turno` do Kommo: filtrar por dia da semana desse campo."
         "\n• Formato humano da oferta (mantenha esse padrão):"
-        "\n     'Tenho 2 horários abertos com a {{MÉDICO}}, {{UNIDADE}}:'"
+        "\n     'Tenho esses horários disponíveis com a {{MÉDICO}}, {{UNIDADE}}:'"
         "\n     '1️⃣ {{dia}} ({{data}}) às {{hora1}}'"
         "\n     '2️⃣ {{dia}} ({{data}}) às {{hora2}}'"
-        "\n     'Algum desses cabe pra você? Se preferir outro dia/horário,"
-        "\n     me diz que ajusto.'"
-        "\n• NUNCA liste a agenda toda. NUNCA mais de 2 horários por mensagem."
+        "\n     '3️⃣ {{dia}} ({{data}}) às {{hora3}}'"
+        "\n     'Qual fica melhor pra você?'"
+        "\n• NUNCA liste a agenda toda. NUNCA mais de 3 horários por mensagem."
         "\n"
-        "\n⚠️ SEQUÊNCIA OBRIGATÓRIA (Bug C-18 — Fábio 10/06/2026):"
-        "\n  PASSO 1: oferta 2 slots concretos (regra acima)."
-        "\n  PASSO 2: SE — e SOMENTE SE — o paciente RECUSAR os 2 slots OU"
+        "\n⚠️ SEQUÊNCIA OBRIGATÓRIA (revisão 05/08/2026):"
+        "\n  PASSO 1: oferta 3 slots concretos (regra acima)."
+        "\n  PASSO 2: SE — e SOMENTE SE — o paciente RECUSAR os 3 slots OU"
         "\n            pedir dia/hora específico que não está na oferta,"
-        "\n            AÍ SIM pergunte juntos NUMA SÓ mensagem:"
-        "\n               'Qual dia da semana, qual turno (manhã/tarde) e"
-        "\n               qual período do turno (início, meio ou fim) fica"
-        "\n               melhor pra você?'"
-        "\n            JÁ NO CONTEXTO certo: com {{MÉDICO}}, na {{UNIDADE}}."
-        "\n  PASSO 3: com a resposta da preferência, escolha 2 NOVOS slots"
-        "\n            que casem com dia+turno+período pedidos."
+        "\n            pergunte UMA vez só: 'Qual dia da semana fica melhor?"
+        "\n            Manhã ou tarde?' — SEM mencionar 'período do turno'."
+        "\n  PASSO 3: com a resposta, escolha 3 NOVOS slots que casem"
+        "\n            com dia+turno pedidos."
         "\n"
-        "\nObjetivo da sequência: AGILIDADE. Mostrar opções concretas primeiro"
-        "\n(o paciente quer ver, não responder formulário). Só quando NÃO der"
-        "\nmatch, pergunte preferência — e pergunte uma vez só, sem ficar"
-        "\nindo e vindo sem definição. O paciente NÃO carrega 3 decisões"
-        "\nseparadas (dia → turno → período em 3 turnos). Tudo em UMA pergunta."
+        "\nObjetivo: AGILIDADE. Mostrar opções concretas elimina 2-3 turnos de"
+        "\nback-and-forth. Paciente escolhe diretamente — sem formulário."
         "\n• Se paciente pedir DIA/HORA específicos (ex: 'sexta às 9h'):"
         "\n  procure na lista abaixo. Se tiver, oferece esse. Se NÃO tiver,"
         "\n  diga isso E ofereça o mais próximo da preferência dele."
         "\n• Nunca invente nem prometa horário fora desta lista."
         "\nEsta seção TEM PRECEDÊNCIA: havendo horário, o agente OFERECE"
-        "\n(2 slots em formato 1️⃣/2️⃣), não pergunta turno/período. Depois"
+        "\n(3 slots em formato 1️⃣/2️⃣/3️⃣), não pergunta turno/período. Depois"
         "\nque o paciente escolher, confirme os dados e informe que a"
         "\nrecepção finaliza o agendamento."
         f"\n{chr(10).join(linhas)}"
@@ -457,6 +449,9 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
         "nome_paciente": "Nome do paciente", "motivo": "Motivo registrado",
         "convenio": "Convênio", "unidade": "Unidade", "medico": "Médico",
         "especialidade": "Especialidade", "dia_turno": "Preferência dia/turno",
+        # Bug C-88 (05/08/2026) — injetados pelo IntentClassifier via _injetar_pre_slots
+        "turno_preferido": "Turno preferido (RESPONDIDO — não reperguntar)",
+        "dia_pref": "Dia preferido (RESPONDIDO — não reperguntar)",
     }
     for k, label in rotulos.items():
         if known.get(k):
@@ -633,7 +628,11 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
     # Caso: ctx tinha 'Médico: Dra. Karla Delalibera' mas Lia ofereceu
     # slots de Fabricio. Bloco explícito + regex pós-geração impedem.
     trava_medico = ""
-    if known.get("medico") or known.get("unidade"):
+    # Bug C-88 (05/08/2026): trava agora cobre turno_preferido + dia_pref
+    # injetados pelo IntentClassifier — LLM precisa vê-los explicitamente
+    # para não reperguntar turno já respondido (causa do loop C-84 Juliana).
+    if (known.get("medico") or known.get("unidade")
+            or known.get("turno_preferido") or known.get("dia_pref")):
         partes = []
         if known.get("medico"):
             partes.append(f"MÉDICO: **{known['medico']}** (NÃO trocar)")
@@ -641,6 +640,14 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
             partes.append(f"UNIDADE: **{known['unidade']}** (NÃO trocar)")
         if known.get("dia_turno"):
             partes.append(f"PREFERÊNCIA dia/turno: **{known['dia_turno']}** (respeitar)")
+        if known.get("turno_preferido"):
+            partes.append(
+                f"TURNO JÁ RESPONDIDO: **{known['turno_preferido']}** — NÃO reperguntar"
+            )
+        if known.get("dia_pref"):
+            partes.append(
+                f"DIA PREFERIDO: **{known['dia_pref']}** — NÃO reperguntar"
+            )
         trava_medico = (
             "\n\n----------------------------------------------------------------"
             "\nTRAVA MÉDICO/UNIDADE — FONTE DE VERDADE"
@@ -659,6 +666,9 @@ def _caller_context_block(ctx: Optional[dict]) -> str:
             "\n"
             "\n❌ PROIBIDO inventar dias fixos de atendimento (ex: 'Karla atende"
             "\nterças e quintas') — a fonte é APENAS a AGENDA REAL abaixo."
+            "\n⚠️ Se TURNO JÁ RESPONDIDO estiver acima: NUNCA pergunte 'manhã ou"
+            "\n   tarde?' de novo. Filtre a agenda por esse turno e ofereça slots"
+            "\n   diretamente sem repergunta."
             "\n----------------------------------------------------------------"
         )
 
@@ -1003,33 +1013,104 @@ def _selecionar_2_slots_inteligente(agenda: list) -> list:
     return list(agenda[:2])
 
 
-def _gerar_oferta_2_slots(ctx: Optional[dict]) -> str:
-    """Constrói a mensagem humana com 2 slots (substituindo pergunta de turno)."""
+def _selecionar_3_slots_para_oferta(
+    agenda: list,
+    turno_preferido: Optional[str] = None,
+) -> list:
+    """Pega 3 slots espalhados no dia (Bug C-88 / Fábio 05/08/2026).
+
+    Estratégia sem preferência de turno:
+      Slot 1 → mais cedo disponível (manhã se possível)
+      Slot 2 → primeiro slot de tarde
+      Slot 3 → próximo horário disponível diferente dos anteriores
+
+    Com turno_preferido="manhã":
+      Retorna os 3 slots de manhã mais próximos (de dias diferentes se possível).
+    Com turno_preferido="tarde":
+      Retorna os 3 slots de tarde mais próximos.
+    Se não houver 3 no turno preferido, completa com o outro turno.
+    """
+    if not agenda:
+        return []
+
+    def _hora_int(s: dict) -> int:
+        try:
+            return int(str(s.get("hora", "00:00"))[:2])
+        except (ValueError, TypeError):
+            return 0
+
+    manha = [s for s in agenda if _hora_int(s) < 12]
+    tarde = [s for s in agenda if _hora_int(s) >= 12]
+
+    if turno_preferido:
+        t = turno_preferido.lower()
+        if "manh" in t:
+            pool_prim, pool_sec = manha, tarde
+        else:
+            pool_prim, pool_sec = tarde, manha
+        result = list(pool_prim[:3])
+        if len(result) < 3:
+            result += pool_sec[: 3 - len(result)]
+        return result[:3]
+
+    # Sem preferência: 1 manhã + 1 tarde + 1 alternativo
+    result: list = []
+    if manha:
+        result.append(manha[0])
+    if tarde:
+        result.append(tarde[0])
+    # 3º slot: próximo horário disponível ainda não incluído
+    for s in agenda:
+        if len(result) >= 3:
+            break
+        if s not in result:
+            result.append(s)
+    return result[:3]
+
+
+_EMOJIS_SLOT = ["1️⃣", "2️⃣", "3️⃣"]
+
+
+def _gerar_oferta_3_slots(ctx: Optional[dict]) -> str:
+    """Constrói a mensagem humana com 3 slots espalhados no dia.
+
+    Bug C-88 / Fábio 05/08/2026: Lia não pergunta mais turno/período —
+    apresenta diretamente 3 opções em horários diferentes e deixa o
+    paciente escolher. Reduz 3-4 turnos de back-and-forth para 1-2.
+    """
     agenda = (ctx or {}).get("agenda") or []
-    dois = _selecionar_2_slots_inteligente(agenda)
-    if not dois:
-        # Sem agenda — recai num fallback honesto.
+    known = ((ctx or {}).get("known") or {})
+    turno_pref = known.get("turno_preferido")  # injetado pelo IntentClassifier
+    tres = _selecionar_3_slots_para_oferta(agenda, turno_pref)
+    if not tres:
         return (
-            "Deixa eu reconferir a agenda real aqui e já volto com 2 horários "
+            "Deixa eu reconferir a agenda real aqui e já volto com horários "
             "concretos pra você escolher. Me dá só 1 minuto."
         )
-    known = ((ctx or {}).get("known") or {})
     medico = (ctx or {}).get("medico") or known.get("medico") or "a médica"
     unidade = known.get("unidade") or "a unidade combinada"
     linhas = []
-    for i, s in enumerate(dois, start=1):
+    for i, s in enumerate(tres):
         dia = s.get("dia_semana", "").capitalize() if s.get("dia_semana") else ""
         dbr = s.get("data_br", "")
         hora = s.get("hora", "")
-        emoji = "1️⃣" if i == 1 else "2️⃣"
+        emoji = _EMOJIS_SLOT[i] if i < len(_EMOJIS_SLOT) else f"{i+1}️⃣"
         prefixo = f"{dia} ({dbr})" if dia and dbr else dbr
         linhas.append(f"{emoji} {prefixo} às {hora}")
     return (
-        f"Tenho 2 horários abertos com a {medico}, {unidade}:\n\n"
+        f"Tenho esses horários disponíveis com a {medico}, {unidade}:\n\n"
         + "\n".join(linhas)
-        + "\n\nAlgum desses cabe pra você? Se preferir outro dia/horário, "
-        "me diz que ajusto."
+        + "\n\nQual fica melhor pra você?"
     )
+
+
+def _gerar_oferta_2_slots(ctx: Optional[dict]) -> str:
+    """Constrói a mensagem humana com 2 slots (substituindo pergunta de turno).
+
+    Mantido para compatibilidade; internamente usa a lógica de 3 slots
+    quando possível para reduzir back-and-forth (Bug C-88 05/08/2026).
+    """
+    return _gerar_oferta_3_slots(ctx)
 
 
 # Padrões de cobrança de sinal/Pix — só são legítimos APÓS o paciente ter
@@ -3415,6 +3496,63 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
     except Exception as e:  # noqa: BLE001
         log.warning("[C-84b] falhou (fail-open): %s", e)
 
+    # === FILTRO C-92 SEMPRE-ON (Bug C-92 05/08/2026 Beatriz 16843614) ===
+    # Paciente JÁ AGENDADO (5-AGENDADO/6-CONFIRMAR/7.CONFIRMADO) pediu
+    # remarcar, corrigir dados, fila de espera, ou qualquer variante.
+    # Lia NÃO deve oferecer novos slots — escalar imediatamente pro humano.
+    # Mesma arquitetura do C-84b: flag Redis → pipeline move o lead.
+    try:
+        _C92_STATUS_AGENDADO = {101507507, 101109455, 106653499}
+        _status_c92 = (ctx or {}).get("status_id")
+        _user_c92 = str((ctx or {}).get("user_text") or "").strip()
+        if _status_c92 in _C92_STATUS_AGENDADO and _user_c92:
+            _C92_TERMOS_RE = re.compile(
+                r"remarcar|reagendar|remarca[çc][aã]o|reagendamento"
+                r"|mudar\s+(?:[oa]\s+)?(?:data|dia|hor[áa]rio)"
+                r"|trocar\s+(?:[oa]\s+)?(?:data|dia|hor[áa]rio)"
+                r"|corrigir\s+(?:os?\s+)?dados?"
+                r"|fila\s+de\s+espera"
+                r"|outro\s+hor[áa]rio|outra\s+data|outro\s+dia"
+                r"|n[aã]o\s+(?:vou|posso|d[áa])\s+(?:conseguir\s+)?(?:ir|comparecer|mais)"
+                r"|n[aã]o\s+consigo\s+(?:mais\s+)?(?:ir|comparecer)"
+                r"|preciso\s+que\s+(?:o\s+)?hor[áa]rio\s+seja"
+                r"|mudar\s+(?:[oa]\s+)?(?:minha\s+)?consulta"
+                r"|cancelar\s+(?:[oa]\s+)?(?:minha\s+)?consulta"
+                r"|quero\s+(?:mudar|trocar|remarcar|cancelar)",
+                re.IGNORECASE,
+            )
+            if _C92_TERMOS_RE.search(_user_c92):
+                _known_c92 = (ctx or {}).get("known") or {}
+                _nome_c92 = str(
+                    _known_c92.get("nome_contato") or _known_c92.get("nome_paciente") or ""
+                ).strip()
+                _saud_c92 = (f"{_nome_c92.split()[0]}, e" if _nome_c92 else "E")
+                _resp_c92 = (
+                    f"{_saud_c92}ntendido! Para remarcar ou ajustar sua consulta, "
+                    "vou passar você para nossa equipe. Em instantes alguém da Blink te ajuda! 🤝"
+                )
+                # Flag Redis → pipeline desativa IA + move pra ATENDIMENTO HUMANO
+                try:
+                    _lead_c92 = (ctx or {}).get("lead") or {}
+                    _lid_c92 = _lead_c92.get("id") or (ctx or {}).get("lead_id")
+                    if _lid_c92:
+                        from voice_agent.settings import get_redis
+                        _r_c92 = get_redis()
+                        if _r_c92:
+                            _r_c92.setex(f"blink:c92_reagendamento_agendado:{_lid_c92}", 86400, "1")
+                except Exception:  # noqa: BLE001
+                    pass
+                log.error(
+                    "[FILTRO C-92] AGENDADO pediu remarcar/corrigir — user=%r. "
+                    "Escalando pra humano. lead_id=%s status_id=%s",
+                    _user_c92[:80],
+                    (ctx or {}).get("lead_id") or ((ctx or {}).get("lead") or {}).get("id"),
+                    _status_c92,
+                )
+                return _resp_c92
+    except Exception as e:  # noqa: BLE001
+        log.warning("[C-92] falhou (fail-open): %s", e)
+
     # === Bug C-69: reconhecer dados informados NESTE turno ===
     # Funde unidade/convênio do inbound em known ANTES dos geradores
     # determinísticos, pra Lia não reperguntar o que acabou de ser dito.
@@ -5168,7 +5306,18 @@ class Responder:
             "com o nome, a data de nascimento e o CPF DAQUELE paciente. O "
             "primeiro item da lista é o paciente principal e deve bater com "
             "'name'/'birth_date_iso'/'cpf'. Associe cada CPF ao paciente certo; "
-            "se um dado de um paciente ainda não foi dito, deixe-o em branco."
+            "se um dado de um paciente ainda não foi dito, deixe-o em branco.\n\n"
+            "REGRA CRÍTICA — nao_aceito_convenio (Bug C-91 05/08/2026): "
+            "JAMAIS preencha este campo a menos que o PACIENTE tenha mencionado "
+            "EXPLICITAMENTE o nome de um convênio que queria usar mas a clínica "
+            "não aceita. Exemplos de menção explícita: 'Tenho Amil', 'Meu plano é "
+            "SUS', 'Uso Bradesco Saúde', 'Sou do GDF'. "
+            "NÃO inferir SUS, Inas GDF, ou qualquer convênio com base em: "
+            "idade do paciente (bebê/criança NÃO implica SUS), contexto familiar, "
+            "ausência de resposta sobre convênio, perfil socioeconômico inferido, "
+            "ou qualquer outro sinal indireto. "
+            "Se o paciente NÃO mencionou o nome do convênio explicitamente, "
+            "omita completamente o campo nao_aceito_convenio."
         )
 
         log.info(

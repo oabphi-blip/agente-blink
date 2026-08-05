@@ -544,6 +544,63 @@ class VoicePipeline:
             except Exception as _e_c81_outer:  # noqa: BLE001
                 log.warning("[C-81] classificador falhou (fail-open): %s", _e_c81_outer)
 
+        # -------------------------------------------------------------------
+        # Bug C-94 (05/08/2026) — Auto-inferência de especialidade + médico
+        # Roda APÓS injetar_pre_slots (C-81) e ANTES do Medware lookup para
+        # que medico_param já esteja preenchido corretamente em known.
+        # -------------------------------------------------------------------
+        try:
+            from voice_agent.intent_classifier import (
+                calcular_idade_anos as _calc_idade_c94,
+                inferir_especialidade as _inf_esp_c94,
+                inferir_medico as _inf_med_c94,
+            )
+            _known_c94 = caller_context.get("known", {}) if caller_context else {}
+            _age_c94 = _calc_idade_c94(
+                _known_c94.get("data_nascimento") or _known_c94.get("data_nasc")
+            )
+            _motivo_c94 = _known_c94.get("motivo") or _known_c94.get("reason") or ""
+
+            # Inferir médico se não definido
+            if not _known_c94.get("medico"):
+                _esp_para_medico = _known_c94.get("especialidade")
+                _med_c94 = _inf_med_c94(_age_c94, _motivo_c94, _esp_para_medico)
+                if _med_c94:
+                    _known_c94["medico"] = _med_c94
+                    log.info(
+                        "[C-94] medico inferido: %s (idade=%s motivo=%r)",
+                        _med_c94, _age_c94, _motivo_c94[:40],
+                    )
+
+            # Inferir especialidade se não definida
+            if not _known_c94.get("especialidade"):
+                _esp_c94 = _inf_esp_c94(_age_c94, _motivo_c94, _known_c94.get("medico"))
+                if _esp_c94:
+                    _known_c94["especialidade"] = _esp_c94
+                    log.info("[C-94] especialidade inferida: %s", _esp_c94)
+                    # Atualizar Kommo (async, fail-open)
+                    _lid_c94 = caller_context.get("lead_id") if caller_context else None
+                    if _lid_c94 and self.kommo is not None:
+                        try:
+                            self.kommo.update_lead_fields(_lid_c94, {"especialidade": _esp_c94})
+                        except Exception as _e_c94_kommo:  # noqa: BLE001
+                            log.warning("[C-94] falha ao atualizar especialidade no Kommo: %s", _e_c94_kommo)
+
+            # Preencher motivo da consulta no Kommo se disponível
+            _lid_c94_mot = caller_context.get("lead_id") if caller_context else None
+            if _motivo_c94 and not _known_c94.get("motivo_gravado_kommo") and _lid_c94_mot and self.kommo is not None:
+                try:
+                    self.kommo.update_lead_fields(_lid_c94_mot, {"reason": _motivo_c94})
+                    _known_c94["motivo_gravado_kommo"] = True
+                except Exception:  # noqa: BLE001
+                    pass  # fail-open
+
+            if caller_context:
+                caller_context["known"] = _known_c94
+        except Exception as _exc_c94:  # noqa: BLE001
+            log.warning("[C-94] inferência falhou (fail-open): %s", _exc_c94)
+        # -------------------------------------------------------------------
+
         # 2d) Agenda Medware: busca horários reais para o agente OFERECER.
         # ANTES: só consultava se caller_context.known.medico estava
         # preenchido. Resultado: lead novo (paciente recém-chegado, médico
@@ -1041,6 +1098,65 @@ class VoicePipeline:
         except Exception as _e_c84_pipe:  # noqa: BLE001
             log.warning("[C-84b PIPELINE] check falhou (fail-open): %s", _e_c84_pipe)
 
+        # 3a-ter) Bug C-92 (05/08/2026 Beatriz 16843614) — paciente AGENDADO pediu
+        # remarcar, corrigir dados ou fila de espera.
+        # Filtro C-92 em responder.py já substituiu o texto e gravou flag Redis.
+        # Aqui: desativar IA + mover pra 1-ATENDIMENTO HUMANO + nota Kommo.
+        try:
+            _redis_c92 = getattr(self, "_redis", None)
+            _lid_c92_pipe = (
+                caller_context.get("lead_id") if isinstance(caller_context, dict) else None
+            )
+            if _redis_c92 and _lid_c92_pipe:
+                _flag_c92 = _redis_c92.get(f"blink:c92_reagendamento_agendado:{_lid_c92_pipe}")
+                if _flag_c92:
+                    log.error(
+                        "[C-92 PIPELINE] paciente AGENDADO pediu remarcar lead=%s — "
+                        "movendo pra ATENDIMENTO HUMANO + desativando IA",
+                        _lid_c92_pipe,
+                    )
+                    _redis_c92.delete(f"blink:c92_reagendamento_agendado:{_lid_c92_pipe}")
+                    if self.kommo is not None:
+                        _status_c92_pipe = (
+                            caller_context.get("status_id")
+                            if isinstance(caller_context, dict) else None
+                        )
+                        _ETAPAS_FINAIS_C92 = {142, 143, 91486864, 106563343}
+                        # (1) Desativar IA
+                        try:
+                            self.kommo.update_lead_fields(
+                                _lid_c92_pipe, {"ativado_ia": "DESATIVADO"}
+                            )
+                        except Exception as _e_c92_ia:  # noqa: BLE001
+                            log.warning("[C-92] desativar IA falhou: %s", _e_c92_ia)
+                        # (2) Mover pra 1-ATENDIMENTO HUMANO
+                        if _status_c92_pipe and _status_c92_pipe not in _ETAPAS_FINAIS_C92:
+                            try:
+                                self.kommo.update_lead_status(_lid_c92_pipe, 106563343)
+                                log.info(
+                                    "[C-92] lead %s movido → 1-ATENDIMENTO HUMANO",
+                                    _lid_c92_pipe,
+                                )
+                            except Exception as _e_c92_st:  # noqa: BLE001
+                                log.warning(
+                                    "[C-92] mover status falhou lead=%s: %s",
+                                    _lid_c92_pipe, _e_c92_st,
+                                )
+                        # (3) Nota Kommo
+                        try:
+                            import datetime as _dt_c92
+                            _nota_c92 = (
+                                f"🔄 [LIA C-92 {_dt_c92.datetime.now().strftime('%H:%M %d/%m')}] "
+                                "Paciente AGENDADO pediu remarcar/corrigir dados/fila de espera. "
+                                "IA desativada + lead movido pra ATENDIMENTO HUMANO. "
+                                f"Msg: \"{user_text[:200]}\""
+                            )
+                            self.kommo.add_note(_lid_c92_pipe, _nota_c92)
+                        except Exception:  # noqa: BLE001
+                            pass
+        except Exception as _e_c92_pipe:  # noqa: BLE001
+            log.warning("[C-92 PIPELINE] check falhou (fail-open): %s", _e_c92_pipe)
+
         # 4) Envio (se houver destino)
         if not reply_to_number:
             return PipelineResult(
@@ -1339,6 +1455,56 @@ class VoicePipeline:
                 ctx = {}
             # Campos extraídos da conversa.
             fields = self.responder.extract_lead_fields(conversation_key) or {}
+
+            # === PROTEÇÃO C-91 (05/08/2026 — Haiku inferiu SUS sem menção do paciente) ===
+            # Haiku às vezes infere nao_aceito_convenio="SUS" para bebês/crianças
+            # sem que o paciente tenha mencionado o convênio. Aqui, validamos que
+            # o nome do convênio aparece EXPLICITAMENTE no texto da mensagem ou
+            # no histórico de notas antes de gravar no Kommo.
+            try:
+                _nac_c91 = fields.get("nao_aceito_convenio")
+                if _nac_c91:
+                    # Monta corpus de textos do paciente neste turn
+                    _ctx_c91 = ctx if isinstance(ctx, dict) else {}
+                    _corpus_c91 = " ".join([
+                        str(user_text or ""),
+                        str((_ctx_c91.get("known") or {}).get("notas_historico") or ""),
+                    ]).lower()
+                    # Aliases dos convênios que o Haiku pode inferir indevidamente
+                    _ALIASES_C91: dict = {
+                        "sus": ["sus", "s.u.s", "sistema único"],
+                        "inas gdf": ["inas", "gdf", "saúde gdf"],
+                        "amil": ["amil"],
+                        "bradesco": ["bradesco"],
+                        "cassi": ["cassi"],
+                        "unimed": ["unimed"],
+                        "notre dame": ["notre dame", "notredame", "ndm"],
+                        "sul américa": ["sul am", "sulam"],
+                        "assefaz": ["assefaz"],
+                        "fusex": ["fusex"],
+                        "geap": ["geap"],
+                        "hap vida": ["hap"],
+                        "pm": ["pm saúde", "pmsaúde"],
+                        "porto seguro": ["porto seguro"],
+                        "outro": [],  # "Outro" genérico não precisa de validação
+                    }
+                    _key_c91 = str(_nac_c91).lower().strip()
+                    _terms_c91 = _ALIASES_C91.get(_key_c91, [_key_c91])
+                    _mencionado_c91 = any(t in _corpus_c91 for t in _terms_c91) if _terms_c91 else True
+                    if not _mencionado_c91:
+                        log.warning(
+                            "[C-91] nao_aceito_convenio=%r NÃO foi mencionado pelo "
+                            "paciente — descartando para evitar invenção de SUS/convênio. "
+                            "lead=%s user_text=%r",
+                            _nac_c91, lead_id, str(user_text or "")[:80],
+                        )
+                        fields.pop("nao_aceito_convenio", None)
+                        # Remover motivo_perda inferido junto (pode ter sido injetado também)
+                        if fields.get("motivo_perda") == "Somente Convênio":
+                            fields.pop("motivo_perda", None)
+            except Exception as _e_c91:  # noqa: BLE001
+                log.warning("[C-91] validação fail-open: %s", _e_c91)
+
             # Carimba o canal de entrada (8133 ou 0710) no campo do lead.
             if channel:
                 fields["numero_telefone"] = channel
