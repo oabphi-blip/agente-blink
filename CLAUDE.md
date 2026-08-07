@@ -213,6 +213,29 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (07/08/2026) Bug C-97 — "Disco furado" perguntando dia/turno mesmo após paciente responder 3x (Zoé 24424208 + Lavinia 24424544)
+
+**Origem:** lead 24424208 Zoé — Lia repetiu "Qual dia da semana e turno funcionam melhor pra vocês?" 3 vezes após paciente responder "Segunda à tarde" 3 vezes. Lead 24424544 Lavinia — mesma falha estrutural. Fábio: *"continuar perguntando sobre turno, a partir de agora tornou desnecessário, pois esta abordagem é para atendimento humano."*
+
+**Decisão arquitetural (P0):** Com médico + unidade + convênio + motivo definidos → ir direto ao Medware e oferecer 2 slots concretos. NUNCA perguntar "qual dia da semana" ou "qual turno". Preferência de dia/turno é papel do atendimento HUMANO.
+
+**10 mudanças em `voice_agent/responder.py`:**
+- `_DIA_SEMANA_FALLBACK`, `_DIA_NAO_ATENDIDO_FALLBACK`, `_DIA_SEM_DATA_FALLBACK`, `_COBRANCA_ANTECIPADA_FALLBACK` → mensagens neutras "Vou verificar..."
+- `_gerar_proxima_pergunta_sem_convenio()` + `_gerar_reconhecimento_curto_e_avanca()` → removidos branches que pediam preferência dia/turno
+- Call sites C-31a, C-31b, C-54 → `_gerar_oferta_2_slots(ctx)` quando há agenda, fallback neutro quando não há
+- `_PERGUNTA_TURNO_PERIODO_PATTERNS` → adicionado `"qual dia da semana"` standalone
+
+**Pytest:** `tests/test_bug_c97_eliminar_pergunta_turno.py` — 20/20 verde.
+**Push:** `PUSH_C97_ELIMINAR_PERGUNTA_TURNO.command`
+**DOCX:** S17 em `RESPOSTAS_CANONICAS_LIA.docx` → ✅ IMPLEMENTADO (C-97).
+
+**Lição arquitetural CRÍTICA:**
+- **Perguntar turno antes de oferecer slot é fricção desnecessária.** Lia tem acesso ao Medware em tempo real — oferta 2 slots e paciente escolhe. Não precisa de preferência prévia.
+- **Call sites de filtros que detectam violação devem também OFERECER alternativa real**, não apenas bloquear com texto neutro. C-31a/C-31b/C-54 agora chamam `_gerar_oferta_2_slots`.
+- **Regex de detecção deve incluir forma mais curta em PT-BR informal.** "Qual dia da semana" (sem "e turno") é a forma mais comum — estava faltando no padrão.
+- **Regra permanente: atendimento humano decide turno, Lia decide slot** consultando Medware em tempo real.
+
+
 ### 0. (05/08/2026) Bug C-90 — P0: agente respondia mesmo com ATIVADO IA = Desativado ou 1-ATENDIMENTO HUMANO
 
 **Origem:** Fábio 05/08/2026: "por favor resolver agora quando transferir para atendimento humano ou preencher o campo desativar. O agente nao responder. Isto é mandatorio." Qualquer mensagem nova após atendente desativar IA → Lia respondia na 2ª mensagem.
@@ -361,34 +384,6 @@ r")"
 - **Regex é mais confiável que LLM para detecção de urgência.** Zero custo, zero alucinação, zero latência. Haiku/Sonnet para urgência é pior — pode dizer "não é urgente" por contexto.
 - **Pré-extração em toda 1ª mensagem.** "Quero consultar na Asa Norte segunda de manhã" já dá unidade + dia + turno. Perguntar de novo é fricção desnecessária.
 - **Padrão estabelecido:** classificar → sub-caminho → prompt focado. Próximos candidatos: FAQ (valor/local/convênio) → resposta determinística sem Medware, cancelamento → C-68 direto.
-
-### 0. (02/08/2026) Bug C-80 — Lia ofertava slots já ocupados por race-condition + re-ofertava mesmo slot ao mesmo paciente
-
-**Origem:** Fábio 02/08/2026: "já erro ao passar horários errados, o foco agora é verificar como blindar o agente, para não passar horários equivocados. O que falta para apresentar 100% de forma correta a agenda?"
-
-**Dois problemas simultâneos resolvidos:**
-
-**C-80a — Race-condition ao gravar:** Lia consulta Medware em T, oferece slot ao paciente, paciente demora horas para confirmar. Entre T e T+N, outro agendamento ocupa o slot. Lia tentava gravar slot inexistente → Medware rejeitava ou gravava horário errado.
-
-**Fix C-80a em 3 arquivos:**
-1. `medware.py::slot_ainda_disponivel()` — SQL-first quando `MEDWARE_AGENDA_SQL=1` (padrão ON) + `medico_nome`/`unidade_nome` fornecidos; fallback REST
-2. `medware_sql.py::slot_ainda_disponivel_sql()` — usa `horarios_livres_dia()` já existente + busca alternativas nos próximos 10 dias. Fix: IndentationError linha 782 (stray `return []`)
-3. `tools_lia.py::handle_gravar_agendamento_medware` — passa `medico_nome` + `unidade_nome` para ativar caminho SQL. Re-valida slot ANTES de chamar `criar_agendamento()`
-
-**C-80b — Re-oferta do mesmo slot (regra de escassez):** Lia re-apresentava o mesmo horário ao mesmo paciente em turnos sucessivos. Novo módulo `voice_agent/slot_rotation.py`:
-- Slot ofertado → `blink:slots_oferecidos:{lead_id}` (Redis SET, TTL 24h) + timestamp (TTL 5 min)
-- 2ª+ rodada: Lia NUNCA re-oferta mesmo slot, mesmo que ainda esteja vago. Sempre apresenta slot diferente + prefixo de escassez ("os horários anteriores foram preenchidos — agenda muito disputada")
-- Após 3 rodadas sem confirmação → `gerar_msg_escalar_humano()` + flag `blink:slot_escalar:{lead_id}`
-- `handle_oferecer_slot` integra: filtra slots propostos pelo LLM, detecta re-proposta, busca novos da agenda automaticamente
-
-**Pytest:** `tests/test_bug_c80_slot_rotation.py` — 33/33 verde.
-**Push:** `PUSH_C80_SLOT_ROTATION.command`
-
-**Lição arquitetural CRÍTICA:**
-- **Contexto de agenda é stale por definição.** `ctx.agenda` é consultado quando a conversa começa. Até a confirmação, horas se passam. A única defesa é re-consultar em tempo real ANTES de gravar. Nunca confiar no cache.
-- **Princípio da escassez melhora conversão.** Comunicar "agenda dinâmica, horários preenchidos rapidamente" cria urgência real e honesta (a agenda de fato muda). Não é manipulação — é transparência sobre o que acontece com slots populares.
-- **Nunca re-ofertar o mesmo slot ao mesmo lead** = regra de UX fundamental. O paciente que não confirmou em 5 min viu o slot "desaparecer" — isso comunica valor e cria urgência pra próxima decisão.
-- **Fallback fail-open.** Se Redis cair, slot_rotation retorna slots sem filtro. Se Medware cair na re-validação, assume slot disponível e prossegue. Downtime do infra nunca bloqueia conversa.
 
 ### 0. (01/08/2026) Bug C-78 — FAQ "está atendendo hoje?" causou loop stall via sábado sem agenda (lead 23456132)
 

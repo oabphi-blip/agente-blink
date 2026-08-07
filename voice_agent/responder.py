@@ -971,6 +971,8 @@ _PERGUNTA_TURNO_PERIODO_PATTERNS = [
     re.compile(r"in[ií]cio[,\s].{0,12}meio.{0,12}fim", re.IGNORECASE | re.DOTALL),
     re.compile(r"per[ií]odo:\s*(in[ií]cio|meio|fim)", re.IGNORECASE),
     re.compile(r"\bturno:\s*(manh[ãa]|tarde)", re.IGNORECASE),
+    # Bug C-97 (07/08/2026) — capturar "qual dia da semana" isolado (caso Zoé 24424208)
+    re.compile(r"qual\b.{0,20}\bdia\s+da\s+semana\b", re.IGNORECASE | re.DOTALL),
 ]
 
 
@@ -1160,8 +1162,7 @@ def _viola_cobranca_antes_slot(text: str) -> bool:
 
 _COBRANCA_ANTECIPADA_FALLBACK = (
     "Antes de qualquer pagamento, deixa eu te oferecer os horários reais. "
-    "Qual dia da semana e turno funcionam melhor pra você? Assim já te passo "
-    "as opções concretas com data e hora."
+    "Vou verificar as opções disponíveis e já te passo com data e hora exatos."
 )
 
 
@@ -1271,9 +1272,12 @@ def _viola_dia_semana(text: str) -> Optional[tuple[str, str, str]]:
     return None
 
 
+# Bug C-97 (07/08/2026) — NUNCA perguntar dia/turno (decisão Fábio).
+# Essa string é usada como fallback quando ctx.agenda está vazio.
+# Quando há agenda, o call site usa _gerar_oferta_2_slots(ctx) diretamente.
 _DIA_SEMANA_FALLBACK = (
-    "Qual dia da semana e turno funcionam melhor pra você? "
-    "Assim confirmo a data e o horário exatos na unidade certa."
+    "Vou verificar os próximos horários disponíveis e já te passo as opções "
+    "com data e hora exatos."
 )
 
 
@@ -1601,9 +1605,10 @@ def _viola_oferta_em_dia_nao_atendido(
     return None
 
 
+# Bug C-97 (07/08/2026) — Nunca perguntar turno. Quando agenda disponível,
+# call site usa _gerar_oferta_2_slots(ctx). Senão, mensagem neutra sem preferência.
 _DIA_NAO_ATENDIDO_FALLBACK = (
-    "Qual turno funciona melhor pra você — manhã ou tarde? "
-    "Com isso confirmo o horário disponível."
+    "Vou verificar os horários disponíveis na unidade correta e já te trago as opções."
 )
 
 
@@ -1714,9 +1719,11 @@ def _viola_dia_sem_data_incompativel_unidade(
     return (dia_raw, medico_norm, unidade_raw)
 
 
+# Bug C-97 (07/08/2026) — removida pergunta de dia/turno. Informa o calendário
+# e oferece ir direto pra agenda quando o call site tiver ctx.agenda.
 _DIA_SEM_DATA_FALLBACK = (
     "A Dra. Karla Delalíbera atende seg/qua/sex em Asa Norte e ter/qui em "
-    "Águas Claras. Qual dia funciona melhor pra você?"
+    "Águas Claras. Vou verificar as próximas datas disponíveis."
 )
 
 
@@ -3218,9 +3225,9 @@ def _gerar_proxima_pergunta_sem_convenio(ctx: Optional[dict] = None) -> str:
             f"{saudacao} Qual unidade fica melhor pra vocês — "
             "Asa Norte ou Águas Claras?"
         )
+    # Bug C-97 (07/08/2026) — nunca perguntar dia/turno. Ir direto pra agenda.
     return (
-        f"{saudacao} Qual dia da semana e turno funcionam melhor "
-        "pra vocês?"
+        f"{saudacao} Vou verificar os próximos horários disponíveis e já te apresento as opções."
     )
 
 
@@ -3307,8 +3314,7 @@ def _gerar_reconhecimento_curto_e_avanca(ctx: Optional[dict] = None) -> str:
         return f"{abertura} O atendimento sera por convenio ou sem convenio?"
     if not known.get("unidade"):
         return f"{abertura} Qual unidade fica melhor — Asa Norte ou Aguas Claras?"
-    if not known.get("preferencia_dia") and not known.get("preferencia_turno"):
-        return f"{abertura} Qual dia da semana e turno funcionam melhor pra voce?"
+    # Bug C-97 (07/08/2026) — nunca perguntar dia/turno. Verificar agenda direto.
     return f"{abertura} Vou verificar os horarios disponiveis."
 
 
@@ -4223,6 +4229,9 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
                 dia_falado, data_str, dia_real,
                 bool(ctx and ctx.get("ja_agendado")), _padrao_oferta, text,
             )
+            # Bug C-97 (07/08/2026) — se temos agenda, ofertar direto; senão msg neutra.
+            if ctx and ctx.get("agenda"):
+                return _gerar_oferta_2_slots(ctx)
             return _DIA_SEMANA_FALLBACK
 
         # OFERTA EM DIA QUE O MÉDICO NÃO ATENDE (considera médico+unidade)
@@ -4295,6 +4304,9 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
                         bool(ctx and ctx.get("ja_agendado")), _padrao_oferta,
                         text[:300],
                     )
+                    # Bug C-97 (07/08/2026) — se temos agenda, ofertar direto; senão msg neutra.
+                    if ctx and ctx.get("agenda"):
+                        return _gerar_oferta_2_slots(ctx)
                     return _DIA_NAO_ATENDIDO_FALLBACK
 
         # C-54 (13/07/2026 — Ubirata/Lucas 24185000): menção a dia-da-semana
@@ -4333,6 +4345,9 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
                     "(dias permitidos nessa unidade não incluem %r). Texto: %r",
                     dia_men, medico_norm, unidade_norm, dia_men, text[:300],
                 )
+                # Bug C-97 (07/08/2026) — se temos agenda, ofertar direto; senão msg neutra.
+                if ctx and ctx.get("agenda"):
+                    return _gerar_oferta_2_slots(ctx)
                 return _DIA_SEM_DATA_FALLBACK
     else:
         # Log preventivo: paciente já agendado E texto NÃO parece oferta nova
