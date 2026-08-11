@@ -96,11 +96,29 @@ def _convenio_str(ctx: Optional[dict]) -> str:
 
 _PADRAO_ACEITE_SLOT = re.compile(
     r"(?:^|\W)("
-    r"1[\W]|2[\W]|3[\W]"  # 1️⃣ 2️⃣ 3️⃣ ou "1)" "2." etc
+    r"1(?:\W|$)|2(?:\W|$)|3(?:\W|$)"  # 1️⃣ 2️⃣ 3️⃣ ou "1)" "2." ou "1" fim de string
     r"|primeir[oa]|segund[oa]|terceir[oa]"
     r"|op[cç][aã]o\s*[123]"
     r"|primeir[oa]\s*op[cç][aã]o|segund[oa]\s*op[cç][aã]o"
     r"|(?:fica|serve|prefiro|melhor|pego|topo|aceito)"
+    r")",
+    re.IGNORECASE,
+)
+
+# C-119 (11/08/2026): Paciente aceita slot E confirma inline ("1, pode marcar").
+# Quando ambos os padrões batem no mesmo turno, Python pula CONFIRMACAO e injeta
+# ctx["known"]["c119_slot_para_gravar"] = slot para pipeline hook gravar no Medware.
+_PADRAO_PODE_MARCAR_INLINE = re.compile(
+    r"(?:"
+    r"pode\s+(?:marcar|agendar|confirmar|registrar|fechar|reservar)"
+    r"|quero\s+(?:marcar|agendar|confirmar|fechar|reservar)"
+    r"|t[aá]\s*(?:bom|ok|[oó]timo|certo)\s*[,!]?\s*(?:pode\s+(?:marcar|agendar|confirmar))?"
+    r"|sim[,!\s]+(?:pode|confirma|agenda|marca|reserva)"
+    r"|(?:confirma|fecha|marca|agenda|reserva)(?:\s+(?:esse|este|aquele|o)\s*hor[aá]rio)?"
+    r"|fica(?:r)?\s+(?:com\s+esse|marcado|confirmado|reservado)"
+    r"|peg[ao]\s+esse"
+    r"|v[aá]\s+(?:marcar|agendar)"
+    r"|f[ei]cha[!]?"
     r")",
     re.IGNORECASE,
 )
@@ -126,7 +144,14 @@ def deve_gerar_confirmacao_aceite(ctx: Optional[dict], user_text: str) -> Option
     if not _PADRAO_ACEITE_SLOT.search(user_text or ""):
         return None
 
-    slots = ctx.get("slots_ofertados") or []
+    # C-118 (11/08/2026): ctx["slots_ofertados"] nunca foi populado em prod —
+    # C-105/enriquecimento_ctx escreve em ctx["known"]["slots_selecionados"].
+    # Fallback added so aceite bypass actually fires.
+    slots = (
+        ctx.get("slots_ofertados")
+        or (ctx.get("known") or {}).get("slots_selecionados")
+        or []
+    )
     if not slots:
         return None
 
@@ -134,6 +159,18 @@ def deve_gerar_confirmacao_aceite(ctx: Optional[dict], user_text: str) -> Option
     slot_aceito = _identificar_slot_aceito(user_text, slots)
     if not slot_aceito:
         return None
+
+    # C-119 (11/08/2026): paciente aceitou slot E confirmou inline ("1, pode marcar").
+    # Injeta flag no ctx.known → pipeline hook em pipeline.py grava Medware e
+    # avança FSM para POS_GRAVACAO, saltando o turno de CONFIRMACAO.
+    if _PADRAO_PODE_MARCAR_INLINE.search(user_text):
+        if isinstance(ctx, dict) and isinstance(ctx.get("known"), dict):
+            ctx["known"]["c119_slot_para_gravar"] = slot_aceito
+            log.info(
+                "[C-119] slot_para_gravar injetado ctx.known: %s %s",
+                slot_aceito.get("data_iso"), slot_aceito.get("hora"),
+            )
+        return _montar_texto_reserva_imediata(slot_aceito, ctx)
 
     return _montar_texto_confirmacao(slot_aceito, ctx)
 
@@ -213,11 +250,57 @@ def _montar_texto_confirmacao(slot: dict, ctx: Optional[dict]) -> str:
         else ""
     )
 
+    # C-118 fix: texto de CONFIRMAÇÃO (não de registro).
+    # Antes dizia "Já estou registrando" sem gravar no Medware — arquiteturalmente errado.
+    # Agora pede confirmação do paciente; pipeline hook C-119 grava quando houver
+    # "pode marcar" inline (via _montar_texto_reserva_imediata).
     return (
-        f"{saudacao}fechado! Vou reservar {dia_semana} ({data_br}) — "
-        f"{intervalo} — com {medico}{unidade_frase}{convenio_frase}.\n\n"
-        "Já estou registrando no sistema — em instantes te envio a "
-        "confirmação com o endereço e as orientações."
+        f"{saudacao}✅ Confirmando: {dia_semana} ({data_br}) — "
+        f"{intervalo} — com {medico}{unidade_frase}{convenio_frase}. "
+        "Está tudo certo pra você?"
+    )
+
+
+def _montar_texto_reserva_imediata(slot: dict, ctx: Optional[dict]) -> str:
+    """C-119: texto enviado quando paciente confirmou inline ('1, pode marcar').
+
+    Pipeline hook em pipeline.py lê ctx["known"]["c119_slot_para_gravar"] e
+    executa a gravação no Medware logo após o envio desta mensagem.
+    """
+    from voice_agent.mensagens_ciclo import (
+        _DIAS_SEMANA_PT,
+        formatar_intervalo_consulta,
+    )
+    try:
+        dt = datetime.strptime(str(slot.get("data_iso", ""))[:10], "%Y-%m-%d")
+        dia_semana = _DIAS_SEMANA_PT[dt.weekday()].capitalize()
+        data_br = dt.strftime("%d/%m")
+    except (ValueError, TypeError):
+        return ""
+
+    hora_inicio = str(slot.get("hora") or "")[:5]
+    medico_ctx = (ctx or {}).get("known", {}).get("medico") or ""
+    intervalo = formatar_intervalo_consulta(hora_inicio, medico_ctx)
+
+    nome = _nome_paciente(ctx)
+    medico = _nome_medico_canonico(ctx)
+    unidade = _unidade_str(ctx)
+    convenio = _convenio_str(ctx)
+
+    saudacao = f"{nome}, " if nome else ""
+    unidade_frase = f" na unidade {unidade}" if unidade else ""
+    convenio_frase = (
+        f" pelo {convenio}"
+        if convenio and convenio.lower() not in (
+            "não se aplica", "nao se aplica", "particular",
+        )
+        else ""
+    )
+
+    return (
+        f"{saudacao}✅ Perfeito! Reservando {dia_semana} ({data_br}) — "
+        f"{intervalo} — com {medico}{unidade_frase}{convenio_frase}. "
+        "Em seguida te mando o endereço e as orientações. 🏥"
     )
 
 
@@ -1086,6 +1169,137 @@ _CONV_NOME_INTEXT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# C-123 (11/08/2026) — Tom canônico + escolha pós-recusa de convênio
+# ─────────────────────────────────────────────────────────────────────────────
+# Paciente pergunta se atende Bradesco → resposta correta:
+#   "ainda estamos em processo de credenciamento. Qual sua preferência?
+#    1️⃣ Somente com Convênio  2️⃣ Seguir Sem Convênio"
+#
+# Quando paciente responde escolhendo opção 2 → injeta ctx.known.convenio
+# = "Não se aplica" + flag c123_marcar_sem_convenio para pipeline gravar Kommo.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_RE_ESCOLHA_SEM_CONVENIO_C123 = re.compile(
+    r"(?:^|\s)"
+    r"(?:"
+    r"2️⃣|"
+    r"2\s*[.,)✔]?(?:\s|$)|"
+    r"seguir\s+sem\s+conv[eê]nio|"
+    r"sem\s+conv[eê]nio\b|"
+    r"prefiro\s+sem|"
+    r"pode\s+ser\s+sem|"
+    r"vou\s+sem\s+conv[eê]nio|"
+    r"seguir\s+sem\b|"
+    r"sem\s+plano\b"
+    r")",
+    re.IGNORECASE,
+)
+
+_RE_ESCOLHA_SO_CONVENIO_C123 = re.compile(
+    r"(?:^|\s)"
+    r"(?:"
+    r"1️⃣|"
+    r"1\s*[.,)✔]?(?:\s|$)|"
+    r"somente\s+com\s+conv[eê]nio|"
+    r"s[oó]\s+com\s+conv[eê]nio|"
+    r"somente\s+conv[eê]nio|"
+    r"preciso\s+de\s+conv[eê]nio|"
+    r"s[oó]\s+(?:com\s+)?conv[eê]nio\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _montar_recusa_convenio(conv_display: str, saud: str = "") -> str:
+    """Tom canônico para convênio não credenciado — C-123.
+
+    Regras:
+    - NÃO usa "não está na nossa rede credenciada" (seco demais)
+    - NÃO usa "particular" (usar "sem convênio")
+    - NÃO oferece valor (não sabe motivo/médico ainda)
+    - Apresenta 2 opções canônicas: 1️⃣ Somente com Convênio / 2️⃣ Seguir Sem Convênio
+    """
+    return (
+        f"{saud}o **{conv_display}** é um convênio que ainda estamos em processo "
+        "de credenciamento. 😊\n\n"
+        "Mas temos condições diferenciadas para atendimento sem convênio! "
+        "Qual a sua preferência?\n\n"
+        "1️⃣ Somente com Convênio\n"
+        "2️⃣ Seguir Sem Convênio"
+    )
+
+
+def _ultima_msg_era_recusa_convenio(ctx: Optional[dict]) -> bool:
+    """Verifica se o último outbound da Lia apresentou as 2 opções de convênio."""
+    ultima = (((ctx or {}).get("known") or {}).get("ultima_msg_outbound") or "").strip()
+    return "Somente com Convênio" in ultima and "Seguir Sem Convênio" in ultima
+
+
+def deve_responder_escolha_convenio(
+    ctx: Optional[dict], user_text: str,
+) -> Optional[str]:
+    """C-123: Detecta escolha do paciente após apresentação das 2 opções de convênio.
+
+    Gate: última outbound contém ambas as opções ("Somente com Convênio" e
+    "Seguir Sem Convênio"). Só age quando estamos neste contexto específico.
+
+    Opção 2 (Seguir Sem Convênio):
+        - Injeta ctx.known.convenio = "Não se aplica"
+        - Injeta ctx.known.c123_marcar_sem_convenio = True (pipeline atualiza Kommo)
+        - Retorna mensagem pedindo motivo da consulta
+
+    Opção 1 (Somente com Convênio):
+        - Injeta ctx.known.c123_encerrar_so_convenio = True
+        - Retorna mensagem de encerramento gentil
+
+    Toggle: BLINDAGEM_ESCOLHA_CONVENIO_ATIVADO (default ON)
+    Fail-open: exceção → None
+    """
+    if not _ativado("BLINDAGEM_ESCOLHA_CONVENIO_ATIVADO"):
+        return None
+    if not user_text or not ctx:
+        return None
+    if not _ultima_msg_era_recusa_convenio(ctx):
+        return None
+
+    try:
+        nome = _nome_paciente(ctx)
+        saud = f"{nome.split()[0]}, " if nome else ""
+        known = ctx.get("known") or {}
+
+        if _RE_ESCOLHA_SEM_CONVENIO_C123.search(user_text):
+            # Paciente escolheu Seguir Sem Convênio
+            if isinstance(ctx, dict) and isinstance(ctx.get("known"), dict):
+                ctx["known"]["convenio"] = "Não se aplica"
+                ctx["known"]["c123_marcar_sem_convenio"] = True
+                # Preservar nome do convênio recusado para Ñ ACEITO CONVÊNIO
+                conv_recusado = known.get("convenio_nao_aceito_nome") or known.get("convenio") or ""
+                if conv_recusado and conv_recusado.lower() not in ("não se aplica", "nao se aplica"):
+                    ctx["known"]["c123_convenio_recusado"] = conv_recusado
+            log.info("[C-123] Paciente escolheu Seguir Sem Convênio")
+            return (
+                f"{saud}ótimo! ✅ Seguiremos sem convênio.\n\n"
+                "Para prosseguir, me conta: qual é o motivo da consulta?"
+            )
+
+        if _RE_ESCOLHA_SO_CONVENIO_C123.search(user_text):
+            # Paciente insiste em só com convênio
+            if isinstance(ctx, dict) and isinstance(ctx.get("known"), dict):
+                ctx["known"]["c123_encerrar_so_convenio"] = True
+            log.info("[C-123] Paciente escolheu Somente com Convênio — encerrando")
+            return (
+                f"{saud}entendo! 😊 Assim que concluirmos o credenciamento, "
+                "te avisamos.\n\n"
+                "Qualquer dúvida, é só chamar aqui. Até mais! 🌟"
+            )
+
+        return None
+
+    except Exception as exc:
+        log.warning("[C-123] deve_responder_escolha_convenio falhou (fail-open): %s", exc)
+        return None
+
 
 def deve_responder_faq_convenio_aceito(
     ctx: Optional[dict], user_text: str,
@@ -1135,12 +1349,10 @@ def deve_responder_faq_convenio_aceito(
                     "qual unidade fica melhor para você: **Asa Norte** ou **Águas Claras**?"
                 )
             else:
-                return (
-                    f"{saud}infelizmente o **{conv_display}** não está na nossa rede credenciada. 😕\n\n"
-                    "Mas atendemos como **particular**:\n"
-                    "💳 Karla Delalíbera — R$ 611 Pix / R$ 670 cartão\n\n"
-                    "Prefere prosseguir assim ou só com convênio?"
-                )
+                # C-123: tom canônico — processo de credenciamento + sem "particular" + sem valor prematuro
+                if isinstance(ctx, dict) and isinstance(ctx.get("known"), dict):
+                    ctx["known"]["convenio_nao_aceito_nome"] = conv_display
+                return _montar_recusa_convenio(conv_display, saud)
 
         # ── Caminho B: convenio_aceito não computado ─────────────────────────
         # Gatilho: padrão FAQ genérico OU ctx.known.convenio aparece no user_text
@@ -1182,12 +1394,10 @@ def deve_responder_faq_convenio_aceito(
                 "qual unidade fica melhor para você: **Asa Norte** ou **Águas Claras**?"
             )
         else:
-            return (
-                f"{saud}infelizmente o **{conv_display}** não está na nossa rede credenciada. 😕\n\n"
-                "Mas atendemos como **particular**:\n"
-                "💳 Karla Delalíbera — R$ 611 Pix / R$ 670 cartão\n\n"
-                "Prefere prosseguir assim ou só com convênio?"
-            )
+            # C-123: tom canônico — processo de credenciamento + sem "particular" + sem valor prematuro
+            if isinstance(ctx, dict) and isinstance(ctx.get("known"), dict):
+                ctx["known"]["convenio_nao_aceito_nome"] = conv_display
+            return _montar_recusa_convenio(conv_display, saud)
 
     except Exception as e:  # noqa: BLE001
         log.warning("[C-104] faq_convenio_aceito falhou: %s", e)
@@ -1197,6 +1407,118 @@ def deve_responder_faq_convenio_aceito(
 # ═══════════════════════════════════════════════════════════════════════
 # PONTO DE ENTRADA — chain of responsibility
 # ═══════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════
+# BYPASS C-120 — DADOS PENDENTES: Python gera pergunta, salva 1 LLM call
+# ═══════════════════════════════════════════════════════════════════════
+# C-120 (11/08/2026): substitui render_bloco_pre_agenda + LLM por bypass Python
+# que emite a pergunta de dados faltantes diretamente — sem chamar LLM.
+#
+# Impacto: ~40% dos fluxos tinham CONVENIO como turno extra separado.
+# C-120 pergunta nome + data_nasc + convênio em 1 mensagem só.
+# Toggle: BLINDAGEM_DADOS_PENDENTES_ATIVADO (default ON).
+
+_SAUDACAO_PURA_C120 = re.compile(
+    r"^[\s]*(?:oi|ol[aá]|bom\s+dia|boa\s+tarde|boa\s+noite|hey|hi|hello"
+    r"|boas|e\s*[aí]|eae)\W*[\s]*$",
+    re.IGNORECASE,
+)
+
+_INTENT_AGENDAR_C120 = re.compile(
+    r"(?:quero|queria|preciso|gostaria|pode(?:ria)?|tentar)\s+"
+    r"(?:de\s+)?(?:agendar|marcar|consultar|uma\s+consulta|uma\s+avalia[cç][aã]o"
+    r"|horário|atend|retorno)",
+    re.IGNORECASE,
+)
+
+_CAMPOS_COLETADOS_C120 = (
+    "nome_paciente", "nome", "motivo", "convenio", "medico",
+    "unidade", "data_nasc_iso", "data_nascimento_iso",
+    "urgency_level", "unidade_detectada", "medico_detectado",
+)
+
+
+def deve_perguntar_dados_pendentes(ctx: Optional[dict], user_text: str) -> Optional[str]:
+    """C-120: Python gera a pergunta de dados pendentes sem chamar o LLM.
+
+    Dispara quando:
+      - FSM em TRIAGEM / DADOS / CONVENIO (ou None = início)
+      - checklist com >= 1 campo pendente para gravar no Medware
+      - paciente demonstrou intenção de agendar OU algum dado já foi coletado
+      - user_text não é saudação pura (ex: "Oi")
+
+    Retorna: string com pergunta concatenada ex. "Me passa nome completo,
+    data de nascimento e convênio?" — uma mensagem única, sem LLM.
+    Retorna None → fail-open, LLM continua fluxo normal.
+
+    Toggle: BLINDAGEM_DADOS_PENDENTES_ATIVADO (default ON).
+    """
+    if not _ativado("BLINDAGEM_DADOS_PENDENTES_ATIVADO"):
+        return None
+    if not ctx or not user_text or not user_text.strip():
+        return None
+
+    # Saudação pura: LLM humaniza o primeiro contato
+    if _SAUDACAO_PURA_C120.match(user_text.strip()):
+        return None
+
+    # FSM: não disparar após o paciente já estar escolhendo slots ou pós-agendamento
+    fsm_estado = ((ctx.get("fsm") or {}).get("estado") or "").upper()
+    if fsm_estado in {"AGENDA", "CONFIRMACAO", "GRAVACAO", "POS_GRAVACAO"}:
+        return None
+
+    # Sem agendamento já realizado
+    known = ctx.get("known") or {}
+    if ctx.get("ja_agendado") or known.get("ja_agendado"):
+        return None
+
+    # Verificar checklist
+    try:
+        from voice_agent.checklist_dados_minimos import verificar_dados_minimos
+        resultado = verificar_dados_minimos(known)
+        if resultado.pronto_para_oferecer_slot or resultado.total_pendentes < 1:
+            return None  # checklist completo ou vazio: não agir
+    except Exception as _exc_c120:
+        log.warning("[C-120] checklist falhou (fail-open): %s", _exc_c120)
+        return None
+
+    # Gate: algum dado já coletado OU intenção explícita de agendar
+    # Evita interceptar perguntas de FAQ/serviços antes do paciente expressar intenção
+    has_data = any(known.get(f) for f in _CAMPOS_COLETADOS_C120)
+    has_intent = bool(_INTENT_AGENDAR_C120.search(user_text))
+    if not has_data and not has_intent:
+        return None  # LLM lida com FAQ, curiosos, perguntas de serviço
+
+    return _montar_pergunta_dados_c120(resultado, ctx)
+
+
+def _montar_pergunta_dados_c120(resultado, ctx) -> str:
+    """Monta a pergunta dos dados pendentes em linguagem natural (C-120)."""
+    pendentes = resultado.campos_pendentes
+    if not pendentes:
+        return ""
+
+    nome = _nome_paciente(ctx)
+    saud = f"{nome}, " if nome else ""
+
+    if len(pendentes) == 1:
+        campo = pendentes[0]
+        # CPF: personalizar com nome do paciente se disponível
+        if "cpf" in campo.lower():
+            nome_pac = (
+                (ctx or {}).get("known", {}).get("nome_paciente") or nome or "do paciente"
+            )
+            return f"{saud}me passa o CPF de {nome_pac}?"
+        return f"{saud}me passa {campo}?"
+
+    # 2+ pendentes: todos em 1 mensagem → elimina turnos extra de coleta
+    if len(pendentes) == 2:
+        lista = f"{pendentes[0]} e {pendentes[1]}"
+    else:
+        lista = ", ".join(pendentes[:-1]) + f" e {pendentes[-1]}"
+
+    return f"{saud}antes de garantir o horário, me passa: {lista}?"
+
 
 def tentar_bypass_deterministico(
     ctx: Optional[dict], user_text: str,
@@ -1335,6 +1657,16 @@ def tentar_bypass_deterministico(
         if t:
             return ("faq_especialidade", t)
 
+        # Bug C-123 (11/08/2026): Escolha pós-recusa de convênio.
+        # Se o último outbound da Lia apresentou "1️⃣ Somente com Convênio /
+        # 2️⃣ Seguir Sem Convênio", detecta a escolha do paciente e injeta
+        # ctx.known.convenio = "Não se aplica" + flag c123_marcar_sem_convenio.
+        # Vem ANTES de faq_convenio_aceito — o paciente está respondendo a uma
+        # oferta já apresentada, não fazendo uma pergunta nova de FAQ.
+        t = deve_responder_escolha_convenio(ctx, user_text)
+        if t:
+            return ("escolha_convenio_c123", t)
+
         # Bug C-104 (11/08/2026): FAQ convênio aceito usando ctx.known.convenio_aceito
         # (derivado por C-103). "Vocês aceitam meu plano?" → resposta imediata
         # sem LLM e sem Medware. Vem ANTES do classificador_convenio para usar
@@ -1393,6 +1725,16 @@ def tentar_bypass_deterministico(
                 return ("sinal_particular_c114", t)
         except Exception as _e114:
             log.warning("[C-114] bypass sinal_particular falhou: %s", _e114)
+
+        # C-120 (11/08/2026): dados pendentes — Python gera pergunta, salva 1 LLM call.
+        # Fica NO FIM da chain: todos os bypasses específicos (FAQ, valor, aceite, etc.)
+        # têm prioridade. Só chega aqui quando nenhum outro bypass quis o turno.
+        try:
+            t = deve_perguntar_dados_pendentes(ctx, user_text)
+            if t:
+                return ("dados_pendentes_c120", t)
+        except Exception as _e120:
+            log.warning("[C-120] bypass dados_pendentes falhou: %s", _e120)
 
     except Exception as e:  # noqa: BLE001
         log.warning("bypass determinístico falhou: %s", e)

@@ -2332,16 +2332,19 @@ def _gerar_script_convenio_nao_aceito(
         label = conv_detectado.upper()
     else:
         label = conv_detectado.title()
+    # C-123 (11/08/2026): tom corrigido
+    # - remove "não está credenciado" (seco) → "ainda não faz parte"
+    # - remove "particular" → "sem convênio"
+    # - remove "(te apresento valor + parcelamento)" (prematuro — não sabe motivo/médico)
+    # - ordem canônica: 1️⃣ Somente com Convênio / 2️⃣ Seguir Sem Convênio
     return (
-        f"{saudacao}preciso te corrigir uma informação: o **{label}** "
-        "não está credenciado na nossa rede — pra nenhum dos profissionais "
-        "(Dra. Karla, Dr. Fabrício ou Dra. Kátia). Sem exceção.\n\n"
-        "Mas não quero te deixar sem solução 💙 — temos atendimento sem "
-        "convênio com incentivos especiais pra quem tem plano que não "
-        "cobrimos.\n\n"
+        f"{saudacao}o **{label}** ainda não faz parte da nossa rede credenciada — "
+        "estamos em processo de credenciamento. 😊\n\n"
+        "Mas não quero te deixar sem solução 💙 — "
+        "temos condições diferenciadas para atendimento sem convênio!\n\n"
         "Como prefere seguir?\n"
-        "1️⃣ Seguir sem convênio (te apresento valor + parcelamento)\n"
-        "2️⃣ Somente com convênio (encerro o atendimento aqui)"
+        "1️⃣ Somente com Convênio\n"
+        "2️⃣ Seguir Sem Convênio"
     )
 
 

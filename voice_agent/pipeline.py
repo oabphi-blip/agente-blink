@@ -1266,6 +1266,69 @@ class VoicePipeline:
         except Exception as _e_c109_pipe:  # noqa: BLE001
             log.warning("[C-109 PIPELINE] check falhou (fail-open): %s", _e_c109_pipe)
 
+        # 3a-C119 (11/08/2026) — Aceite slot + "pode marcar" inline.
+        # deve_gerar_confirmacao_aceite (blindagens_deterministicas.py) injetou
+        # ctx["known"]["c119_slot_para_gravar"] = slot. Aqui: gravar Medware e
+        # avançar FSM para POS_GRAVACAO — salta o turno de CONFIRMACAO.
+        try:
+            _slot_c119 = (
+                caller_context.get("known") or {}
+            ).get("c119_slot_para_gravar")
+            _lid_c119 = (
+                caller_context.get("lead_id")
+                if isinstance(caller_context, dict) else None
+            )
+            if _slot_c119 and _lid_c119:
+                # Limpa flag imediatamente (evita re-trigger no próximo turno)
+                if isinstance(caller_context.get("known"), dict):
+                    caller_context["known"].pop("c119_slot_para_gravar", None)
+                _known_c119 = caller_context.get("known") or {}
+                _decision_c119 = {
+                    "medico": _known_c119.get("medico") or "",
+                    "unidade": _known_c119.get("unidade") or "",
+                    "data_iso": _slot_c119.get("data_iso") or "",
+                    "hora": _slot_c119.get("hora") or "",
+                }
+                if _decision_c119["data_iso"] and _decision_c119["hora"]:
+                    log.info(
+                        "[C-119 PIPELINE] gravando Medware lead=%s %s %s",
+                        _lid_c119,
+                        _decision_c119["data_iso"],
+                        _decision_c119["hora"],
+                    )
+                    from voice_agent.agendamento import (  # noqa: PLC0415
+                        executar_agendamento as _exec_ag_c119,
+                    )
+                    _res_c119 = _exec_ag_c119(
+                        _decision_c119,
+                        caller_context,
+                        self.medware if hasattr(self, "medware") else None,
+                        self.kommo if hasattr(self, "kommo") else None,
+                        getattr(self, "_redis", None),
+                    )
+                    if (_res_c119 or {}).get("ok"):
+                        log.info("[C-119 PIPELINE] OK lead=%s", _lid_c119)
+                        try:
+                            from voice_agent.fsm_conversa import (  # noqa: PLC0415
+                                EstadoConversa as _EC_c119,
+                                FSMManager as _FSMMgr_c119,
+                            )
+                            _FSMMgr_c119(getattr(self, "_redis", None)).transicionar(
+                                conversation_key,
+                                _EC_c119.POS_GRAVACAO,
+                                motivo="C-119 aceite+pode_marcar inline",
+                            )
+                        except Exception as _e_fsm_c119:  # noqa: BLE001
+                            log.warning("[C-119 FSM] transicionar falhou: %s", _e_fsm_c119)
+                    else:
+                        log.warning(
+                            "[C-119 PIPELINE] agendamento falhou lead=%s motivo=%s",
+                            _lid_c119,
+                            (_res_c119 or {}).get("motivo"),
+                        )
+        except Exception as _e_c119_pipe:  # noqa: BLE001
+            log.warning("[C-119 PIPELINE] check falhou (fail-open): %s", _e_c119_pipe)
+
         # 3a-ter) Bug C-92 (05/08/2026 Beatriz 16843614) — paciente AGENDADO pediu
         # remarcar, corrigir dados ou fila de espera.
         # Filtro C-92 em responder.py já substituiu o texto e gravou flag Redis.
@@ -1474,6 +1537,106 @@ class VoicePipeline:
                         log.warning("[C-116] delete flags falhou: %s", _e_c116_del)
         except Exception as _e_c116_pipe:  # noqa: BLE001
             log.warning("[C-116 PIPELINE] check falhou (fail-open): %s", _e_c116_pipe)
+
+        # 3a-sex) Bug C-123 (11/08/2026) — Escolha pós-recusa de convênio.
+        # bypass deve_responder_escolha_convenio() injetou em ctx.known:
+        #   c123_marcar_sem_convenio = True  →  paciente escolheu Seguir Sem Convênio
+        #   c123_encerrar_so_convenio = True →  paciente insiste em Somente com Convênio
+        # Aqui: gravar campo CONVÊNIO = "Não se aplica" (field 853206) no Kommo
+        # + gravar Ñ ACEITO CONVÊNIO com o plano recusado (field 1175268)
+        # + mover lead → 2.LEADS FRIO se insistiu em só com convênio.
+        try:
+            _known_c123 = (
+                caller_context.get("known") if isinstance(caller_context, dict) else {}
+            ) or {}
+            _lid_c123 = (
+                caller_context.get("lead_id") if isinstance(caller_context, dict) else None
+            )
+            _marcar_sem_c123 = _known_c123.get("c123_marcar_sem_convenio")
+            _encerrar_so_c123 = _known_c123.get("c123_encerrar_so_convenio")
+
+            if _lid_c123 and self.kommo is not None and (_marcar_sem_c123 or _encerrar_so_c123):
+                import datetime as _dt_c123
+                _ts_c123 = _dt_c123.datetime.now().strftime("%H:%M %d/%m")
+
+                if _marcar_sem_c123:
+                    # Limpar flag (idempotência)
+                    _known_c123.pop("c123_marcar_sem_convenio", None)
+
+                    # Gravar CONVÊNIO = "Não se aplica" (enum_id 906979, field 853206)
+                    # Usar patch_custom_fields_raw — Bug C-12: update_lead_fields não grava select
+                    try:
+                        self.kommo.patch_custom_fields_raw(
+                            _lid_c123,
+                            [{"field_id": 853206, "values": [{"enum_id": 906979}]}],
+                        )
+                        log.info(
+                            "[C-123 PIPELINE] CONVÊNIO = Não se aplica gravado lead=%s",
+                            _lid_c123,
+                        )
+                    except Exception as _e_c123_conv:  # noqa: BLE001
+                        log.warning("[C-123] gravar CONVÊNIO falhou: %s", _e_c123_conv)
+
+                    # Gravar Ñ ACEITO CONVÊNIO com o plano recusado (field 1175268)
+                    # se o nome foi preservado em ctx.known.c123_convenio_recusado
+                    _conv_recusado_c123 = _known_c123.get("c123_convenio_recusado", "")
+                    if _conv_recusado_c123:
+                        try:
+                            # update_lead_fields lida com o mapeamento nome→enum_id
+                            self.kommo.update_lead_fields(
+                                _lid_c123,
+                                {"nao_aceito_convenio": _conv_recusado_c123},
+                            )
+                            log.info(
+                                "[C-123] Ñ ACEITO CONVÊNIO = %s lead=%s",
+                                _conv_recusado_c123, _lid_c123,
+                            )
+                        except Exception as _e_c123_nao:  # noqa: BLE001
+                            log.warning("[C-123] gravar Ñ ACEITO CONVÊNIO falhou: %s", _e_c123_nao)
+
+                    # Nota Kommo
+                    try:
+                        _conv_disp_c123 = _conv_recusado_c123 or "convênio recusado"
+                        self.kommo.add_note(
+                            _lid_c123,
+                            f"✅ [LIA C-123 {_ts_c123}] Paciente escolheu SEGUIR SEM CONVÊNIO. "
+                            f"Plano: {_conv_disp_c123}. "
+                            f"CONVÊNIO → Não se aplica. Coleta de motivo em andamento.",
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                if _encerrar_so_c123:
+                    # Limpar flag
+                    _known_c123.pop("c123_encerrar_so_convenio", None)
+
+                    # Mover lead → 2.LEADS FRIO e desativar IA
+                    _status_c123 = (
+                        caller_context.get("status_id") if isinstance(caller_context, dict) else None
+                    )
+                    _ETAPAS_FINAIS_C123 = {142, 143, 91486864, 106563343}
+                    if _status_c123 and _status_c123 not in _ETAPAS_FINAIS_C123:
+                        try:
+                            self.kommo.update_lead_status(_lid_c123, 101508307)  # 2.LEADS FRIO
+                            log.info("[C-123] lead %s movido → 2.LEADS FRIO", _lid_c123)
+                        except Exception as _e_c123_st:  # noqa: BLE001
+                            log.warning("[C-123] mover status falhou: %s", _e_c123_st)
+                    try:
+                        self.kommo.update_lead_fields(_lid_c123, {"ativado_ia": "DESATIVADO"})
+                    except Exception as _e_c123_ia:  # noqa: BLE001
+                        log.warning("[C-123] desativar IA falhou: %s", _e_c123_ia)
+                    try:
+                        self.kommo.add_note(
+                            _lid_c123,
+                            f"🔕 [LIA C-123 {_ts_c123}] Paciente insistiu em SOMENTE com convênio. "
+                            "IA desativada. Lead movido → 2.LEADS FRIO. "
+                            "Avisar quando credenciamento concluído.",
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+
+        except Exception as _e_c123_pipe:  # noqa: BLE001
+            log.warning("[C-123 PIPELINE] check falhou (fail-open): %s", _e_c123_pipe)
 
         # 4) Envio (se houver destino)
         if not reply_to_number:
