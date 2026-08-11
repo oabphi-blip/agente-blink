@@ -1,0 +1,43 @@
+{
+  "name": "1020_retorno_mais_de_1_ano_v1",
+  "language": "pt_BR",
+  "category": "UTILITY",
+  "components": [
+    {
+      "type": "BODY",
+      "text": "Olá, {{1}}!\n\nFaz mais de um ano que {{2}} não consulta com a Dra. Karla (última visita: {{3}}).\n\nHora da próxima consulta 💙",
+      "example": {
+        "body_text": [
+          ["Ana", "Bento", "16/03/2025"]
+        ]
+      }
+    },
+    {
+      "type": "BUTTONS",
+      "buttons": [
+        {
+          "type": "QUICK_REPLY",
+          "text": "Agendar agora"
+        },
+        {
+          "type": "QUICK_REPLY",
+          "text": "Me lembre depois"
+        }
+      ]
+    }
+  ],
+  "_meta_notes": {
+    "campaign": "Reativação de pacientes com 1+ ano sem consultar",
+    "source_channel": "#04-lista-pacientes-cons...",
+    "created_by": "Claude/Fábio em 10/06/2026 23:30 BRT",
+    "placeholders": {
+      "1": "nome do contato/responsável (ex: Ana)",
+      "2": "nome do paciente (ex: Bento Loures da Fonseca)",
+      "3": "data da última consulta em dd/MM/aaaa (ex: 16/03/2025)"
+    },
+    "expected_buttons_routing": {
+      "Agendar agora": "→ Lia entra em modo AGENDA E1.5 (pergunta nome contato se inválido) → E2 (motivo) → ...",
+      "Me lembre depois": "→ Status conversa = 'aguarda_decisao' + scheduler reenvia em 30 dias"
+    }
+  }
+}

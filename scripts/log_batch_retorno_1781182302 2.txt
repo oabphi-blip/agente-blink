@@ -1,0 +1,13 @@
+# Batch retorno > 1 ano — 2026-06-11T09:51:42.446127
+
+
+# RESUMO
+{
+  "OK": 0,
+  "JA_RECEBEU": 0,
+  "ERRO": 0,
+  "FORA_HORARIO": 0
+}
+
+# DETALHES
+[]

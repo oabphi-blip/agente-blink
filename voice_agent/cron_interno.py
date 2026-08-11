@@ -1,0 +1,1282 @@
+"""Cron interno do voice_agent — roda background dentro do FastAPI.
+
+Substitui necessidade de N8N ou scheduled task externa. Hook no startup
+do app (em webhook.py:create_app). Loops em threads daemon:
+
+  1. classificar_tick — a cada CLASSIFICAR_CADA_HORAS (default 1h)
+     varre Redis blink:classificar:aguardando_resposta:* e move quem
+     passou timeout pra etapa "0-a classificar".
+
+  2. renovacao_varredura — TODO próxima sessão. Vai iterar leads Kommo
+     em STATUS_IDS_ANTES_AGENDADO + ja_respondeu, e disparar dispatcher.
+
+Envs:
+  BLINK_CRON_ENABLED=1     → liga (default OFF)
+  BLINK_CRON_DRY_RUN=true  → não move/dispara, só loga (default ON)
+  CLASSIFICAR_CADA_HORAS=1 → frequência do classificar (default 1h)
+  CLASSIFICAR_TIMEOUT_HORAS=24 → tempo após disparo pra mover (default 24h)
+
+Pra desligar: setar BLINK_CRON_ENABLED=0 e redeploy.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import threading
+import time
+
+log = logging.getLogger(__name__)
+
+
+def _enabled() -> bool:
+    return (os.environ.get("BLINK_CRON_ENABLED") or "").strip() == "1"
+
+
+def _dry_run_default() -> bool:
+    raw = (os.environ.get("BLINK_CRON_DRY_RUN") or "true").lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _intervalo_classificar_seg() -> int:
+    raw = (os.environ.get("CLASSIFICAR_CADA_HORAS") or "1").strip()
+    try:
+        return max(int(float(raw) * 3600), 60)  # mínimo 1 min
+    except ValueError:
+        return 3600
+
+
+def _intervalo_renovacao_seg() -> int:
+    raw = (os.environ.get("RENOVACAO_CADA_MIN") or "15").strip()
+    try:
+        return max(int(float(raw) * 60), 60)  # mínimo 1 min
+    except ValueError:
+        return 900
+
+
+def _hora_brt() -> int:
+    """Hora atual em Brasília (UTC-3, sem DST)."""
+    from datetime import datetime, timedelta, timezone
+    return datetime.now(timezone(timedelta(hours=-3))).hour
+
+
+def _renovacao_em_horario_comercial() -> bool:
+    """Default 8h–18h BRT. Configurável via env."""
+    try:
+        h_ini = int(os.environ.get("RENOVACAO_HORA_INICIO") or "8")
+        h_fim = int(os.environ.get("RENOVACAO_HORA_FIM") or "18")
+    except ValueError:
+        h_ini, h_fim = 8, 18
+    h = _hora_brt()
+    return h_ini <= h < h_fim
+
+
+# ---------------------------------------------------------------------------
+# Worker: classificar_tick
+# ---------------------------------------------------------------------------
+
+def _executar_classificar(*, pipeline, dry_run: bool) -> dict:
+    """Lógica idêntica ao endpoint /admin/classificar-tick (varredura completa).
+
+    Devolve resumo {ok, total_candidatos, movidos, dry_run}.
+    """
+    from voice_agent.classificar import (
+        REDIS_KEY_AGUARDA_FMT,
+        get_status_a_classificar_id,
+        get_timeout_classificar_horas,
+        mover_lead_para_classificar,
+    )
+
+    destino = get_status_a_classificar_id()
+    if destino is None:
+        return {"ok": False, "razao": "sem_status_destino"}
+
+    redis_cli = getattr(pipeline, "_redis", None)
+    kommo_cli = getattr(pipeline, "kommo", None)
+    if redis_cli is None:
+        return {"ok": False, "razao": "sem_redis"}
+
+    agora = time.time()
+    timeout_h = get_timeout_classificar_horas()
+    movidos = 0
+    candidatos = 0
+
+    try:
+        cursor = 0
+        pattern = "blink:classificar:aguardando_resposta:*"
+        while True:
+            cursor, batch = redis_cli.scan(
+                cursor=cursor, match=pattern, count=200,
+            )
+            for k in batch:
+                key_str = k.decode() if isinstance(k, bytes) else k
+                try:
+                    lead_id = int(key_str.rsplit(":", 1)[1])
+                except (IndexError, ValueError):
+                    continue
+                try:
+                    raw = redis_cli.get(key_str)
+                    disparo_ts = float(raw) if raw else None
+                except Exception:  # noqa: BLE001
+                    disparo_ts = None
+                r = mover_lead_para_classificar(
+                    lead_id=lead_id,
+                    disparo_renovacao_ts=disparo_ts,
+                    ultima_resposta_paciente_ts=None,
+                    kommo_client=None if dry_run else kommo_cli,
+                    agora=agora, dry_run=dry_run,
+                    timeout_horas=timeout_h,
+                    status_destino_id=destino,  # passa explícito (lê env atual)
+                )
+                # Candidato = passou do timeout. `razao` pode virar "dry_run"
+                # depois da decisão original, então usamos horas_passadas.
+                if r.horas_passadas is not None and r.horas_passadas >= timeout_h:
+                    candidatos += 1
+                    if r.movido:
+                        movidos += 1
+            if cursor == 0:
+                break
+    except Exception as exc:  # noqa: BLE001
+        log.warning("[CRON classificar] varredura falhou: %s", exc)
+        return {
+            "ok": False, "razao": "excecao_varredura",
+            "candidatos": candidatos, "movidos": movidos,
+        }
+
+    return {
+        "ok": True, "dry_run": dry_run,
+        "candidatos": candidatos, "movidos": movidos,
+        "timeout_horas": timeout_h, "status_destino": destino,
+    }
+
+
+def _worker_classificar_loop(*, pipeline, stop_event: threading.Event) -> None:
+    intervalo = _intervalo_classificar_seg()
+    log.info(
+        "[CRON classificar] worker iniciado intervalo=%ss dry_run=%s",
+        intervalo, _dry_run_default(),
+    )
+    # Atraso inicial — espera 60s pro app subir 100%.
+    if stop_event.wait(60):
+        return
+    while not stop_event.is_set():
+        try:
+            res = _executar_classificar(
+                pipeline=pipeline, dry_run=_dry_run_default(),
+            )
+            log.info("[CRON classificar] %s", res)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("[CRON classificar] exceção no loop: %s", exc)
+        if stop_event.wait(intervalo):
+            return
+
+
+# ---------------------------------------------------------------------------
+# Worker: renovacao_varredura
+# ---------------------------------------------------------------------------
+
+def _executar_renovacao_varredura(*, pipeline, dry_run: bool) -> dict:
+    """Itera leads Kommo nos status pré-AGENDADO, lê Redis ultima_msg_paciente,
+    chama dispatcher de renovação por lead elegível.
+
+    Retorna {ok, candidatos, enviados, dry_run, motivo}.
+    """
+    from voice_agent.mensagens_janela import STATUS_IDS_ANTES_AGENDADO
+    from voice_agent.renovacao_dispatcher import (
+        SnapshotLead, dispatch_renovacao,
+    )
+
+    kommo = getattr(pipeline, "kommo", None)
+    if kommo is None:
+        return {"ok": False, "razao": "sem_kommo"}
+    redis_cli = getattr(pipeline, "_redis", None)
+
+    candidatos = 0
+    enviados = 0
+    erros = 0
+
+    # Limitar varredura. Se Fábio quiser mais leads, ajusta env.
+    limite = int(os.environ.get("RENOVACAO_LIMITE_LEADS") or "50")
+    horas_pre_renovacao = int(os.environ.get("RENOVACAO_HORAS_MIN") or "22")
+
+    try:
+        # Iterar lista de leads ativos via kommo.list_stale_leads (existente).
+        # Compatível com qualquer cliente que tenha esse método.
+        leads = []
+        if hasattr(kommo, "list_active_leads"):
+            leads = kommo.list_active_leads(
+                pipeline_id=8601819, limit=limite,
+            ) or []
+        elif hasattr(kommo, "list_stale_leads"):
+            leads = kommo.list_stale_leads(
+                pipeline_id=8601819, limit=limite,
+            ) or []
+        else:
+            return {"ok": False, "razao": "kommo_sem_list_method"}
+
+        for lead in leads:
+            if not isinstance(lead, dict):
+                continue
+            status_id = lead.get("status_id")
+            if status_id not in STATUS_IDS_ANTES_AGENDADO:
+                continue
+            lead_id = lead.get("id")
+            telefone = lead.get("telefone") or lead.get("phone") or ""
+            nome_contato = lead.get("nome_contato") or lead.get("name") or ""
+            if not lead_id or not telefone or not nome_contato:
+                continue
+
+            # Lê ultima_msg_paciente do Redis (gravada pelo webhook).
+            ultima_ts = None
+            if redis_cli is not None:
+                try:
+                    raw = redis_cli.get(
+                        f"blink:janela:ultima_msg_paciente:{lead_id}"
+                    )
+                    ultima_ts = float(raw) if raw else None
+                except Exception:  # noqa: BLE001
+                    ultima_ts = None
+
+            snap = SnapshotLead(
+                lead_id=int(lead_id), telefone_e164=str(telefone),
+                nome_contato=str(nome_contato), status_id=int(status_id),
+                ultima_msg_paciente_ts=ultima_ts,
+                paciente_ja_respondeu_na_vida=bool(ultima_ts),
+            )
+            try:
+                res = dispatch_renovacao(
+                    snap,
+                    wa_client=None if dry_run else getattr(pipeline, "wa_cloud", None),
+                    redis_client=redis_cli,
+                    kommo_note_writer=None if dry_run else kommo,
+                    dry_run=dry_run,
+                )
+                if res.elegibilidade.get("elegivel"):
+                    candidatos += 1
+                if res.enviado:
+                    enviados += 1
+            except Exception as exc:  # noqa: BLE001
+                erros += 1
+                log.warning("[CRON renovacao] dispatch lead=%s falhou: %s",
+                            lead_id, exc)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "razao": "excecao", "erro": str(exc)[:300]}
+
+    return {
+        "ok": True, "dry_run": dry_run, "candidatos": candidatos,
+        "enviados": enviados, "erros": erros, "limite": limite,
+    }
+
+
+def _worker_renovacao_loop(*, pipeline, stop_event: threading.Event) -> None:
+    intervalo = _intervalo_renovacao_seg()
+    log.info(
+        "[CRON renovacao] worker iniciado intervalo=%ss dry_run=%s",
+        intervalo, _dry_run_default(),
+    )
+    # Atraso inicial — espera 90s pro app subir.
+    if stop_event.wait(90):
+        return
+    while not stop_event.is_set():
+        if _renovacao_em_horario_comercial():
+            try:
+                res = _executar_renovacao_varredura(
+                    pipeline=pipeline, dry_run=_dry_run_default(),
+                )
+                log.info("[CRON renovacao] %s", res)
+            except Exception as exc:  # noqa: BLE001
+                log.exception("[CRON renovacao] exceção no loop: %s", exc)
+        else:
+            log.debug("[CRON renovacao] fora horário comercial — pulando")
+        if stop_event.wait(intervalo):
+            return
+
+
+# ---------------------------------------------------------------------------
+# Worker: janela_24h_tick (observabilidade do prazo WhatsApp, 05/07/2026)
+# Recalcula o campo JANELA 24H (aberta/expirando/fechada) pra cada lead
+# ativo a partir do último inbound gravado em Redis. Roda 24h (uma janela
+# fecha a qualquer hora), sem gate de horário comercial.
+# Toggle: JANELA24H_TICK_ENABLED (default ON — inerte até os campos Kommo
+# existirem, pois update_lead_fields ignora field_id/enum_id == 0).
+# ---------------------------------------------------------------------------
+
+def _janela24h_tick_enabled() -> bool:
+    raw = (os.environ.get("JANELA24H_TICK_ENABLED") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off", "")
+
+
+def _intervalo_janela24h_seg() -> int:
+    raw = (os.environ.get("JANELA24H_CADA_MIN") or "15").strip()
+    try:
+        return max(int(float(raw) * 60), 60)
+    except ValueError:
+        return 900
+
+
+def _executar_janela_24h_varredura(*, pipeline, dry_run: bool) -> dict:
+    """Itera leads ativos, lê o último inbound em Redis e atualiza o campo
+    JANELA 24H no Kommo (aberta/expirando/fechada).
+
+    Retorna {ok, varridos, atualizados, sem_ts, erros, dry_run}.
+    """
+    from voice_agent import campos_acompanhamento as _ca
+
+    kommo = getattr(pipeline, "kommo", None)
+    if kommo is None:
+        return {"ok": False, "razao": "sem_kommo"}
+    redis_cli = getattr(pipeline, "_redis", None)
+    if redis_cli is None:
+        return {"ok": False, "razao": "sem_redis"}
+
+    limite = int(os.environ.get("JANELA24H_LIMITE_LEADS") or "200")
+    # TTL do cache Redis do rótulo. 20min < 15min (intervalo do worker) daria
+    # ping-pong; 20min > 15min garante que qualquer entrada de cache expira
+    # ANTES do 2º tick seguinte — força re-avaliação periódica mesmo quando o
+    # rótulo "aparente" não mudou. Fix bug JANELA 24H fixo em "Falta 20h"
+    # (05/07/2026).
+    cache_ttl_seg = int(os.environ.get("JANELA24H_CACHE_TTL_SEG") or "1200")
+    varridos = atualizados = sem_ts = erros = sem_mudanca = 0
+
+    try:
+        leads = []
+        if hasattr(kommo, "list_active_leads"):
+            leads = kommo.list_active_leads(pipeline_id=8601819, limit=limite) or []
+        elif hasattr(kommo, "list_stale_leads"):
+            leads = kommo.list_stale_leads(pipeline_id=8601819, limit=limite) or []
+        else:
+            return {"ok": False, "razao": "kommo_sem_list_method"}
+
+        for lead in leads:
+            if not isinstance(lead, dict):
+                continue
+            lead_id = lead.get("id")
+            if not lead_id:
+                continue
+            varridos += 1
+            ultima_ts = None
+            try:
+                raw = redis_cli.get(
+                    f"blink:janela:ultima_msg_paciente:{lead_id}"
+                )
+                ultima_ts = float(raw) if raw else None
+            except Exception:  # noqa: BLE001
+                ultima_ts = None
+            if ultima_ts is None:
+                sem_ts += 1
+                continue
+            campos = _ca.campos_janela_24h(ultima_ts)
+            if not campos:
+                sem_ts += 1
+                continue
+            novo_rotulo = campos.get("janela_24h")
+            # ULTIMA MENS HUMANO — só pra leads em 1-ATENDIMENTO HUMANO
+            # (106563343), onde o humano está conduzindo. Escopo estreito =
+            # custo baixo (1 leitura de notas só nesses leads).
+            human_ts = None
+            if int(lead.get("status_id") or 0) == 106563343:
+                try:
+                    human_ts = kommo.ts_ultima_msg_humano(lead_id)
+                except Exception:  # noqa: BLE001
+                    human_ts = None
+                if human_ts:
+                    campos["ts_ultima_msg_humano"] = int(human_ts)
+            # Grava só quando algo MUDA — evita reescrever o mesmo valor a
+            # cada varredura (economia de chamadas Kommo). Chave composta:
+            # rótulo da janela + ts humano.
+            marca = f"{novo_rotulo}|{int(human_ts) if human_ts else ''}"
+            cache_key = f"blink:janela:rotulo:{lead_id}"
+            try:
+                atual = redis_cli.get(cache_key)
+                if isinstance(atual, bytes):
+                    atual = atual.decode("utf-8", "ignore")
+            except Exception:  # noqa: BLE001
+                atual = None
+            # Só pula quando cache existe COM valor igual. Cache expirado
+            # (setex TTL 20min) volta como None → força re-write pra Kommo.
+            if atual is not None and atual == marca:
+                sem_mudanca += 1
+                continue
+            if dry_run:
+                atualizados += 1
+                continue
+            try:
+                kommo.update_lead_fields(int(lead_id), campos)
+                atualizados += 1
+                try:
+                    # setex TTL curto — força re-avaliação no próximo tick
+                    # mesmo que rótulo aparente igual. Chave nova regrava
+                    # depois da expiração natural, propagando "Falta 15h"
+                    # etc pro Kommo em vez de ficar preso em "Falta 20h".
+                    redis_cli.setex(cache_key, cache_ttl_seg, marca)
+                except Exception:  # noqa: BLE001
+                    pass
+            except Exception as exc:  # noqa: BLE001
+                erros += 1
+                log.warning("[CRON janela24h] update lead=%s falhou: %s",
+                            lead_id, exc)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "razao": "excecao", "erro": str(exc)[:300]}
+
+    # Contador incremental de ticks pra observabilidade (não persistente
+    # entre restarts do processo — só serve pra numerar linhas no log).
+    global _JANELA24H_TICK_COUNTER
+    _JANELA24H_TICK_COUNTER += 1
+    log.info(
+        "[CRON janela24h] tick #%d varridos=%d atualizados=%d "
+        "sem_mudanca=%d sem_ts=%d erros=%d cache_ttl_seg=%d dry_run=%s",
+        _JANELA24H_TICK_COUNTER, varridos, atualizados,
+        sem_mudanca, sem_ts, erros, cache_ttl_seg, dry_run,
+    )
+    return {
+        "ok": True, "dry_run": dry_run, "varridos": varridos,
+        "atualizados": atualizados, "sem_ts": sem_ts,
+        "sem_mudanca": sem_mudanca, "erros": erros,
+        "cache_ttl_seg": cache_ttl_seg,
+        "tick_num": _JANELA24H_TICK_COUNTER,
+    }
+
+
+# Contador global do worker JANELA 24H — reset a cada boot. Usado só pra
+# ordenar linhas de log ("[CRON janela24h] tick #N ..."). Fica no módulo
+# em vez de fechado no worker pra que /admin/janela-24h-tick também numere.
+_JANELA24H_TICK_COUNTER: int = 0
+
+
+def _worker_janela_24h_loop(*, pipeline, stop_event: threading.Event) -> None:
+    intervalo = _intervalo_janela24h_seg()
+    log.info("[CRON janela24h] worker iniciado intervalo=%ss enabled=%s",
+             intervalo, _janela24h_tick_enabled())
+    if stop_event.wait(90):
+        return
+    while not stop_event.is_set():
+        if _janela24h_tick_enabled():
+            try:
+                # Observabilidade não-destrutiva (só carimba status da
+                # janela) → escreve sempre, independente do dry_run global
+                # do cron. Pra silenciar, use JANELA24H_TICK_ENABLED=0.
+                res = _executar_janela_24h_varredura(
+                    pipeline=pipeline, dry_run=False,
+                )
+                log.info("[CRON janela24h] %s", res)
+            except Exception as exc:  # noqa: BLE001
+                log.exception("[CRON janela24h] exceção no loop: %s", exc)
+        if stop_event.wait(intervalo):
+            return
+
+
+# ---------------------------------------------------------------------------
+# Worker: campanha semanal por categoria (task #218 — 04/06/2026)
+# Toggle: CAMPANHA_SEMANAL_ENABLED=1
+# Quando: segunda-feira (BRT) 9h, 1x por semana
+# O que: roda a mesma lógica do /admin/disparar-categoria internamente
+# ---------------------------------------------------------------------------
+
+def _campanha_semanal_enabled() -> bool:
+    return (os.environ.get("CAMPANHA_SEMANAL_ENABLED") or "").strip() == "1"
+
+
+def _campanha_semanal_categoria() -> str:
+    return (os.environ.get("CAMPANHA_SEMANAL_CATEGORIA") or "R").upper()
+
+
+def _campanha_semanal_max_leads() -> int:
+    raw = (os.environ.get("CAMPANHA_SEMANAL_MAX") or "20").strip()
+    try:
+        return min(int(raw), 200)
+    except ValueError:
+        return 20
+
+
+def _campanha_semanal_unidade() -> str:
+    return (os.environ.get("CAMPANHA_SEMANAL_UNIDADE") or "").lower()
+
+
+def _campanha_semanal_medico() -> str:
+    return (os.environ.get("CAMPANHA_SEMANAL_MEDICO") or "").lower()
+
+
+def _executar_campanha_semanal(*, pipeline, dry_run: bool) -> dict:
+    """Filtra leads por categoria + dispara template aprovado em batch.
+
+    Reusa lógica de filtro do endpoint /admin/disparar-categoria mas roda
+    INTERNAMENTE sem precisar de curl externo. Token de acesso vem do
+    próprio app (env nativo do container Easypanel).
+    """
+    from voice_agent.kommo import KommoClient  # noqa: F401
+
+    kommo = getattr(pipeline, "kommo", None)
+    wa_cloud = getattr(pipeline, "wa_cloud", None)
+    if not kommo or not wa_cloud:
+        return {"ok": False, "razao": "kommo_ou_wa_indisponivel"}
+
+    categoria = _campanha_semanal_categoria()
+    if categoria not in ("R", "E", "C"):
+        return {"ok": False, "razao": f"categoria_invalida={categoria}"}
+
+    max_leads = _campanha_semanal_max_leads()
+    unidade_filtro = _campanha_semanal_unidade()
+    medico_filtro = _campanha_semanal_medico()
+
+    KEYWORDS = {
+        "R": ["REAGENDAR", "REMARCAÇÃO", "REMARCACAO", "FALTOU",
+              "DESMARCOU", "DESMARCAÇÃO", "DESMARCACAO"],
+        "E": ["COM CONVÊNIO", "COM CONVENIO"],
+        "C": ["SEM CONVÊNIO", "SEM CONVENIO", "PARTICULAR"],
+    }
+    EXCLUIR = ["INAS", "GDF", "CASSI", "SULAMERICA", "BRADESCO"]
+
+    try:
+        leads = []
+        if hasattr(kommo, "list_stale_leads"):
+            leads = kommo.list_stale_leads(
+                pipeline_id=8601819, limit=max_leads * 3,
+            ) or []
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "razao": f"kommo_falha={exc}"}
+
+    kw_cat = KEYWORDS[categoria]
+    candidatos = []
+    for lead in leads:
+        if len(candidatos) >= max_leads:
+            break
+        nome_lead = (lead.get("name") or "").upper()
+        if any(ex in nome_lead for ex in EXCLUIR):
+            continue
+        if not any(k in nome_lead for k in kw_cat):
+            continue
+        if unidade_filtro and unidade_filtro not in nome_lead.lower():
+            pass  # heurística branda — fetch detalhado seria caro
+        if medico_filtro and medico_filtro not in nome_lead.lower():
+            pass
+        if lead.get("id"):
+            candidatos.append(int(lead["id"]))
+
+    if not candidatos:
+        return {
+            "ok": True, "candidatos": 0, "disparados": 0,
+            "razao": "nenhum_lead_casou",
+        }
+
+    # Importa a função helper do webhook só na hora (evita import circular)
+    try:
+        from voice_agent.webhook import (
+            _disparar_template_aprovado_para_lead,
+        )
+    except ImportError:
+        return {"ok": False, "razao": "helper_indisponivel"}
+
+    disparados = 0
+    falhas = 0
+    detalhes = []
+    for lead_id in candidatos:
+        try:
+            res = _disparar_template_aprovado_para_lead(
+                lead_id, kommo, wa_cloud, dry_run=dry_run,
+            )
+            if res.get("ok"):
+                disparados += 1
+                detalhes.append({"lead_id": lead_id, "ok": True})
+            else:
+                falhas += 1
+                detalhes.append({
+                    "lead_id": lead_id, "ok": False,
+                    "motivo": res.get("motivo", "?"),
+                })
+        except Exception as exc:  # noqa: BLE001
+            falhas += 1
+            detalhes.append({
+                "lead_id": lead_id, "ok": False,
+                "motivo": f"exception={exc}",
+            })
+
+    return {
+        "ok": True, "categoria": categoria,
+        "candidatos": len(candidatos),
+        "disparados": disparados, "falhas": falhas,
+        "dry_run": dry_run, "detalhes": detalhes,
+    }
+
+
+def _eh_segunda_feira_9h_brt() -> bool:
+    """True se agora é segunda-feira entre 9h e 10h BRT."""
+    from datetime import datetime, timedelta, timezone
+    agora_brt = datetime.now(timezone(timedelta(hours=-3)))
+    return agora_brt.weekday() == 0 and agora_brt.hour == 9
+
+
+def _worker_campanha_semanal_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Loop que verifica a cada 30min se é hora da campanha semanal.
+
+    Dispara apenas se for segunda-feira 9h-10h BRT E
+    CAMPANHA_SEMANAL_ENABLED=1. Usa Redis pra dedup (não dispara 2x
+    no mesmo dia mesmo se o worker reiniciar).
+    """
+    log.info(
+        "[CRON campanha semanal] worker iniciado — checa a cada 30min "
+        "se é seg 9h-10h BRT (CAMPANHA_SEMANAL_ENABLED=%s, categoria=%s)",
+        _campanha_semanal_enabled(), _campanha_semanal_categoria(),
+    )
+    if stop_event.wait(120):
+        return
+    while not stop_event.is_set():
+        if not _campanha_semanal_enabled():
+            log.debug("[CRON campanha semanal] desligado — pulando")
+        elif not _eh_segunda_feira_9h_brt():
+            log.debug("[CRON campanha semanal] fora janela — pulando")
+        else:
+            # Dedup: já disparou hoje?
+            redis_cli = getattr(pipeline, "_redis", None)
+            from datetime import datetime, timedelta, timezone
+            hoje_brt = datetime.now(
+                timezone(timedelta(hours=-3))
+            ).strftime("%Y-%m-%d")
+            dedup_key = f"blink:campanha_semanal:{hoje_brt}"
+            ja_disparou = False
+            if redis_cli is not None:
+                try:
+                    ja_disparou = bool(redis_cli.get(dedup_key))
+                except Exception:  # noqa: BLE001
+                    pass
+
+            if ja_disparou:
+                log.debug(
+                    "[CRON campanha semanal] já disparou hoje (%s) — pulando",
+                    hoje_brt,
+                )
+            else:
+                try:
+                    res = _executar_campanha_semanal(
+                        pipeline=pipeline, dry_run=_dry_run_default(),
+                    )
+                    log.info("[CRON campanha semanal] %s", res)
+                    if redis_cli is not None:
+                        try:
+                            redis_cli.setex(dedup_key, 86400 * 2, "1")
+                        except Exception:  # noqa: BLE001
+                            pass
+                except Exception as exc:  # noqa: BLE001
+                    log.exception(
+                        "[CRON campanha semanal] falhou: %s", exc,
+                    )
+        # checa de 30 em 30 min
+        if stop_event.wait(1800):
+            return
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap a partir do create_app
+# ---------------------------------------------------------------------------
+
+_stop_event_global: threading.Event | None = None
+_threads_iniciadas: list[threading.Thread] = []
+
+
+# ============================================================
+# WORKER MÉTRICAS — alarme horário + replay 23h (task #260)
+# ============================================================
+
+def _funcionamento_enabled() -> bool:
+    """METRICAS_FUNCIONAMENTO_ENABLED=1 liga os 2 workers de métrica."""
+    return os.environ.get("METRICAS_FUNCIONAMENTO_ENABLED", "1") == "1"
+
+
+def _eh_hora_replay_noturno() -> bool:
+    """Roda 1x ao dia entre 23h e 23h59 BRT."""
+    from datetime import datetime, timedelta, timezone
+    agora = datetime.now(timezone(timedelta(hours=-3)))
+    return agora.hour == 23
+
+
+def _worker_alarmes_horario_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Worker que checa /admin/funcionamento a cada 1h e dispara alarmes Slack.
+
+    Lê snap das taxas; se cair, posta no Slack (dedup 1h por alarme).
+    """
+    log.info("[CRON alarmes-horarios] worker iniciado (intervalo=1h)")
+    if stop_event.wait(180):
+        return
+    intervalo = int(os.environ.get("METRICAS_ALARME_INTERVALO_SEG", "3600"))
+    while not stop_event.is_set():
+        if not _funcionamento_enabled():
+            log.debug("[CRON alarmes-horarios] desligado — pulando")
+        else:
+            try:
+                from . import metricas_funcionamento as mf
+                redis_cli = getattr(pipeline, "_redis", None)
+                snap = mf.funcionamento_hoje(redis_cli)
+                alarmes = snap.get("alarmes_ativos") or []
+                if alarmes:
+                    slack_url = os.environ.get("SLACK_WEBHOOK_URL") or ""
+                    if slack_url:
+                        try:
+                            import httpx
+                            for a in alarmes:
+                                dedup_k = (
+                                    f"blink:alarme_funcionamento:"
+                                    f"{hash(a) & 0xFFFFFFFF}"
+                                )
+                                if redis_cli is not None:
+                                    try:
+                                        if redis_cli.get(dedup_k):
+                                            continue
+                                    except Exception:  # noqa: BLE001
+                                        pass
+                                with httpx.Client(timeout=8.0) as cli:
+                                    cli.post(slack_url, json={
+                                        "text": (
+                                            f":rotating_light: "
+                                            f"*Funcionamento Lia*\n{a}"
+                                        ),
+                                    })
+                                if redis_cli is not None:
+                                    try:
+                                        redis_cli.setex(dedup_k, 3600, "1")
+                                    except Exception:  # noqa: BLE001
+                                        pass
+                            log.warning(
+                                "[CRON alarmes] %d alarme(s) postado(s)",
+                                len(alarmes),
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            log.warning("[CRON alarmes] slack falhou: %s", e)
+            except Exception as e:  # noqa: BLE001
+                log.warning("[CRON alarmes-horarios] crash silencioso: %s", e)
+        if stop_event.wait(intervalo):
+            return
+
+
+def _worker_replay_noturno_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Worker que roda 1x/noite (23h BRT) varrendo abandonados do dia.
+
+    Para cada abandonado >= 30min sem resposta Lia, posta resumo no Slack
+    pra revisão humana. Detecta regressão sem esperar paciente reclamar.
+    """
+    log.info("[CRON replay-noturno] worker iniciado — alvo 23h BRT")
+    if stop_event.wait(180):
+        return
+    # Checa a cada 30min se entrou na janela 23h BRT
+    while not stop_event.is_set():
+        if _funcionamento_enabled() and _eh_hora_replay_noturno():
+            # Dedup do dia
+            redis_cli = getattr(pipeline, "_redis", None)
+            from datetime import datetime, timedelta, timezone
+            hoje_brt = datetime.now(
+                timezone(timedelta(hours=-3))
+            ).strftime("%Y-%m-%d")
+            dedup_key = f"blink:replay_noturno:{hoje_brt}"
+            ja = False
+            if redis_cli is not None:
+                try:
+                    ja = bool(redis_cli.get(dedup_key))
+                except Exception:  # noqa: BLE001
+                    pass
+            if not ja:
+                try:
+                    from . import metricas_funcionamento as mf
+                    snap = mf.funcionamento_hoje(redis_cli)
+                    slack_url = os.environ.get("SLACK_WEBHOOK_URL") or ""
+                    if slack_url:
+                        import httpx
+                        with httpx.Client(timeout=10.0) as cli:
+                            cli.post(slack_url, json={
+                                "text": (
+                                    f":crystal_ball: *Replay noturno {hoje_brt}*\n"
+                                    f"Contadores: {snap.get('contadores')}\n"
+                                    f"Taxas: {snap.get('taxas')}\n"
+                                    f"Alarmes: {snap.get('alarmes_ativos') or 'OK'}"
+                                ),
+                            })
+                    if redis_cli is not None:
+                        try:
+                            redis_cli.setex(dedup_key, 86400, "1")
+                        except Exception:  # noqa: BLE001
+                            pass
+                    log.info("[CRON replay-noturno] resumo enviado")
+                except Exception as e:  # noqa: BLE001
+                    log.warning("[CRON replay-noturno] crash: %s", e)
+        if stop_event.wait(1800):  # 30min
+            return
+
+
+def _reativar_ia_enabled() -> bool:
+    """REATIVAR_IA_CRON_ENABLED=1 liga o worker de varredura 6h."""
+    return os.environ.get("REATIVAR_IA_CRON_ENABLED", "1") == "1"
+
+
+def _reativar_ia_intervalo_seg() -> int:
+    return int(os.environ.get("REATIVAR_IA_INTERVALO_SEG", "21600"))  # 6h
+
+
+def _reativar_ia_max_leads() -> int:
+    return min(int(os.environ.get("REATIVAR_IA_MAX_LEADS", "1000")), 5000)
+
+
+def _worker_reativar_ia_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Worker que varre TODOS os leads em etapas ativas a cada 6h e
+    reativa IA dos que estão Desativado.
+
+    Resolve caso lead Maite 22186627 (06/06/2026) — leads que ficam parados
+    em uma etapa ativa sem mudança de etapa não disparavam o webhook #233,
+    ficavam invisíveis pra Lia. Este worker varre periodicamente.
+    """
+    log.info(
+        "[CRON reativar-ia] worker iniciado (intervalo=%ds, max_leads=%d)",
+        _reativar_ia_intervalo_seg(), _reativar_ia_max_leads(),
+    )
+    if stop_event.wait(300):  # espera 5min após boot
+        return
+    while not stop_event.is_set():
+        if not _reativar_ia_enabled():
+            log.debug("[CRON reativar-ia] desligado — pulando")
+        else:
+            try:
+                from . import reativacao_ia
+                kommo_client = getattr(pipeline, "kommo", None)
+                if kommo_client:
+                    res = reativacao_ia.reativar_ia_em_etapas_ativas(
+                        kommo_client,
+                        max_leads=_reativar_ia_max_leads(),
+                        dry_run=False,
+                    )
+                    log.info(
+                        "[CRON reativar-ia] varredura: lidos=%d, "
+                        "desativados=%d, reativados=%d, falhas=%d",
+                        res.get("total_lidos", 0),
+                        res.get("encontrados_desativados", 0),
+                        res.get("reativados", 0),
+                        res.get("falhas", 0),
+                    )
+                    # Métrica: reativações por execução
+                    try:
+                        from . import metricas_funcionamento as _mf
+                        _mf.incrementar(
+                            getattr(pipeline, "_redis", None),
+                            "cron:reativar_ia:reativados",
+                            valor=res.get("reativados", 0),
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                else:
+                    log.warning("[CRON reativar-ia] kommo_client indisponível")
+            except Exception as e:  # noqa: BLE001
+                log.warning("[CRON reativar-ia] crash: %s", e)
+        if stop_event.wait(_reativar_ia_intervalo_seg()):
+            return
+
+
+# ============================================================
+# WORKER AUDITORIA DIÁRIA RETROATIVA (sprint SRE 18/06/2026)
+# Toggle: AUDITORIA_DIARIA_ENABLED=1 (default ON)
+# Quando: 1x/dia entre 7h-8h BRT
+# O que: varre tracing últimas 24h → juiz adversarial → Slack
+# Dedup: blink:auditoria_diaria:{YYYY-MM-DD} TTL 24h
+# ============================================================
+
+def _eh_hora_auditoria_diaria() -> bool:
+    """True se agora é entre 7h e 7h59 BRT."""
+    from datetime import datetime, timedelta, timezone
+    return datetime.now(timezone(timedelta(hours=-3))).hour == 7
+
+
+def _worker_auditoria_diaria_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Roda relatorio_diario 1x/dia 7h BRT e posta no Slack.
+
+    Dedup por dia via Redis. Toggle AUDITORIA_DIARIA_ENABLED=1 (default ON).
+    Slack só se SLACK_WEBHOOK_AUDITORIA_URL existir.
+    """
+    log.info(
+        "[CRON auditoria-diaria] worker iniciado — alvo 7h BRT, "
+        "intervalo de check 30min",
+    )
+    if stop_event.wait(180):
+        return
+    while not stop_event.is_set():
+        try:
+            from . import auditoria_diaria as _ad
+            if not _ad.auditoria_diaria_habilitada():
+                log.debug("[CRON auditoria-diaria] desligado — pulando")
+            elif not _eh_hora_auditoria_diaria():
+                log.debug("[CRON auditoria-diaria] fora janela — pulando")
+            else:
+                redis_cli = getattr(pipeline, "_redis", None)
+                dedup_key = _ad.chave_dedup_dia()
+                ja = False
+                if redis_cli is not None:
+                    try:
+                        ja = bool(redis_cli.get(dedup_key))
+                    except Exception:  # noqa: BLE001
+                        pass
+                if ja:
+                    log.debug(
+                        "[CRON auditoria-diaria] já rodou hoje (%s) — pulando",
+                        dedup_key,
+                    )
+                else:
+                    rel = _ad.relatorio_diario(redis_cli)
+                    msg = _ad.gerar_slack_message(rel)
+                    log.info(
+                        "[CRON auditoria-diaria] turnos=%d risco_alto=%d",
+                        rel.get("total_turnos", 0),
+                        rel.get("total_risco_alto", 0),
+                    )
+                    slack_url = (
+                        os.environ.get("SLACK_WEBHOOK_AUDITORIA_URL") or ""
+                    )
+                    if slack_url:
+                        try:
+                            import httpx
+                            with httpx.Client(timeout=10.0) as cli:
+                                cli.post(slack_url, json={"text": msg})
+                            log.info("[CRON auditoria-diaria] postado Slack")
+                        except Exception as e:  # noqa: BLE001
+                            log.warning(
+                                "[CRON auditoria-diaria] slack falhou: %s", e,
+                            )
+                    if redis_cli is not None:
+                        try:
+                            redis_cli.setex(dedup_key, 86400, "1")
+                        except Exception:  # noqa: BLE001
+                            pass
+        except Exception as e:  # noqa: BLE001
+            log.warning("[CRON auditoria-diaria] crash: %s", e)
+        if stop_event.wait(1800):  # checa a cada 30min
+            return
+
+
+# ============================================================
+# WORKER SYNTHETIC USERS — 100 cenários a cada 6h (sprint SRE)
+# Toggle: SYNTHETIC_USERS_ENABLED=1 (default OFF — só liga após baseline)
+# ============================================================
+
+def _synthetic_users_enabled() -> bool:
+    """SYNTHETIC_USERS_ENABLED=1 liga o worker. Default OFF."""
+    raw = (os.environ.get("SYNTHETIC_USERS_ENABLED") or "0").lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _synthetic_intervalo_seg() -> int:
+    try:
+        return int(os.environ.get("SYNTHETIC_INTERVALO_SEG") or "21600")  # 6h
+    except ValueError:
+        return 21600
+
+
+def _synthetic_max_workers() -> int:
+    try:
+        return max(
+            1, min(int(os.environ.get("SYNTHETIC_MAX_WORKERS") or "20"), 50),
+        )
+    except ValueError:
+        return 20
+
+
+def _worker_synthetic_users_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Roda os 100 cenários sintéticos a cada 6h. Salva taxa em env
+    pra error_budget consumir. Alerta Slack se taxa < 0.95."""
+    log.info(
+        "[CRON synthetic] worker iniciado — intervalo=%ds, max_workers=%d",
+        _synthetic_intervalo_seg(), _synthetic_max_workers(),
+    )
+    if stop_event.wait(240):  # 4min após boot
+        return
+    while not stop_event.is_set():
+        if not _synthetic_users_enabled():
+            log.debug("[CRON synthetic] desligado — pulando ciclo")
+        else:
+            try:
+                from voice_agent import synthetic_users as su
+                rel = su.executar_todos_cenarios_paralelo(
+                    max_workers=_synthetic_max_workers(),
+                )
+                log.info(
+                    "[CRON synthetic] %d/%d OK (taxa=%.2f%%) em %dms",
+                    rel.get("ok", 0), rel.get("total", 0),
+                    (rel.get("taxa", 0.0) * 100), rel.get("duracao_ms", 0),
+                )
+                try:
+                    os.environ["SYNTHETIC_LAST_PASS_RATE"] = str(
+                        rel.get("taxa", 0.0)
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                taxa = float(rel.get("taxa") or 0.0)
+                if taxa < 0.95:
+                    slack_url = (
+                        os.environ.get("SLACK_WEBHOOK_SMOKE_URL") or ""
+                    ).strip()
+                    if slack_url:
+                        try:
+                            import httpx
+                            with httpx.Client(timeout=8.0) as cli:
+                                cli.post(slack_url, json={
+                                    "text": (
+                                        f":warning: *Synthetic users abaixo "
+                                        f"do SLO* — {rel.get('ok')}/"
+                                        f"{rel.get('total')} "
+                                        f"(taxa={taxa:.2%})"
+                                    ),
+                                })
+                        except Exception as e:  # noqa: BLE001
+                            log.warning(
+                                "[CRON synthetic] slack falhou: %s", e,
+                            )
+            except Exception as e:  # noqa: BLE001
+                log.warning("[CRON synthetic] crash: %s", e)
+        if stop_event.wait(_synthetic_intervalo_seg()):
+            return
+
+
+# ============================================================
+# WORKER ERROR BUDGET — alerta SLO a cada 15min (sprint SRE)
+# Toggle: ERROR_BUDGET_ALERTS_ENABLED=1 (default ON)
+# ============================================================
+
+def _error_budget_alerts_enabled() -> bool:
+    raw = (os.environ.get("ERROR_BUDGET_ALERTS_ENABLED") or "1").lower()
+    return raw not in ("0", "false", "no", "off", "")
+
+
+def _error_budget_intervalo_seg() -> int:
+    try:
+        return int(os.environ.get("ERROR_BUDGET_INTERVALO_SEG") or "900")
+    except ValueError:
+        return 900
+
+
+def _worker_error_budget_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Chama disparar_alerta_se_necessario() a cada 15min. Dedup vive
+    dentro do módulo via Redis."""
+    log.info(
+        "[CRON error-budget] worker iniciado — intervalo=%ds",
+        _error_budget_intervalo_seg(),
+    )
+    if stop_event.wait(150):
+        return
+    while not stop_event.is_set():
+        if not _error_budget_alerts_enabled():
+            log.debug("[CRON error-budget] desligado — pulando")
+        else:
+            try:
+                from voice_agent import error_budget as eb
+                redis_cli = getattr(pipeline, "_redis", None)
+                res = eb.disparar_alerta_se_necessario(
+                    redis_client=redis_cli,
+                )
+                if res.get("enviou"):
+                    log.warning(
+                        "[CRON error-budget] alerta postado: %d violations",
+                        len(res.get("violations") or []),
+                    )
+                else:
+                    log.debug(
+                        "[CRON error-budget] sem alerta — motivo=%s",
+                        res.get("motivo"),
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning("[CRON error-budget] crash: %s", e)
+        if stop_event.wait(_error_budget_intervalo_seg()):
+            return
+
+
+# ============================================================
+# WORKER SYNC META → KOMMO (task #379)
+# ============================================================
+
+def _sync_templates_meta_enabled() -> bool:
+    """SYNC_TEMPLATES_META_ENABLED=1 (default ON) liga o worker."""
+    raw = (os.environ.get("SYNC_TEMPLATES_META_ENABLED") or "1").lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def _intervalo_sync_templates_seg() -> int:
+    """Default 1h. Override via SYNC_TEMPLATES_META_INTERVALO_SEG."""
+    raw = (os.environ.get("SYNC_TEMPLATES_META_INTERVALO_SEG") or "3600")
+    try:
+        return max(int(float(raw)), 300)  # mínimo 5min
+    except ValueError:
+        return 3600
+
+
+def _worker_sync_templates_meta_loop(
+    *, pipeline, stop_event: threading.Event,
+) -> None:
+    """Worker que sincroniza templates aprovados Meta → enums Kommo.
+
+    Roda a cada SYNC_TEMPLATES_META_INTERVALO_SEG (default 1h). Lazy
+    import pra não custar boot. Default ON — desativar via
+    SYNC_TEMPLATES_META_ENABLED=0.
+    """
+    intervalo = _intervalo_sync_templates_seg()
+    log.info(
+        "[CRON sync-templates-meta] worker iniciado intervalo=%ds enabled=%s",
+        intervalo, _sync_templates_meta_enabled(),
+    )
+    # Espera 90s pra deixar o app boot estabilizar antes da 1ª rodada.
+    if stop_event.wait(90):
+        return
+    while not stop_event.is_set():
+        if not _sync_templates_meta_enabled():
+            log.debug("[CRON sync-templates-meta] desligado — pulando")
+        else:
+            try:
+                from voice_agent.scripts.sync_meta_to_kommo import sincronizar
+                res = sincronizar()
+                log.info(
+                    "[CRON sync-templates-meta] ok=%s total=%s "
+                    "adicionados=%s obsoletos=%s erro=%s",
+                    res.get("ok"),
+                    res.get("total_aprovados"),
+                    len(res.get("adicionados") or []),
+                    len(res.get("obsoletos") or []),
+                    res.get("erro"),
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.exception(
+                    "[CRON sync-templates-meta] falhou: %s", exc,
+                )
+        if stop_event.wait(intervalo):
+            return
+
+
+def iniciar_cron(pipeline) -> dict:
+    """Liga os workers de cron interno. Idempotente — só liga uma vez."""
+    global _stop_event_global
+    if not _enabled():
+        return {"started": False, "reason": "BLINK_CRON_ENABLED!=1"}
+    if _stop_event_global is not None:
+        return {"started": False, "reason": "ja_iniciado"}
+
+    _stop_event_global = threading.Event()
+    t1 = threading.Thread(
+        target=_worker_classificar_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-classificar",
+    )
+    t1.start()
+    _threads_iniciadas.append(t1)
+
+    t2 = threading.Thread(
+        target=_worker_renovacao_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-renovacao",
+    )
+    t2.start()
+    _threads_iniciadas.append(t2)
+
+    # task #218: worker semanal de campanha
+    t3 = threading.Thread(
+        target=_worker_campanha_semanal_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-campanha-semanal",
+    )
+    t3.start()
+    _threads_iniciadas.append(t3)
+
+    # task #260: alarmes horários de funcionamento
+    t4 = threading.Thread(
+        target=_worker_alarmes_horario_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-alarmes-horarios",
+    )
+    t4.start()
+    _threads_iniciadas.append(t4)
+
+    # task #260: replay noturno 23h BRT
+    t5 = threading.Thread(
+        target=_worker_replay_noturno_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-replay-noturno",
+    )
+    t5.start()
+    _threads_iniciadas.append(t5)
+
+    # task #264: varredura 6h pra reativar IA em leads parados
+    t6 = threading.Thread(
+        target=_worker_reativar_ia_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-reativar-ia",
+    )
+    t6.start()
+    _threads_iniciadas.append(t6)
+
+    # sprint SRE 18/06: auditoria diária retroativa via juiz adversarial
+    t7 = threading.Thread(
+        target=_worker_auditoria_diaria_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-auditoria-diaria",
+    )
+    t7.start()
+    _threads_iniciadas.append(t7)
+
+    # sprint SRE 18/06: synthetic users (100 cenários a cada 6h)
+    t8 = threading.Thread(
+        target=_worker_synthetic_users_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-synthetic-users",
+    )
+    t8.start()
+    _threads_iniciadas.append(t8)
+
+    # sprint SRE 18/06: error budget (15min, default ON)
+    t9 = threading.Thread(
+        target=_worker_error_budget_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-error-budget",
+    )
+    t9.start()
+    _threads_iniciadas.append(t9)
+
+    # task #379: sync Meta templates → Kommo enums (1h, default ON)
+    t10 = threading.Thread(
+        target=_worker_sync_templates_meta_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-sync-templates-meta",
+    )
+    t10.start()
+    _threads_iniciadas.append(t10)
+
+    # 05/07/2026: observabilidade JANELA 24H (15min, default ON)
+    t11 = threading.Thread(
+        target=_worker_janela_24h_loop,
+        kwargs={"pipeline": pipeline, "stop_event": _stop_event_global},
+        daemon=True, name="blink-cron-janela24h",
+    )
+    t11.start()
+    _threads_iniciadas.append(t11)
+
+    return {
+        "started": True,
+        "workers": [
+            "classificar", "renovacao", "campanha_semanal",
+            "alarmes_horarios", "replay_noturno", "reativar_ia",
+            "auditoria_diaria", "synthetic_users", "error_budget",
+            "sync_templates_meta", "janela24h",
+        ],
+        "dry_run": _dry_run_default(),
+        "intervalo_classificar_seg": _intervalo_classificar_seg(),
+        "intervalo_renovacao_seg": _intervalo_renovacao_seg(),
+        "campanha_semanal_enabled": _campanha_semanal_enabled(),
+        "campanha_semanal_categoria": _campanha_semanal_categoria(),
+        "campanha_semanal_max": _campanha_semanal_max_leads(),
+    }
+
+
+def parar_cron() -> None:
+    """Sinaliza pros workers pararem. Não bloqueia."""
+    global _stop_event_global
+    if _stop_event_global is not None:
+        _stop_event_global.set()

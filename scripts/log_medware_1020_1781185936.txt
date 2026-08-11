@@ -1,0 +1,11 @@
+# Disparo template 1020 via Medware — 2026-06-11T10:52:16.140881
+
+
+# RESUMO
+{
+  "OK": 0,
+  "ERRO": 0
+}
+
+# DETALHES
+[]

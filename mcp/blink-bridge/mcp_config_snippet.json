@@ -1,0 +1,11 @@
+{
+  "_comentario": "Snippet pra adicionar ao seu claude_desktop_config.json. Copia o conteúdo de 'blink-bridge' pra dentro do seu 'mcpServers'. Ajuste os paths se necessário (o install.sh imprime os corretos).",
+  "mcpServers": {
+    "blink-bridge": {
+      "command": "/Users/fabiophilipecostamartins/Documents/Claude/Projects/AGENTE IA BLINK/mcp/blink-bridge/venv/bin/python",
+      "args": [
+        "/Users/fabiophilipecostamartins/Documents/Claude/Projects/AGENTE IA BLINK/mcp/blink-bridge/blink_bridge_mcp.py"
+      ]
+    }
+  }
+}

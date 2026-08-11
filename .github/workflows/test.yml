@@ -1,0 +1,138 @@
+name: Pytest + Smoke
+
+# Origem: Fábio 02/06/2026 — "como evitar Lia regredir como aluno
+# que volta a errar 1ª série depois de chegar na 3ª". Resposta:
+# CI/CD gate. Cada push em main roda TODOS os testes. Se algum
+# cenário histórico quebrar, CHECK fica vermelho → Easypanel
+# não faz auto-deploy. Memória ativa preventiva, não reativa.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  golden_suite:
+    name: Golden Suite (bloqueante)
+    runs-on: ubuntu-latest
+    # BLOQUEANTE — se um cenário canônico quebrar, deploy NÃO sai.
+    # Origem: sprint SRE 18/06/2026 (task #362). 50+ cenários cobrindo
+    # bugs C-12 a C-37c, fluxo feliz, edge cases e invariantes.
+    # Execução alvo: < 30s. Sem continue-on-error de propósito.
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instala dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Golden Suite (50+ cenários canônicos)
+        env:
+          ANTHROPIC_API_KEY: sk-ant-fake-pra-mock
+          OPENAI_API_KEY: sk-fake-pra-mock
+          KOMMO_SUBDOMAIN: univeja
+          KOMMO_TOKEN: fake-jwt
+          REDIS_URL: redis://localhost:6379/0
+          WEBHOOK_SECRET: ""
+          EVOLUTION_BASE_URL: http://fake-evolution:8080
+          EVOLUTION_API_KEY: fake-evo-key
+          EVOLUTION_INSTANCE: blink-fake
+          MEDWARE_USER: fake
+          MEDWARE_PASSWORD: fake
+        run: |
+          python -m pytest tests/test_golden_50.py -q --tb=short
+
+  pytest:
+    name: pytest (cobertura de regressão)
+    runs-on: ubuntu-latest
+    # Não-bloqueante por enquanto: alguns testes precisam de Redis/Kommo/
+    # Medware reais (integrações end-to-end). Marcá-los todos com
+    # @pytest.mark.requires_env vira fase 2 (task #181). Por ora o CI
+    # roda pra dar visibilidade, mas não bloqueia auto-deploy.
+    continue-on-error: true
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instala dependências
+        run: |
+          python -m pip install --upgrade pip
+          # Usa requirements.txt — bate com o ambiente de produção e
+          # cobre TUDO que voice_agent importa (incluindo python-dotenv
+          # que faltava antes e quebrava 50+ testes).
+          # Fix: 02/06/2026 tarde — ERROR ModuleNotFoundError: 'dotenv'.
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Roda pytest (sem rede)
+        env:
+          ANTHROPIC_API_KEY: sk-ant-fake-pra-mock
+          OPENAI_API_KEY: sk-fake-pra-mock
+          KOMMO_SUBDOMAIN: univeja
+          KOMMO_TOKEN: fake-jwt
+          REDIS_URL: redis://localhost:6379/0
+          # WEBHOOK_SECRET vazio = endpoints /admin/* ficam ABERTOS no CI.
+          # Os testes em test_auditoria_endpoints.py fazem POST sem token,
+          # esperando 400/503/200 — não 401. Quando havia "fake-secret"
+          # aqui, todos retornavam 401 Unauthorized.
+          WEBHOOK_SECRET: ""
+          # Settings.load() valida presença dessas 3 envs antes de instanciar
+          # o FastAPI app. Sem elas, fixtures que usam TestClient quebram com
+          # RuntimeError. Valores fake são OK porque os testes mockam HTTP.
+          EVOLUTION_BASE_URL: http://fake-evolution:8080
+          EVOLUTION_API_KEY: fake-evo-key
+          EVOLUTION_INSTANCE: blink-fake
+          MEDWARE_USER: fake
+          MEDWARE_PASSWORD: fake
+        run: |
+          python -m pytest tests/ -v --tb=short \
+            --maxfail=10 -p no:cacheprovider
+
+      - name: Resumo
+        if: always()
+        run: |
+          echo "=========================="
+          echo "Resumo de cobertura"
+          echo "=========================="
+          python -m pytest tests/ --co -q 2>&1 | tail -5 || true
+
+  lint:
+    name: lint básico (não bloqueante)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instala ruff
+        run: pip install ruff
+
+      - name: Lint
+        run: |
+          ruff check voice_agent/ tests/ --select E,F,W --quiet || \
+            echo "::warning::Ruff encontrou avisos (não bloqueante)"

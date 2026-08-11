@@ -1,0 +1,76 @@
+{
+  "ts": 1781020000,
+  "data_execucao": "2026-06-12",
+  "geracao": {
+    "fonte_slack": ["C0A399F5A1E (#01-janeiro)", "C08DJUSLNLV (#03-marco)", "C08Q260BPPB (#05-maio)"],
+    "template": "1089_mens_ativar_conv_parada_qz7kbz",
+    "endpoint": "https://blink-agent.6prkfn.easypanel.host/admin/disparar-template-get/{LEAD_ID}",
+    "metodologia": "Varredura 1 pagina Slack por canal + kommo_search_leads pipeline 8601819 + filtros SKIP (convenio bloqueado / status ativo 5-8 / nome operacional / ja disparado em sessao anterior) + disparo via web_fetch + dedup por kommo_id na execucao. Cap 20 OK/canal. Yield baixo em Janeiro/Marco porque maioria dos nomes do Slack ja foram convertidos a 'JANEIRO-DD.MM.AAAA-CONVENIO' (nome operacional) ou estao em status 91486864 (8-REALIZADO) — sao consultas reais ja feitas.",
+    "filtros_skip_aplicados": [
+      "status 5-AGENDADO (101507507) / 6-CONFIRMAR (101109455) / 7.CONFIRMADO (106653499) / 8-REALIZADO (91486864) / Closed-won (142) — paciente ja agendou ou consultou",
+      "status 106157327 (1-ATENDIMENTO HUMANO) / 106157139 (CIRURGIAS) — equipe humana ja atuando",
+      "nome operacional Kommo: 'JANEIRO-DD', 'AGENDADO', 'REALIZADO', 'CAPTACAO', 'REAGENDADO', 'RETORNO em ...', 'FEZ CONSULTA', 'Confirmada', '[A]', 'Lead #NNNN' anonimo",
+      "convenio_bloqueado: INAS/GDF/CASSI/BRADESCO/SULAMERICA/UNIMED",
+      "nao_encontrado no Kommo via search"
+    ]
+  },
+  "listas": {
+    "C08Q260BPPB_maio": {
+      "total_processados": 20,
+      "disparados_ok": 12,
+      "skipped": {
+        "atendimento_humano_106157327": 1,
+        "operacional_kommo_nome": 4,
+        "nao_encontrado": 4,
+        "status_8_realizado_91486864": 4
+      },
+      "disparos": [
+        {"lead_id": 8535792, "slack_nome": "RAFAEL OLIVEIRA VIRGINIO", "kommo_nome": "RAFAEL OLIVEIRA VIRGINIO  - Novo", "telefone": "556199673310", "wamid": "wamid.HBgMNTU2MTk5NjczMzEwFQIAERgSNzc3MkI3RDk2ODU4RTNEOTg5AA==", "status_id": 143},
+        {"lead_id": 7192458, "slack_nome": "PIETRA LANDIM BARROSO GOMES", "kommo_nome": "PIETRA LANDIM BARROSO GOMES", "telefone": "556181506166", "wamid": "wamid.HBgMNTU2MTgxNTA2MTY2FQIAERgSNkZGQzE4MzRGQjM5RjFERTgxAA==", "status_id": 143},
+        {"lead_id": 8272608, "slack_nome": "PEDRO COSTA FIGUEIREDO", "kommo_nome": "PEDRO COSTA FIGUEIREDO", "telefone": "556182060168", "wamid": "wamid.HBgMNTU2MTgyMDYwMTY4FQIAERgSRkExNTU5MkJFOUM1RDJFQzRBAA==", "status_id": 143},
+        {"lead_id": 20706617, "slack_nome": "MATEUS MATOS MACIEL", "kommo_nome": "MATEUS MATOS MACIEL", "telefone": "5561981940173", "wamid": "wamid.HBgMNTU2MTgxOTQwMTczFQIAERgSQTJBMjVENUMyRDRDMEE3OTg5AA==", "status_id": 143},
+        {"lead_id": 7331508, "slack_nome": "MARILENA MACHADO BARREIROS", "kommo_nome": "MARILENA MACHADO BARREIROS", "telefone": "55619228764", "wamid": "wamid.HBgLNTU2MTkyMjg3NjQVAgARGBJGRTcxREM4OEMzMUVEMEZGQ0YA", "status_id": 143},
+        {"lead_id": 7746226, "slack_nome": "MANUELA TEIXEIRA MARTINS", "kommo_nome": "MANUELA TEIXEIRA MARTINS", "telefone": "556185803998", "wamid": "wamid.HBgMNTU2MTg1ODAzOTk4FQIAERgSRjBCN0NEQjNGODUzQTZFQUNGAA==", "status_id": 143},
+        {"lead_id": 6980046, "slack_nome": "LUCIANO FERNANDES GOMES", "kommo_nome": "Luciano Fernandes Gomes", "telefone": "556181697311", "wamid": "wamid.HBgMNTU2MTgxNjk3MzExFQIAERgSRkQyRDJCMDJDQ0RDRjBBNjc2AA==", "status_id": 143},
+        {"lead_id": 7545988, "slack_nome": "JUSSARA BARROS DA SILVA", "kommo_nome": "JUSSARA BARROS DA SILVA", "telefone": "556191300096", "wamid": "wamid.HBgMNTU2MTkxMzAwMDk2FQIAERgSMTJBQ0Q5Q0U2QjM4RDlEMkNGAA==", "status_id": 143},
+        {"lead_id": 19377939, "slack_nome": "ISABELLE DE MORAIS SOUZA MENDES", "kommo_nome": "FEVEREIRO 21.02.2025 SERPRO ISABELLE DE MORAIS SOUZA MENDES", "telefone": "5561983285742", "wamid": "wamid.HBgMNTU2MTgzMjg1NzQyFQIAERgSQjIwQThGQkZBNkYxQTQ4N0M0AA==", "status_id": 96441724},
+        {"lead_id": 7000676, "slack_nome": "ISABELA SCHILD GRIMALDI", "kommo_nome": "ISABELA SCHILD GRIMALDI", "telefone": "556199808685", "wamid": "wamid.HBgMNTU2MTk5ODA4Njg1FQIAERgSN0VGNjZEQjJBODUyM0UzRUNGAA==", "status_id": 143},
+        {"lead_id": 6956604, "slack_nome": "ISABELA REBELLO MUNOZ", "kommo_nome": "Isabela Rebello", "telefone": "556191553932", "wamid": "wamid.HBgMNTU2MTkxNTUzOTMyFQIAERgSOTdEMTU1MzQ0RDUwMzA0OTQ3AA==", "status_id": 143},
+        {"lead_id": 20691481, "slack_nome": "HENRIQUE ROCHA MACIEL", "kommo_nome": "HENRIQUE ROCHA MACIEL -PARTICULAR", "telefone": "5561981690546", "wamid": "wamid.HBgMNTU2MTgxNjkwNTQ2FQIAERgSMjI5NzAwNjRDNkM1QURCMTU5AA==", "status_id": 96441724}
+      ]
+    },
+    "C08DJUSLNLV_marco": {
+      "total_processados": 15,
+      "disparados_ok": 2,
+      "skipped": {
+        "operacional_kommo_nome": 7,
+        "nao_encontrado": 4,
+        "status_91486864_realizado": 1,
+        "status_142_closed_won": 1
+      },
+      "disparos": [
+        {"lead_id": 9084490, "slack_nome": "VITOR TAKAI VENCESLAU", "kommo_nome": "VITOR TAKAI VENCESLAU", "telefone": "556193700553", "wamid": "wamid.HBgMNTU2MTkzNzAwNTUzFQIAERgSRkM2MUE1MjIxNzE4NzJGMTdCAA==", "status_id": 143},
+        {"lead_id": 2802096, "slack_nome": "RANAE TAKAKI VIEIRA", "kommo_nome": "Ranae", "telefone": "556183429226", "wamid": "wamid.HBgMNTU2MTgzNDI5MjI2FQIAERgSMDhGMUM5NkYwNUIxMTUxNjBEAA==", "status_id": 143}
+      ]
+    },
+    "C0A399F5A1E_janeiro": {
+      "total_processados": 16,
+      "disparados_ok": 1,
+      "skipped": {
+        "operacional_kommo_nome_janeiro_dd": 10,
+        "status_91486864_realizado": 3,
+        "status_142_closed_won": 1,
+        "nao_encontrado": 1
+      },
+      "disparos": [
+        {"lead_id": 2802912, "slack_nome": "VANESSA BRITO MUNOZ SILVA", "kommo_nome": "VANESSA BRITO MUNOZ SILVA", "telefone": "556181588616", "wamid": "wamid.HBgMNTU2MTgxNTg4NjE2FQIAERgSMzc0ODk5MjE1MTExNTdGRjk5AA==", "status_id": 143}
+      ]
+    }
+  },
+  "totais": {
+    "disparos_ok": 15,
+    "skipped_total": 36,
+    "taxa_conversao_para_disparo": "29%"
+  },
+  "observacao_operacional": "Listas Janeiro/Marco tem yield muito baixo (~7-13%) porque a maioria dos pacientes ja teve seu lead Kommo migrado para nome operacional (JANEIRO-DD.MM.AAAA-CONVENIO ou 'REALIZADO CONSULTA' ou 'AGENDADO_doc ok'). Isso significa que MUITOS desses pacientes JA SAO CLIENTES e nao devem receber template '1089 conversa parada' (que pressupoe lead frio/abandonado). Recomendacao Fabio: pra essas listas antigas, melhor usar template 1020_retorno_consulta (campanha retorno > 1 ano) que ja foi disparado em batch dedicado anteriormente."
+}

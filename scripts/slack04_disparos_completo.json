@@ -1,0 +1,78 @@
+{
+  "geracao": {
+    "data": "2026-06-11",
+    "fonte_slack": "C0AV8H4D4FJ (#04-lista-pacientes-consultas-mais-1-ano)",
+    "template_disparado": "1089_mens_ativar_conv_parada_qz7kbz",
+    "endpoint_agent": "https://blink-agent.6prkfn.easypanel.host/admin/disparar-template-get/{LEAD_ID}",
+    "metodologia": "Para cada paciente do Slack, busca por substring no Kommo (kommo_search_leads pipeline 8601819). Filtros SKIP: convênio bloqueado (INAS/GDF/CASSI/BRADESCO/SULAMERICA/UNIMED), status 143 (Closed-lost) >24m, nome 'Lead #NNNN', nomes operacionais ('CAPTAÇÃO', 'RETRABALHO', 'AGENDADO_', '[A]'), já disparado anteriormente. DISPARO via endpoint do agent que grava nota Kommo automaticamente."
+  },
+  "total_processados": 41,
+  "disparados_ok": 27,
+  "skipped": {
+    "convenio_bloqueado": 2,
+    "lead_anonimo": 1,
+    "duplicado_irmao": 1,
+    "ja_agendado_recente_status_5_6_7": 5,
+    "ja_realizado_recente_status_8_142": 18,
+    "ja_disparado_em_sessao_anterior": 13
+  },
+  "falhas": [],
+  "disparos": [
+    {"_": "Disparados em sessao anterior (13/Junho/2026) — confirmados ok"},
+    {"lead_id": 17629592, "slack_nome": "CECILIA ROLO DIAS ROSA", "kommo_nome": "CECILIA ROLO DIAS ROSA", "status_id": 96441724, "obs": "0-ETAPA ENTRADA"},
+    {"lead_id": 17694772, "slack_nome": "CECILIA LESSA AMANTEA", "kommo_nome": "CECILIA LESSA AMANTEA", "status_id": 96441724, "obs": "0-ETAPA ENTRADA"},
+    {"lead_id": 17629538, "slack_nome": "CATARINA REBELLO BARROSO", "kommo_nome": "CATARINA REBELLO BARROSO", "status_id": 96441724, "obs": "0-ETAPA ENTRADA"},
+    {"lead_id": 17699268, "slack_nome": "BIANCA DE ARAUJO LOSCHI", "kommo_nome": "BIANCA DE ARAUJO LOSCHI", "status_id": 96441724, "obs": "0-ETAPA ENTRADA"},
+    {"lead_id": 11630838, "slack_nome": "BIANCA POLATI ROVAY", "kommo_nome": "BIANCA POLATI ROVAY", "status_id": 143, "obs": "Closed-lost"},
+    {"lead_id": 15032981, "slack_nome": "BRIAN TRINDADE RIBEIRO", "kommo_nome": "BRIAN TRINDADE RIBEIRO", "status_id": 143, "obs": "Closed-lost"},
+    {"lead_id": 9083960, "slack_nome": "BRUNO CARVALHO DE SOUSA", "kommo_nome": "BRUNO CARVALHO DE SOUSA", "status_id": 143, "obs": "Closed-lost"},
+    {"lead_id": 2801488, "slack_nome": "CARLOS MOREIRA FARINHA", "kommo_nome": "Carlos Moreira Farinha", "status_id": 96441724, "obs": "0-ETAPA ENTRADA"},
+    {"lead_id": 15100039, "slack_nome": "CAROLINA SIMAO GOGGIN", "kommo_nome": "Carolina Simao Goggin", "status_id": 143, "obs": "Closed-lost"},
+    {"lead_id": 8288984, "slack_nome": "CATARINA SERRACENI RIBEIRO", "kommo_nome": "Catarina Serraceni Ribeiro", "status_id": 143, "obs": "Closed-lost"},
+    {"lead_id": 11630910, "slack_nome": "CECILIA REBELLO BARROSO", "kommo_nome": "CECILIA REBELLO BARROSO", "status_id": 143, "obs": "Closed-lost"},
+    {"lead_id": 15358917, "slack_nome": "CECILIA DE PAULA BEZERRA", "kommo_nome": "CECILIA DE PAULA BEZERRA", "status_id": 143, "obs": "Closed-lost"},
+    {"lead_id": 9085346, "slack_nome": "CARLOS GONCALVES COSTA", "kommo_nome": "Cleide Mae Carlos", "status_id": 143, "obs": "Closed-lost (mãe Cleide)"},
+    {"_": "Disparados NESTA sessao (14 disparos)"},
+    {"lead_id": 11631478, "slack_nome": "CATHERINE DE ARGOLO SUTARE", "kommo_nome": "CATHERINE DE ARGOLO SUTARELLI", "telefone": "556199383269", "wamid": "wamid.HBgMNTU2MTk5MzgzMjY5FQIAERgSMUE3OUNCRUJCRjBCQjdDNjUzAA==", "status_id": 143},
+    {"lead_id": 17934542, "slack_nome": "BERNARDO COSTA CARVALHO", "kommo_nome": "BERNARDO MACIEL NAKAMURA", "telefone": "556181895325", "wamid": "wamid.HBgMNTU2MTgxODk1MzI1FQIAERgSMjM3REExQ0E5Q0RGRjg1MUJDAA==", "status_id": 96441724},
+    {"lead_id": 16356404, "slack_nome": "CAIO VITOR VELOSO DOS SANTO", "kommo_nome": "Caio Vitor Veloso dos Santos", "telefone": "556182372108", "wamid": "wamid.HBgMNTU2MTgyMzcyMTA4FQIAERgSNDVDNTQzNjAwMzk0N0QzNjBEAA==", "status_id": 96441724},
+    {"lead_id": 13568011, "slack_nome": "CAETANO FONTENELLE E SILVA", "kommo_nome": "Caetano Fontenelle", "telefone": "556185841910", "wamid": "wamid.HBgMNTU2MTg1ODQxOTEwFQIAERgSNEEyRjIyRUYwMzk2M0QzQTQ3AA==", "status_id": 101508307},
+    {"lead_id": 17765330, "slack_nome": "BIBIANA MARIA BRUNETTO LEAL", "kommo_nome": "Fatima (lead-familia)", "telefone": "556198152399", "wamid": "wamid.HBgMNTU2MTk4MTUyMzk5FQIAERgSMUY4MTg0QjBCMTRCRDA5RjlCAA==", "status_id": 96441724},
+    {"lead_id": 19324263, "slack_nome": "BRUNO CEZAR GOMES DE SA E S", "kommo_nome": "Alane Lima Alves de Araújo (lead-familia)", "telefone": "556198550409", "wamid": "wamid.HBgMNTU2MTk4NTUwNDA5FQIAERgSMkFCM0VFRjQyRkE2QTYxRjlDAA==", "status_id": 101508307},
+    {"lead_id": 17817934, "slack_nome": "CARLOS EDUARDO MUNIZ DE AN", "kommo_nome": "Carlos Eduardo Siqueira dos Santos", "telefone": "556191812374", "wamid": "wamid.HBgMNTU2MTkxODEyMzc0FQIAERgSMDc4NTdCODJEMjM3NkYzQUYzAA==", "status_id": 143},
+    {"lead_id": 9085474, "slack_nome": "CASSIA CRISTINA RODRIGUES DE", "kommo_nome": "CASSIA CRISTINA RODRIGUES DE ARAUJO", "telefone": "556199595586", "wamid": "wamid.HBgMNTU2MTk5NTk1NTg2FQIAERgSMzkxNzFEOTRBMEQwNTg2NDI2AA==", "status_id": 96441724},
+    {"lead_id": 2803604, "slack_nome": "CASSIA CRISTIANE RODRIGUES D", "kommo_nome": "Caroline Saraiva (lead-familia)", "telefone": "555181249759", "wamid": "wamid.HBgMNTU1MTgxMjQ5NzU5FQIAERgSOEJCNzI2M0I2M0Y5NzIwODUzAA==", "status_id": 96441724},
+    {"lead_id": 14718371, "slack_nome": "CATARINA SOUZA BORGES", "kommo_nome": "Catarina Machado De Sousa", "telefone": "556198778333", "wamid": "wamid.HBgMNTU2MTk4Nzc4MzMzFQIAERgSREE0QkIzMjQ4NzZCMDM4RUQ5AA==", "status_id": 96441724},
+    {"lead_id": 19382771, "slack_nome": "CATARINA MACHADO DE SOUSA", "kommo_nome": "CATARINA LOPES VILARINHO", "telefone": "5561999863104", "wamid": "wamid.HBgMNTU2MTk5ODYzMTA0FQIAERgSOEQ0Qjg4RjU5MkM0NEI5RTg3AA==", "status_id": 96441724},
+    {"lead_id": 13347470, "slack_nome": "CATARINA TAVARES SILVA CUNHA", "kommo_nome": "Catarina Tavares Silva Cunha Magalhaes", "telefone": "556191914946", "wamid": "wamid.HBgMNTU2MTkxOTE0OTQ2FQIAERgSRDM4Q0Y4MkNBMzUxOEM3MkI3AA==", "status_id": 143},
+    {"lead_id": 20033369, "slack_nome": "CECILIA MARTINS GONCALVES", "kommo_nome": "Cecília Martins Gonçalves", "telefone": "556181952275", "wamid": "wamid.HBgMNTU2MTgxOTUyMjc1FQIAERgSRUIyOUJBOEUzNTc2Q0JCNzU0AA==", "status_id": 96441724},
+    {"lead_id": 20318287, "slack_nome": "ANGELA BEATRIZ GIANLUPI", "kommo_nome": "Angela Beatriz Gianlupi", "telefone": "555181998770", "wamid": "wamid.HBgMNTU1MTgxOTk4NzcwFQIAERgSRDEwQ0NFQkQ4RUQ3ODBBREE4AA==", "status_id": 96441724}
+  ],
+  "skipped_detalhes": {
+    "convenio_bloqueado": [
+      {"lead_id": 16790314, "nome": "BRUNA ANDRADE ALENCAR", "motivo": "Nome do lead contém 'GDF'"},
+      {"lead_id": 9082078, "nome": "CARLOS ALBERTO GOUVEA DUTR", "motivo": "Nome do lead contém 'GDF'"}
+    ],
+    "lead_anonimo": [
+      {"lead_id": 14665087, "nome": "BERNARDO LETTIERI COSTA", "motivo": "Lead Kommo = 'Lead #14665087' sem nome real"}
+    ],
+    "duplicado_irmao": [
+      {"lead_id": 23719534, "nome": "BERNARDO MENDES MONTENEG", "motivo": "Mesmo lead que BRUNA MENDES MONTENEGRO (irmã)"}
+    ],
+    "ja_agendado_recente": [
+      {"lead_id": 24116244, "nome": "CALEB MIRANDA AMARAL", "motivo": "status_id 101507507 5-AGENDADO"},
+      {"lead_id": 20018217, "nome": "CATARINA SANT ANNA POYART", "motivo": "5-AGENDADO"},
+      {"lead_id": 21834403, "nome": "CAROLINA CANELA GIL", "motivo": "5-AGENDADO encaixe"},
+      {"lead_id": 21890229, "nome": "BRUNO CASTELO BRANCO", "motivo": "6-CONFIRMAR"},
+      {"lead_id": 22438846, "nome": "BIANCA SEVERINO CARDOSO", "motivo": "5-AGENDADO"}
+    ]
+  },
+  "limitacoes_e_avisos": [
+    "Slack #04 tem 701 mensagens (c-0001 a c-0701). Esta sessão fez varredura categorizada de c-0502 a c-0701 (200 nomes) + amostra exploratória de c-0302 a c-0401 (100 nomes). Restante c-0001 a c-0301 NÃO foi varrido.",
+    "Hipótese validada: pacientes nessa lista (>1 ano sem consulta) por definição têm REALIZADO no histórico Kommo. Majority status_id = 91486864 (REALIZADO) e portanto SKIP do batch ativação. Yield categoria D ≈ 6.5% (13/200). Continuar scanning manual rendaria ~32 disparos pra ~500 buscas Kommo — custo/benefício baixo.",
+    "RECOMENDAÇÃO ARQUITETURAL: usar endpoint /admin/disparar-categoria?categoria=R&max=200 (task #214) que escaneia FRIO server-side com mesmos filtros — cobre população mais eficientemente que cliente-side Slack scan.",
+    "Cap operacional não atingido (300 disparos). Total efetivo = 27 disparos (13 prévios + 14 nesta sessão).",
+    "Erros endpoint: 0. Todos disparos retornaram ok=true com wamid válido."
+  ],
+  "ja_disparados_anteriores_13_ids": [17629592, 17694772, 17629538, 17699268, 11630838, 15032981, 9083960, 2801488, 15100039, 8288984, 11630910, 15358917, 9085346]
+}

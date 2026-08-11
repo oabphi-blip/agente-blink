@@ -1,0 +1,14 @@
+[20:15:02] 📋 Total a processar: 1
+[20:15:02] 🟡 MODO DRY-RUN (não vai gravar)
+[20:15:02] 
+— [1/1] lead 21431041 —
+[20:15:03]   🔎 [1] Lydia Cecy Oliveira Rosa e Silva (primeiro=LYDIA, segundo=CECY)
+[20:15:03] 🔑 Medware token OK
+[20:15:04]   🔎 [2] Davi Ribeiro de Oliveira Junior (primeiro=DAVI, segundo=RIBEIRO)
+[20:15:04]   🔎 [3] Vinicius Abdoral Rosa e Silva De Oliveira (primeiro=VINICIUS, segundo=ABDORAL)
+[20:15:05]   🟡 DRY-RUN — não gravou. Updates planejados: 0
+[20:15:05]   ✅ OK (0 pacientes)
+[20:15:05] 
+🎯 FIM: ok=1 skipped=0 erros=0
+[20:15:05] 📋 Log: /Users/fabiophilipecostamartins/Documents/Claude/Projects/AGENTE IA BLINK/logs_sync_jul2026/sync_20260628_201502.log
+[20:15:05] 📋 Relatório JSON: /Users/fabiophilipecostamartins/Documents/Claude/Projects/AGENTE IA BLINK/logs_sync_jul2026/sync_20260628_201502_report.json

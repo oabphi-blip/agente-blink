@@ -1,0 +1,15 @@
+{
+  "promptDelete": true,
+  "alwaysUpdateLinks": true,
+  "newFileLocation": "current",
+  "defaultViewMode": "preview",
+  "livePreview": true,
+  "showLineNumber": false,
+  "spellcheck": true,
+  "spellcheckLanguages": ["pt-BR", "en-US"],
+  "useTab": false,
+  "tabSize": 2,
+  "showFrontmatter": true,
+  "trashOption": "system",
+  "attachmentFolderPath": "anexos"
+}

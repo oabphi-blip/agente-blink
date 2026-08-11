@@ -1,0 +1,37 @@
+Fábio, olha só.
+
+Ambiente paralelo, tipo staging duplicado ou sandbox Medware, não é o que vai garantir que a Lia apresente agenda e grave agendamento. É mais conforto que garantia.
+
+Por três motivos. Primeiro: bug de modelo só aparece com paciente real variando. Input sintético em staging não reproduz. Segundo: bug de integração ainda assim conversa com Kommo e Medware reais. Não escapa. Terceiro: custa horas por semana de manutenção que entram em entropia rápido.
+
+O que de fato garante funcionamento são as camadas que já estão no código depois dos fixes de hoje.
+
+Primeiro. Tool choice forçado por estado da máquina de estados. Quando a conversa entra no estado AGENDA, o modelo é obrigado pela API da Anthropic a invocar a tool oferecer slot. Ele não consegue mais escrever, vou consultar. Isso resolve sozinho os casos Sabrina, Kamila, Janeide, Iara, Keyla e Alice.
+
+Segundo. Gravação no Medware é real agora, não é mais stub. A tool gravar agendamento chama de fato a função criar agendamento. Antes era flag Redis vazia.
+
+Terceiro. Checklist de quatro dados mínimos antes de ofertar slot. Nome completo, data de nascimento, CPF e convênio. Sem isso, a Lia não oferta, porque sabe que não vai conseguir gravar.
+
+Quarto. Lock por conversa. Paciente manda cinco mensagens em três segundos, agora só uma processa. As outras retornam, conversa travada, e a primeira responde com contexto completo.
+
+Quinto. Circuit breaker do Medware. Três falhas seguidas, escala humano automaticamente. Não engole pedido em silêncio.
+
+Sexto. Patch Kommo com validação real. Aquele bug C doze, em que o MCP retornava sucesso mas não gravava. Agora a função faz PATCH e, em seguida, GET. Confere se o campo realmente apareceu. Se não apareceu, retorna erro explícito. Não mente mais.
+
+Sétimo. Endpoint leads abandonados. Lia parou de responder paciente faz trinta minutos com IA ativa? Operador abre uma URL e vê a lista ordenada do mais antigo pro mais recente. Não depende mais de paciente reclamar pra você descobrir.
+
+Oitavo. Toggle de dry run. Liga a variável LIA gravação dry run igual a um, e a Lia roda tudo igual em produção. Mas não chama Medware real. É o seu ambiente de teste, sem precisar montar staging.
+
+O que falta pra ter garantia mensurada. Não promessa. Número.
+
+Item um. Métricas live num endpoint admin funcionamento. Você abre e vê: hoje, X por cento das conversas em estado AGENDA terminaram com oferecer slot chamado. Y por cento das gravações chegaram OK no Medware. Tempo médio paciente até slot oferecido.
+
+Item dois. Alarme Slack se métrica cair. Se a relação oferecer slot por AGENDA cair abaixo de oitenta por cento em uma hora, ping no canal ops.
+
+Item três. Replay noturno dos abandonos. Cron pega os dez abandonados do dia, refaz simulação, compara comportamento. Detecta regressão antes do paciente reclamar.
+
+Esses três itens entregam oitenta por cento da garantia mensurada por um décimo do esforço de ambiente paralelo de verdade.
+
+Recomendo aplicar os três agora. São de três a quatro horas de código. Sem infra nova. Ao fim, você abre uma URL e vê o número.
+
+Me confirma. A, pra avançar com isso. B, pra montar infra paralela primeiro. Ou C, se tem outra prioridade.

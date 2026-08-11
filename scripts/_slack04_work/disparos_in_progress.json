@@ -1,0 +1,25 @@
+{
+  "disparados_existentes_d_categoria": [
+    {"lead_id": 11631478, "slack_nome": "CATHERINE DE ARGOLO SUTARE", "kommo_nome": "CATHERINE DE ARGOLO SUTARELLI", "telefone": "556199383269", "wamid": "wamid.HBgMNTU2MTk5MzgzMjY5FQIAERgSMUE3OUNCRUJCRjBCQjdDNjUzAA==", "status_id": 143},
+    {"lead_id": 17934542, "slack_nome": "BERNARDO COSTA CARVALHO", "kommo_nome": "BERNARDO MACIEL NAKAMURA", "telefone": "556181895325", "wamid": "wamid.HBgMNTU2MTgxODk1MzI1FQIAERgSMjM3REExQ0E5Q0RGRjg1MUJDAA==", "status_id": 96441724},
+    {"lead_id": 16356404, "slack_nome": "CAIO VITOR VELOSO DOS SANTO", "kommo_nome": "Caio Vitor Veloso dos Santos", "telefone": "556182372108", "wamid": "wamid.HBgMNTU2MTgyMzcyMTA4FQIAERgSNDVDNTQzNjAwMzk0N0QzNjBEAA==", "status_id": 96441724},
+    {"lead_id": 13568011, "slack_nome": "CAETANO FONTENELLE E SILVA", "kommo_nome": "Caetano Fontenelle", "telefone": "556185841910", "wamid": "wamid.HBgMNTU2MTg1ODQxOTEwFQIAERgSNEEyRjIyRUYwMzk2M0QzQTQ3AA==", "status_id": 101508307},
+    {"lead_id": 17765330, "slack_nome": "BIBIANA MARIA BRUNETTO LEAL", "kommo_nome": "Fatima", "telefone": "556198152399", "wamid": "wamid.HBgMNTU2MTk4MTUyMzk5FQIAERgSMUY4MTg0QjBCMTRCRDA5RjlCAA==", "status_id": 96441724},
+    {"lead_id": 19324263, "slack_nome": "BRUNO CEZAR GOMES DE SA E S", "kommo_nome": "Alane Lima Alves de Araújo", "telefone": "556198550409", "wamid": "wamid.HBgMNTU2MTk4NTUwNDA5FQIAERgSMkFCM0VFRjQyRkE2QTYxRjlDAA==", "status_id": 101508307},
+    {"lead_id": 17817934, "slack_nome": "CARLOS EDUARDO MUNIZ DE AN", "kommo_nome": "Carlos Eduardo Siqueira dos Santos", "telefone": "556191812374", "wamid": "wamid.HBgMNTU2MTkxODEyMzc0FQIAERgSMDc4NTdCODJEMjM3NkYzQUYzAA==", "status_id": 143},
+    {"lead_id": 9085474, "slack_nome": "CASSIA CRISTINA RODRIGUES DE", "kommo_nome": "CASSIA CRISTINA RODRIGUES DE ARAUJO", "telefone": "556199595586", "wamid": "wamid.HBgMNTU2MTk5NTk1NTg2FQIAERgSMzkxNzFEOTRBMEQwNTg2NDI2AA==", "status_id": 96441724},
+    {"lead_id": 2803604, "slack_nome": "CASSIA CRISTIANE RODRIGUES D", "kommo_nome": "Caroline Saraiva", "telefone": "555181249759", "wamid": "wamid.HBgMNTU1MTgxMjQ5NzU5FQIAERgSOEJCNzI2M0I2M0Y5NzIwODUzAA==", "status_id": 96441724},
+    {"lead_id": 14718371, "slack_nome": "CATARINA SOUZA BORGES", "kommo_nome": "Catarina Machado De Sousa", "telefone": "556198778333", "wamid": "wamid.HBgMNTU2MTk4Nzc4MzMzFQIAERgSREE0QkIzMjQ4NzZCMDM4RUQ5AA==", "status_id": 96441724},
+    {"lead_id": 19382771, "slack_nome": "CATARINA MACHADO DE SOUSA", "kommo_nome": "CATARINA LOPES VILARINHO", "telefone": "5561999863104", "wamid": "wamid.HBgMNTU2MTk5ODYzMTA0FQIAERgSOEQ0Qjg4RjU5MkM0NEI5RTg3AA==", "status_id": 96441724},
+    {"lead_id": 13347470, "slack_nome": "CATARINA TAVARES SILVA CUNHA", "kommo_nome": "Catarina Tavares Silva Cunha Magalhaes", "telefone": "556191914946", "wamid": "wamid.HBgMNTU2MTkxOTE0OTQ2FQIAERgSRDM4Q0Y4MkNBMzUxOEM3MkI3AA==", "status_id": 143},
+    {"lead_id": 20033369, "slack_nome": "CECILIA MARTINS GONCALVES", "kommo_nome": "Cecília Martins Gonçalves", "telefone": "556181952275", "wamid": "wamid.HBgMNTU2MTgxOTUyMjc1FQIAERgSRUIyOUJBOEUzNTc2Q0JCNzU0AA==", "status_id": 96441724}
+  ],
+  "ja_disparados_anteriores_13": [17629592, 17694772, 17629538, 17699268, 11630838, 15032981, 9083960, 2801488, 15100039, 8288984, 11630910, 15358917, 9085346],
+  "total_disparados_acumulado": 26,
+  "skipped_filtros": {
+    "convenio_gdf": [16790314, 9082078],
+    "lead_anonimo": [14665087],
+    "duplicado_irmao": [23719534],
+    "ja_agendado": [24116244]
+  }
+}

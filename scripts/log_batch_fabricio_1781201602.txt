@@ -1,0 +1,14 @@
+# Batch Fabrício — 2026-06-11T15:13:22.685904
+
+
+# RESUMO
+{
+  "OK": 0,
+  "JA_RECEBEU": 0,
+  "SEM_TELEFONE": 0,
+  "ERRO": 0,
+  "FORA_HORARIO": 0
+}
+
+# DETALHES
+[]

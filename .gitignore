@@ -1,0 +1,42 @@
+# Secrets — NEVER commit
+.env
+.env.local
+*.env
+!.env.example
+config.json
+
+# Tokens/secrets em arquivos (proteção contra `git add -A` acidental)
+*TOKEN*
+*token*
+*SECRET*
+*secret*
+*.pem
+*.key
+*credentials*
+BLINK_TOKENS.txt
+.LOVABLE_WEBHOOK_SECRET_TEMP.txt
+
+# Scripts .command — todos locais, muitos com credenciais embutidas
+*.command
+
+# Build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Local-only build files
+.deploy_dockerfile_v2.txt
+.deploy_dockerfile_v3.txt
+blink-agent.tar.xz
+blink-agent.zip
+agente_blink_widget.zip
+ziN3L4Ro
+
+# macOS
+.DS_Store
+
+# Planilhas com dados de pacientes — nunca versionar (LGPD)
+*.xlsx

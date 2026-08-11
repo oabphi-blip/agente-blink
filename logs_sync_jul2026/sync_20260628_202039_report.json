@@ -1,0 +1,44 @@
+{
+  "started_at": "2026-06-28T20:20:39.141752-03:00",
+  "leads": [
+    {
+      "lead_id": 21431041,
+      "ok": true,
+      "pacientes": [
+        {
+          "slot": 1,
+          "cod": 6143,
+          "nome": "Lydia Cecy Oliveira Rosa E Silva",
+          "nasc": "05/06/1976",
+          "dia": "2025-07-03T09:30:00-03:00",
+          "tag": "ÚLTIMA REALIZADA"
+        },
+        {
+          "slot": 2,
+          "cod": 6144,
+          "nome": "Davi Ribeiro De Oliveira Junior",
+          "nasc": "22/06/1971",
+          "dia": "2026-03-06T15:30:00-03:00",
+          "tag": "ÚLTIMA REALIZADA"
+        },
+        {
+          "slot": 3,
+          "cod": 7169,
+          "nome": "Vinicius Abdoral Rosa E Silva De Oliveira",
+          "nasc": "08/02/2007",
+          "dia": "2026-01-28T17:00:00-03:00",
+          "tag": "ÚLTIMA REALIZADA"
+        }
+      ],
+      "skip_reason": null,
+      "dry_run": true
+    }
+  ],
+  "totals": {
+    "total": 1,
+    "ok": 1,
+    "skipped": 0,
+    "erros": 0
+  },
+  "finished_at": "2026-06-28T20:20:41.491806-03:00"
+}

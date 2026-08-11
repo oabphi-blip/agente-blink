@@ -1,0 +1,13 @@
+{
+  "total_encontrados": 0,
+  "filtro": {
+    "status_id_alvo": 96441724,
+    "etapa": "0-ETAPA ENTRADA",
+    "field_id_campanhas": 1260440,
+    "enum_id_alvo": 927043,
+    "enum_label": "Julho/2026"
+  },
+  "fonte": "mcp-kommo-kommo_search_leads-1782651026148.txt (page 1, 250 leads)",
+  "observacao": "Esta página (1) retornou 250 leads, todos com status_id=143 (Closed-lost). Nenhum lead na etapa 96441724 (0-ETAPA ENTRADA). O payload do search_leads NÃO inclui custom_fields_values — só metadata básica (id, name, status_id, pipeline_id, timestamps, url). Para identificar leads com campanha Julho/2026 é necessário (a) filtrar por status_id=96441724 ANTES OU (b) fazer GET /leads/{id}?with=custom_fields_values pra cada lead candidato, OU (c) usar kommo_list_leads com filtro server-side por status_id=96441724 e expandir custom_fields_values.",
+  "leads": []
+}

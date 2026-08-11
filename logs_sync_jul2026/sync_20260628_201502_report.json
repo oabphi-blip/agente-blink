@@ -1,0 +1,19 @@
+{
+  "started_at": "2026-06-28T20:15:02.397389-03:00",
+  "leads": [
+    {
+      "lead_id": 21431041,
+      "ok": true,
+      "pacientes": [],
+      "skip_reason": null,
+      "dry_run": true
+    }
+  ],
+  "totals": {
+    "total": 1,
+    "ok": 1,
+    "skipped": 0,
+    "erros": 0
+  },
+  "finished_at": "2026-06-28T20:15:05.655206-03:00"
+}

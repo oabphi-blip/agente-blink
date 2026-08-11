@@ -1,0 +1,1251 @@
+# Batch ferias julho — 2026-06-10 16:39:11
+
+[  1/184] #0001 Thomas Döwich Rall                       → SKIP (não encontrado no Kommo)
+[  2/184] #0002 Bruno Cassol de Castro                   → SKIP (todos os 1 leads estão em status finalizado)
+[  3/184] #0003 Sofia Ayami Veloso Yano                  → OK lead=11979432 status=96441724 primeiro=Sofia
+[  4/184] #0004 Lucas Portugal Pissutti                  → SKIP (não encontrado no Kommo)
+[  5/184] #0005 Fabio Alexandre e Silva                  → SKIP (todos os 1 leads estão em status finalizado)
+[  6/184] #0006 Isis Cardoso Bruno                       → SKIP (não encontrado no Kommo)
+[  7/184] #0007 Laura Ferreira Monteiro                  → OK lead=12356062 status=96441724 primeiro=Laura
+[  8/184] #0008 Barbara Cristina Galvão Adiala           → SKIP (não encontrado no Kommo)
+[  9/184] #0009 Rodrigo Henriques Campos                 → SKIP (não encontrado no Kommo)
+[ 10/184] #0010 Fellipe Teixeira Carvalho                → OK lead=12131840 status=96441724 primeiro=Fellipe
+[ 11/184] #0011 Marina Aliprandi Camilato                → OK lead=24019119 status=102560495 primeiro=Rafaela
+[ 12/184] #0012 Eduardo Cocota Mendes                    → SKIP (todos os 2 leads estão em status finalizado)
+[ 13/184] #0013 Pietra Fantinel Tomasini                 → SKIP (todos os 1 leads estão em status finalizado)
+[ 14/184] #0014 Carina Schlabitz Ferreira                → SKIP (todos os 2 leads estão em status finalizado)
+[ 15/184] #0015 Guilherme Eustáquio de Moraes Mota       → OK lead=11802718 status=96441724 primeiro=Guilherme
+[ 16/184] #0016 Fernanda Botelho Silveira                → OK lead=3333316 status=96441724 primeiro=Fernanda
+[ 17/184] #0017 Rogens Lino Gonçalves Barbosa            → OK lead=10809265 status=96441724 primeiro=Rogens
+[ 18/184] #0018 Wendel Teixeira Santos                   → OK lead=12871624 status=96441724 primeiro=Inbra
+[ 19/184] #0019 Marcia Castilho de Sales                 → OK lead=12270650 status=96441724 primeiro=Marcia
+[ 20/184] #0020 Miguel Miranda de Oliveira               → SKIP (todos os 1 leads estão em status finalizado)
+[ 21/184] #0021 Roberta Maria Rocha Barbosa Ferreira     → OK lead=21429947 status=106157327 primeiro=Roberta
+[ 22/184] #0022 Jorge Reis Munhoz Belo                   → SKIP (não encontrado no Kommo)
+[ 23/184] #0023 Beatriz Belo Freire                      → SKIP (todos os 1 leads estão em status finalizado)
+[ 24/184] #0024 Clarice Rocha Brandão de Souza Cavalcant → SKIP (todos os 1 leads estão em status finalizado)
+[ 25/184] #0025 Rayssa Santana de Moraes                 → SKIP (todos os 1 leads estão em status finalizado)
+[ 26/184] #0026 Clara Delalibera Rodrigues               → SKIP (todos os 5 leads estão em status finalizado)
+[ 27/184] #0027 Maria Thereza de Medeiros Alves Kuhlmann → SKIP (não encontrado no Kommo)
+[ 28/184] #0028 Leonel Masoller Wendt Filho              → SKIP (todos os 1 leads estão em status finalizado)
+[ 29/184] #0029 Mateus Albuquerque de Almeida            → OK lead=11977772 status=96441724 primeiro=Mateus
+[ 30/184] #0030 Joaquim Pinheiro da Luz                  → SKIP (todos os 1 leads estão em status finalizado)
+[ 31/184] #0031 Arnaldo Ribeiro Nacarato                 → SKIP (não encontrado no Kommo)
+[ 32/184] #0032 Janaina Pereira Braz de Souza            → OK lead=12760926 status=96441724 primeiro=Janaina
+[ 33/184] #0033 Gustavo Moura de Sousa                   → SKIP (todos os 4 leads estão em status finalizado)
+[ 34/184] #0034 Helena Araujo Soares Santos              → OK lead=12751536 status=96441724 primeiro=Helena
+[ 35/184] #0035 Jonas Morinishi da Silva Rocha           → OK lead=7916506 status=106157327 primeiro=Josy
+[ 36/184] #0036 Leise Rios Viana Ayres                   → OK lead=11976424 status=106157327 primeiro=Leise
+[ 37/184] #0037 Mavie Oliveira Severo Franco             → SKIP (não encontrado no Kommo)
+[ 38/184] #0038 Sara Regazzi Moreira                     → OK lead=13046322 status=96441724 primeiro=Diana
+[ 39/184] #0039 Micaella Pinho Soares Alcantara Crema    → SKIP (todos os 1 leads estão em status finalizado)
+[ 40/184] #0040 Davi Nogueira Rodrigues                  → SKIP (todos os 2 leads estão em status finalizado)
+[ 41/184] #0041 Leandro Vinicius Fortes da Silva         → OK lead=13023794 status=96441724 primeiro=Leandro
+[ 42/184] #0042 Joaquim Luiz Blanger Santiago            → SKIP (todos os 2 leads estão em status finalizado)
+[ 43/184] #0043 Daniel Cantanhede de Barros              → OK lead=12674792 status=96441724 primeiro=Daniel
+[ 44/184] #0044 Eduardo Andrade Caetano Oliveira         → OK lead=7908644 status=96441724 primeiro=Eduardo
+[ 45/184] #0045 Laura Buhler Vilhena                     → OK lead=23274526 status=106157327 primeiro=Genara
+[ 46/184] #0046 Benicio Ávila Niemeyer                   → SKIP (não encontrado no Kommo)
+[ 47/184] #0047 Vitor Garcia Scarpinelli                 → OK lead=11427228 status=96441724 primeiro=Vitor
+[ 48/184] #0048 Davi Morais dos Santos                   → OK lead=7193206 status=96441724 primeiro=Davi
+[ 49/184] #0049 Laura Goncalves Carneiro                 → OK lead=13124832 status=96441724 primeiro=Laura
+[ 50/184] #0050 Tomás Guimarães Figueiredo               → SKIP (todos os 1 leads estão em status finalizado)
+[ 51/184] #0051 Joao Rafael Machado Goncalves Olinto Pes → SKIP (todos os 1 leads estão em status finalizado)
+[ 52/184] #0052 Joao Inacio Rodrigues Moreira            → SKIP (não encontrado no Kommo)
+[ 53/184] #0053 Henrique Francica Aguiar de Oliveira     → OK lead=13184614 status=96441724 primeiro=Henrique
+[ 54/184] #0054 Laura Ferreira Monteiro                  → OK lead=12356062 status=96441724 primeiro=Laura
+[ 55/184] #0055 Lais Marques Moreira                     → OK lead=21647479 status=106157327 primeiro=Elga
+[ 56/184] #0056 Helena Ayumi Goto Santiago               → OK lead=12412832 status=96441724 primeiro=Helena
+[ 57/184] #0057 Manuela Barbosa de Macedo Esteves        → SKIP (todos os 1 leads estão em status finalizado)
+[ 58/184] #0058 Murilo de Sousa Vieira Oliveira          → SKIP (todos os 1 leads estão em status finalizado)
+[ 59/184] #0059 Liana Sena da Silva Castro               → OK lead=20412931 status=106157327 primeiro=Liana
+[ 60/184] #0060 Teresa Gardino Menezes de Carvalho       → SKIP (não encontrado no Kommo)
+[ 61/184] #0061 Jade Tupinamba Cruz de Azevedo           → OK lead=11632540 status=96441724 primeiro=Jorge
+[ 62/184] #0062 Hugo Mello Kohnert Seidler               → SKIP (todos os 1 leads estão em status finalizado)
+[ 63/184] #0063 Pathna Leticia Freitas Placido Mendes Ca → SKIP (todos os 1 leads estão em status finalizado)
+[ 64/184] #0064 Rebecah Carmo de Sousa                   → SKIP (todos os 1 leads estão em status finalizado)
+[ 65/184] #0065 Angelo Fioravanti de Oliveira            → OK lead=23262754 status=102560495 primeiro=Marcella
+[ 66/184] #0066 Olivia Afonso de Paula Rodrigues         → OK lead=13301706 status=96441724 primeiro=Olivia
+[ 67/184] #0067 Heitor Quixabeira Marinho                → SKIP (todos os 1 leads estão em status finalizado)
+[ 68/184] #0068 Felipe Melo Borges                       → OK lead=12983878 status=96441724 primeiro=Felipe
+[ 69/184] #0069 Noah Barbosa Gonçalves                   → OK lead=13185856 status=96441724 primeiro=Noah
+[ 70/184] #0070 Pedro Mayer de Camargo                   → OK lead=11214748 status=96441724 primeiro=Pedro
+[ 71/184] #0071 Vitoria Altfuldisck Soares               → OK lead=22670546 status=102560495 primeiro=Ana
+[ 72/184] #0072 Tito Neves Weber Pinheiro                → OK lead=13423188 status=96441724 primeiro=Aline
+[ 73/184] #0073 Laura Pessoa Marangon                    → SKIP (todos os 1 leads estão em status finalizado)
+[ 74/184] #0074 Osman Farias Filho                       → OK lead=13422490 status=96441724 primeiro=Osman
+[ 75/184] #0075 Sophia Pan Teixeira                      → OK lead=13425010 status=96441724 primeiro=Sophia
+[ 76/184] #0076 Martin Rideyoshi Teijeira Guibo          → OK lead=13460132 status=96441724 primeiro=Martin
+[ 77/184] #0077 Helienne Rizzo de Paula                  → SKIP (todos os 1 leads estão em status finalizado)
+[ 78/184] #0078 Jade de Oliveira Cabral                  → OK lead=12875946 status=96441724 primeiro=Kelly
+[ 79/184] #0079 Luciana Paola Demociani                  → SKIP (não encontrado no Kommo)
+[ 80/184] #0080 Davi Schroder de Holanda Faria           → SKIP (todos os 2 leads estão em status finalizado)
+[ 81/184] #0081 Enrico de Lima Santana                   → OK lead=13463274 status=96441724 primeiro=Enrico
+[ 82/184] #0082 Clara Carvalho Jordão                    → OK lead=21189747 status=96441724 primeiro=Aline
+[ 83/184] #0083 Júlia Requião de Andrade                 → OK lead=9785130 status=96441724 primeiro=Andrea
+[ 84/184] #0084 Ana Luiza Moreira de Oliveira            → SKIP (todos os 1 leads estão em status finalizado)
+[ 85/184] #0085 João Miguel Vieira Alves Valduga         → SKIP (todos os 2 leads estão em status finalizado)
+[ 86/184] #0086 Maria Fernanda de Almeida Carvalho       → SKIP (todos os 2 leads estão em status finalizado)
+[ 87/184] #0087 Maria Eduarda de Oliveira Florindo       → SKIP (todos os 2 leads estão em status finalizado)
+[ 88/184] #0088 Fernanda Lopes Braga                     → SKIP (todos os 2 leads estão em status finalizado)
+[ 89/184] #0089 Afonso Oliveira Lopes                    → SKIP (todos os 1 leads estão em status finalizado)
+[ 90/184] #0090 Beatriz Lobosque de Almeida Cunha        → OK lead=16843614 status=96441724 primeiro=Beatriz
+[ 91/184] #0091 Lis de Melo Cunha                        → SKIP (não encontrado no Kommo)
+[ 92/184] #0092 Lana Marcal de Sousa Barbosa             → OK lead=13873343 status=96441724 primeiro=Lana
+[ 93/184] #0093 Isaac Cardoso Leite                      → OK lead=17626278 status=96441724 primeiro=Isaac
+[ 94/184] #0094 Selena Deolindo de Carvalho Amaral       → OK lead=16793000 status=96441724 primeiro=Selena
+[ 95/184] #0095 Carlos Eduardo Siqueira dos Santos       → SKIP (todos os 1 leads estão em status finalizado)
+[ 96/184] #0096 Debora Fernanda Moura dos Santos         → OK lead=21391615 status=106157327 primeiro=Fge
+[ 97/184] #0097 Isabela Alves Crescenti                  → SKIP (não encontrado no Kommo)
+[ 98/184] #0098 Ana Clara de Oliveira dos Santos         → SKIP (todos os 1 leads estão em status finalizado)
+[ 99/184] #0099 Mateus Yoshihiro Matos Lima Tatugawa     → OK lead=15378319 status=101508307 primeiro=Mateus
+[100/184] #0100 Gabriel Sbampato Franca Moura Paim       → SKIP (não encontrado no Kommo)
+[101/184] #0101 Cecilia Fantinel Tomasini                → SKIP (todos os 2 leads estão em status finalizado)
+[102/184] #0102 Beatriz Rocha Ferreira de Oliveira       → OK lead=21429947 status=106157327 primeiro=Roberta
+[103/184] #0103 Serena Melo Guerra                       → OK lead=12666662 status=96441724 primeiro=Serena
+[104/184] #0104 Cesar Nogueira Rodrigues                 → SKIP (todos os 1 leads estão em status finalizado)
+[105/184] #0105 Arthur Guedes Souza                      → OK lead=22733858 status=106157327 primeiro=Ariane
+[106/184] #0106 Isadora Ribeiro Soares                   → OK lead=22141801 status=101508307 primeiro=Daniella
+[107/184] #0107 Priscila Goggin Alves                    → OK lead=18112691 status=106157327 primeiro=Eduardo
+[108/184] #0108 Ava Gruneich do Amaral                   → OK lead=18374029 status=101508307 primeiro=Danielle
+[109/184] #0109 Henrique Melo Vianna                     → SKIP (todos os 1 leads estão em status finalizado)
+[110/184] #0110 Maite Barbosa Ruztz                      → SKIP (não encontrado no Kommo)
+[111/184] #0111 Sandra Cristina Ribeiro                  → OK lead=10741982 status=106157327 primeiro=Davi
+[112/184] #0112 Eloah Zuany Fagundes                     → SKIP (todos os 1 leads estão em status finalizado)
+[113/184] #0113 Francesca Marliere Pita                  → SKIP (todos os 1 leads estão em status finalizado)
+[114/184] #0114 Joao Pedro dos Santos Reis               → OK lead=17968789 status=106157327 primeiro=Mariana
+[115/184] #0115 Alice de Abreu Sobreira                  → SKIP (não encontrado no Kommo)
+[116/184] #0116 Giovana Pereira dos Santos               → OK lead=2800570 status=96441724 primeiro=Giovana
+[117/184] #0117 Fernando Nagano Foschiera                → SKIP (não encontrado no Kommo)
+[118/184] #0118 Zahara Teofilo Bonfim                    → SKIP (todos os 1 leads estão em status finalizado)
+[119/184] #0119 Miguel Pereira Masoller                  → SKIP (todos os 3 leads estão em status finalizado)
+[120/184] #0120 Eva Cardoso Santana                      → SKIP (todos os 2 leads estão em status finalizado)
+[121/184] #0121 Gabriela Castro Silva                    → OK lead=13347374 status=96441724 primeiro=Gabriela
+[122/184] #0122 Julia Poema Cardoso da Silva             → SKIP (todos os 1 leads estão em status finalizado)
+[123/184] #0123 Beatriz Cardoso Souto Muniz              → SKIP (todos os 1 leads estão em status finalizado)
+[124/184] #0124 Maria Alice Alvarenga Peixoto            → OK lead=21545155 status=106157327 primeiro=FᥲFᥲ́
+[125/184] #0125 Luisa Lopes Rocha                        → OK lead=11090640 status=96441724 primeiro=Daisy
+[126/184] #0126 Davi Oliveira Silva                      → OK lead=21431041 status=96441724 primeiro=Lydia
+[127/184] #0127 Miguel Soares do Nascimento              → SKIP (todos os 1 leads estão em status finalizado)
+[128/184] #0128 Maria Valentina Ceciliano Eleuterio      → SKIP (todos os 1 leads estão em status finalizado)
+[129/184] #0129 Bernardo Reis Costa                      → SKIP (todos os 1 leads estão em status finalizado)
+[130/184] #0130 Leonardo Machado de Sousa                → OK lead=9044978 status=102560495 primeiro=Leonardo
+[131/184] #0131 Ravi Bandeira Oliveira Bezerra           → SKIP (não encontrado no Kommo)
+[132/184] #0132 Melissa Vargas Nakatani                  → SKIP (todos os 1 leads estão em status finalizado)
+[133/184] #0133 Anna Flavia Araujo Ribeiro Sant Anna     → SKIP (todos os 1 leads estão em status finalizado)
+[134/184] #0134 Heloisa Abdala Rosa                      → SKIP (todos os 1 leads estão em status finalizado)
+[135/184] #0135 Isabella Guimaraes Elmasry               → OK lead=14323899 status=96441724 primeiro=Isabella
+[136/184] #0136 Julia Curi de Sousa                      → SKIP (todos os 1 leads estão em status finalizado)
+[137/184] #0137 Heloisa Abdala Rosa                      → SKIP (todos os 1 leads estão em status finalizado)
+[138/184] #0138 Leticia Carneiro Dornellas de Castro     → SKIP (todos os 1 leads estão em status finalizado)
+[139/184] #0139 Henrique de Medeiros Santana             → SKIP (não encontrado no Kommo)
+[140/184] #0140 Benicio de Matos                         → OK lead=17811442 status=96441724 primeiro=Benício
+[141/184] #0141 Arthur Nunes Duarte Martins              → OK lead=9297648 status=96441724 primeiro=Arthur
+[142/184] #0142 Gabriele Vasconcelos Arnaud              → OK lead=21023793 status=101508307 primeiro=Arnaud
+[143/184] #0143 Larissa Vitoria de Mendonca Lima         → SKIP (todos os 2 leads estão em status finalizado)
+[144/184] #0144 Enzo Olivi Lins de Araujo                → OK lead=22723784 status=96441724 primeiro=Olivi
+[145/184] #0145 Julia Kineipp de Souza Andrade           → SKIP (todos os 3 leads estão em status finalizado)
+[146/184] #0146 Henrique Monteiro Roberto Alves          → SKIP (todos os 2 leads estão em status finalizado)
+[147/184] #0147 Antonio Debortoli Maschio                → OK lead=6545052 status=96441724 primeiro=Antônio
+[148/184] #0148 Fernando Avila Sampaio                   → SKIP (todos os 2 leads estão em status finalizado)
+[149/184] #0149 Livia Villani Calais                     → SKIP (todos os 1 leads estão em status finalizado)
+[150/184] #0150 Henry Gomes dos Reis                     → OK lead=21245589 status=96441724 primeiro=Euziele
+[151/184] #0151 Arthur de Mello Curado                   → SKIP (todos os 1 leads estão em status finalizado)
+[152/184] #0152 Luna Cecilia Assis de Mello              → OK lead=13347190 status=96441724 primeiro=Luna
+[153/184] #0153 Sonia Maria Rodrigues de Melo            → SKIP (não encontrado no Kommo)
+[154/184] #0154 Rebeca Bernardes Marques                 → SKIP (todos os 1 leads estão em status finalizado)
+[155/184] #0155 Guilherme Linhares Godoi                 → SKIP (não encontrado no Kommo)
+[156/184] #0156 Eloah Bender Rodrigues                   → SKIP (não encontrado no Kommo)
+[157/184] #0157 Felipe Magalhaes Meinberg                → OK lead=2803042 status=96441724 primeiro=Felipe
+[158/184] #0158 Davi Curado Freire                       → SKIP (todos os 1 leads estão em status finalizado)
+[159/184] #0159 Gael Alves e Domingues Soares            → OK lead=2803388 status=96441724 primeiro=Gael
+[160/184] #0160 Arthur Ribeiro Cruzeiro                  → SKIP (não encontrado no Kommo)
+[161/184] #0161 Rebecca Escorcio Sousa                   → SKIP (todos os 1 leads estão em status finalizado)
+[162/184] #0162 Davi de Oliveira Almeida                 → SKIP (todos os 2 leads estão em status finalizado)
+[163/184] #0163 Eduardo Campelo Gomes                    → OK lead=11427628 status=102560495 primeiro=Mariana
+[164/184] #0164 Heitor Pires Pimentel                    → SKIP (todos os 3 leads estão em status finalizado)
+[165/184] #0165 Ana Clara Rabello Ataides                → SKIP (todos os 1 leads estão em status finalizado)
+[166/184] #0166 Tales de Castro Santos                   → SKIP (todos os 1 leads estão em status finalizado)
+[167/184] #0167 Bernardo Alves Ferreira                  → SKIP (todos os 2 leads estão em status finalizado)
+[168/184] #0168 Hugo Fernando Kotama Varela              → SKIP (todos os 2 leads estão em status finalizado)
+[169/184] #0169 Joao Pedro Brito Correa                  → SKIP (todos os 2 leads estão em status finalizado)
+[170/184] #0170 Aleksander Velozo Pascoal                → OK lead=17629776 status=96441724 primeiro=Aleksander
+[171/184] #0171 Gustavo Lima Rodrigues                   → SKIP (todos os 1 leads estão em status finalizado)
+[172/184] #0172 Maria Julia Torres Lopes                 → SKIP (não encontrado no Kommo)
+[173/184] #0173 Maria Helena da Silva Pinto              → OK lead=19921467 status=96441724 primeiro=Maria
+[174/184] #0174 Samuel Fernandes de Freitas              → SKIP (não encontrado no Kommo)
+[175/184] #0175 Ana Laís Alves da Silva                  → OK lead=19878237 status=96441724 primeiro=Ana
+[176/184] #0176 Henrique Botelho de Carvalho             → SKIP (todos os 1 leads estão em status finalizado)
+[177/184] #0177 Caetano de Oliveira Lobo                 → SKIP (todos os 2 leads estão em status finalizado)
+[178/184] #0178 Elis Dias de Assis                       → OK lead=20365977 status=106157327 primeiro=Elis
+[179/184] #0179 Marina Mítica Nunes                      → SKIP (não encontrado no Kommo)
+[180/184] #0180 Emanuele Santana Abreu                   → OK lead=13195098 status=96441724 primeiro=Emanuele
+[181/184] #0181 Fábio Junior Francisco Almeida           → OK lead=20901861 status=96441724 primeiro=Fábio
+[182/184] #0182 Catarina Nery Siqueira                   → SKIP (todos os 1 leads estão em status finalizado)
+[183/184] #0183 Lucca Viana Barreto                      → SKIP (todos os 1 leads estão em status finalizado)
+[184/184] #0184 Antonio Pereira Abreu                    → OK lead=7953316 status=96441724 primeiro=Antonio
+
+# RESUMO
+DISPARA: 81
+SKIP_REALIZADO: 75
+SKIP_CONVENIO: 0
+SKIP_NOTFOUND: 28
+ERRO: 0
+TOTAL: 184
+
+# DETALHES JSON
+[
+  {
+    "slack_id": "0003",
+    "nome": "Sofia Ayami Veloso Yano",
+    "lead_id": 11979432,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Sofia",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556292637700\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MjkyNjM3NzAwFQIAERgSM0MzOUE5MEI5MjYzQUVBRDY3AA==\",\"lead_id\":11979432}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0007",
+    "nome": "Laura Ferreira Monteiro",
+    "lead_id": 12356062,
+    "status_id": 96441724,
+    "convenio": "conab",
+    "primeiro_nome": "Laura",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556196352445\",\"nome\":\"Laura Ferreira Monteiro\",\"primeiro_nome\":\"Laura\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk2MzUyNDQ1FQIAERgSOThEMTdGOTNCMDQyQUJEQTZDAA==\",\"lead_id\":12356062}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0010",
+    "nome": "Fellipe Teixeira Carvalho",
+    "lead_id": 12131840,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Fellipe",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181534453\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxNTM0NDUzFQIAERgSNjVFNDQ2MDAyMzk3MjY0OEE2AA==\",\"lead_id\":12131840}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0011",
+    "nome": "Marina Aliprandi Camilato",
+    "lead_id": 24019119,
+    "status_id": 102560495,
+    "convenio": "plan assiste - mpf (mpu)",
+    "primeiro_nome": "Rafaela",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181172113\",\"nome\":\"Rafaela\",\"primeiro_nome\":\"Rafaela\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxMTcyMTEzFQIAERgSRjlFQTQxRjJBODMyQzAyNjkxAA==\",\"lead_id\":24019119}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0015",
+    "nome": "Guilherme Eustáquio de Moraes Mota",
+    "lead_id": 11802718,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Guilherme",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556199230636\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk5MjMwNjM2FQIAERgSMDcxNzIwNzkwNUIyRTMxOTEwAA==\",\"lead_id\":11802718}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0016",
+    "nome": "Fernanda Botelho Silveira",
+    "lead_id": 3333316,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Fernanda",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181735898\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxNzM1ODk4FQIAERgSMDY4RDBGQUNFNjQyRDlCQTk1AA==\",\"lead_id\":3333316}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0017",
+    "nome": "Rogens Lino Gonçalves Barbosa",
+    "lead_id": 10809265,
+    "status_id": 96441724,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Rogens",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556182642324\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgyNjQyMzI0FQIAERgSN0I4QTE3QkE1MjJGNEJCQjQyAA==\",\"lead_id\":10809265}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0018",
+    "nome": "Wendel Teixeira Santos",
+    "lead_id": 12871624,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Inbra",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556182127241\",\"nome\":\"Inbra Jassen\",\"primeiro_nome\":\"Inbra\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgyMTI3MjQxFQIAERgSRkIzOUNEOUMxOTk1QTUwQjA3AA==\",\"lead_id\":12871624}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0019",
+    "nome": "Marcia Castilho de Sales",
+    "lead_id": 12270650,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Marcia",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181187601\",\"nome\":\"MARCIA CASTILHO DE SALES\",\"primeiro_nome\":\"Marcia\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxMTg3NjAxFQIAERgSQzlERENGRDE5QzY0RjVDMDNDAA==\",\"lead_id\":12270650}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0021",
+    "nome": "Roberta Maria Rocha Barbosa Ferreira",
+    "lead_id": 21429947,
+    "status_id": 106157327,
+    "convenio": "tjdft pró-saúde",
+    "primeiro_nome": "Roberta",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556193700978\",\"nome\":\"Roberta Ferreira\",\"primeiro_nome\":\"Roberta\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkzNzAwOTc4FQIAERgSQjE5NjFEQ0Y3QjY5OUFBMDQwAA==\",\"lead_id\":21429947}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0029",
+    "nome": "Mateus Albuquerque de Almeida",
+    "lead_id": 11977772,
+    "status_id": 96441724,
+    "convenio": "e-vida",
+    "primeiro_nome": "Mateus",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556186320788\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTg2MzIwNzg4FQIAERgSNDRBMjg1MjdGNDc4MkFCQjE2AA==\",\"lead_id\":11977772}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0032",
+    "nome": "Janaina Pereira Braz de Souza",
+    "lead_id": 12760926,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Janaina",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556196699725\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk2Njk5NzI1FQIAERgSNkUyN0YyNTUyNTZFQUY1QTZGAA==\",\"lead_id\":12760926}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0034",
+    "nome": "Helena Araujo Soares Santos",
+    "lead_id": 12751536,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Helena",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556196369734\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk2MzY5NzM0FQIAERgSRjZFOUJERkMyREQ5MjYxQkI1AA==\",\"lead_id\":12751536}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0035",
+    "nome": "Jonas Morinishi da Silva Rocha",
+    "lead_id": 7916506,
+    "status_id": 106157327,
+    "convenio": "conab",
+    "primeiro_nome": "Josy",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556184522287\",\"nome\":\"Josy\",\"primeiro_nome\":\"Josy\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTg0NTIyMjg3FQIAERgSOTFEQzRCRTYxN0NDMTM5ODQzAA==\",\"lead_id\":7916506}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0036",
+    "nome": "Leise Rios Viana Ayres",
+    "lead_id": 11976424,
+    "status_id": 106157327,
+    "convenio": "care plus",
+    "primeiro_nome": "Leise",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181289340\",\"nome\":\"Leise Rios Viana Ayres\",\"primeiro_nome\":\"Leise\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxMjg5MzQwFQIAERgSRDhCQURFMjA1QjFDNEJFQkIzAA==\",\"lead_id\":11976424}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0038",
+    "nome": "Sara Regazzi Moreira",
+    "lead_id": 13046322,
+    "status_id": 96441724,
+    "convenio": "casembrapa  _ embrapa",
+    "primeiro_nome": "Diana",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181401901\",\"nome\":\"Diana\",\"primeiro_nome\":\"Diana\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxNDAxOTAxFQIAERgSNzkzQTA0MERERDRFQzJGQzk3AA==\",\"lead_id\":13046322}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0041",
+    "nome": "Leandro Vinicius Fortes da Silva",
+    "lead_id": 13023794,
+    "status_id": 96441724,
+    "convenio": "plan assiste - mpf (mpu)",
+    "primeiro_nome": "Leandro",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556196813506\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk2ODEzNTA2FQIAERgSMzAzODc5NTNFQzFCRTk3NDY5AA==\",\"lead_id\":13023794}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0043",
+    "nome": "Daniel Cantanhede de Barros",
+    "lead_id": 12674792,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Daniel",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556191561313\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkxNTYxMzEzFQIAERgSRDlERkY5RkY1RjlGNkZGRkY4AA==\",\"lead_id\":12674792}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0044",
+    "nome": "Eduardo Andrade Caetano Oliveira",
+    "lead_id": 7908644,
+    "status_id": 96441724,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Eduardo",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556183509085\",\"nome\":\"Eduardo Andrade Caetano Oliveira\",\"primeiro_nome\":\"Eduardo\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgzNTA5MDg1FQIAERgSOURCODU3Qzc5ODAzQTEzNDNBAA==\",\"lead_id\":7908644}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0045",
+    "nome": "Laura Buhler Vilhena",
+    "lead_id": 23274526,
+    "status_id": 106157327,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Genara",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556183430919\",\"nome\":\"Genara\",\"primeiro_nome\":\"Genara\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgzNDMwOTE5FQIAERgSMTYxOTkwRDVDNEM4Q0QyMzYxAA==\",\"lead_id\":23274526}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0047",
+    "nome": "Vitor Garcia Scarpinelli",
+    "lead_id": 11427228,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Vitor",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181301259\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxMzAxMjU5FQIAERgSMEMzM0Q4QkQ2QzExRjM5OTE2AA==\",\"lead_id\":11427228}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0048",
+    "nome": "Davi Morais dos Santos",
+    "lead_id": 7193206,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Davi",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556198146919\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk4MTQ2OTE5FQIAERgSRUNDODNGNTk3NEUyNjdEMEM5AA==\",\"lead_id\":7193206}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0049",
+    "nome": "Laura Goncalves Carneiro",
+    "lead_id": 13124832,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Laura",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181881038\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxODgxMDM4FQIAERgSNDRDRDM3MUMzQkJBN0MxQ0Y3AA==\",\"lead_id\":13124832}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0053",
+    "nome": "Henrique Francica Aguiar de Oliveira",
+    "lead_id": 13184614,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Henrique",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"554399691296\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU0Mzk5NjkxMjk2FQIAERgSNEMyNUE0QzM5QkM5NkI0QzJDAA==\",\"lead_id\":13184614}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0054",
+    "nome": "Laura Ferreira Monteiro",
+    "lead_id": 12356062,
+    "status_id": 96441724,
+    "convenio": "conab",
+    "primeiro_nome": "Laura",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556196352445\",\"nome\":\"Laura Ferreira Monteiro\",\"primeiro_nome\":\"Laura\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk2MzUyNDQ1FQIAERgSMjY1M0MyQTU2QkVDRDhGMDg2AA==\",\"lead_id\":12356062}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0055",
+    "nome": "Lais Marques Moreira",
+    "lead_id": 21647479,
+    "status_id": 106157327,
+    "convenio": "saúde caixa",
+    "primeiro_nome": "Elga",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556199910551\",\"nome\":\"Elga\",\"primeiro_nome\":\"Elga\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk5OTEwNTUxFQIAERgSMTc4N0RGRkE2RjYyOTI0MEVEAA==\",\"lead_id\":21647479}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0056",
+    "nome": "Helena Ayumi Goto Santiago",
+    "lead_id": 12412832,
+    "status_id": 96441724,
+    "convenio": "saúde caixa",
+    "primeiro_nome": "Helena",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"553898313730\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTUzODk4MzEzNzMwFQIAERgSNjY0MTJDRUU3NUNCQTEzOTVGAA==\",\"lead_id\":12412832}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0059",
+    "nome": "Liana Sena da Silva Castro",
+    "lead_id": 20412931,
+    "status_id": 106157327,
+    "convenio": "plan assiste - mpf (mpu)",
+    "primeiro_nome": "Liana",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556193117641\",\"nome\":\"Liana Sena da Silva Castro\",\"primeiro_nome\":\"Liana\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkzMTE3NjQxFQIAERgSOTJFNjhFMzU1MEUyMzkxMzVCAA==\",\"lead_id\":20412931}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0061",
+    "nome": "Jade Tupinamba Cruz de Azevedo",
+    "lead_id": 11632540,
+    "status_id": 96441724,
+    "convenio": "tjdft pró-saúde",
+    "primeiro_nome": "Jorge",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556191255065\",\"nome\":\"Jorge Cruz\",\"primeiro_nome\":\"Jorge\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkxMjU1MDY1FQIAERgSNDNDRjA3RTcwOEU1RDVFNEI2AA==\",\"lead_id\":11632540}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0065",
+    "nome": "Angelo Fioravanti de Oliveira",
+    "lead_id": 23262754,
+    "status_id": 102560495,
+    "convenio": "plan assiste - mpf (mpu)",
+    "primeiro_nome": "Marcella",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556199780288\",\"nome\":\"Marcella Fioravanti\",\"primeiro_nome\":\"Marcella\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk5NzgwMjg4FQIAERgSRjQ4MTgyNUQzMDMxQjQ0MkZBAA==\",\"lead_id\":23262754}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0066",
+    "nome": "Olivia Afonso de Paula Rodrigues",
+    "lead_id": 13301706,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Olivia",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181212979\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxMjEyOTc5FQIAERgSN0QwRjFBMjE5RkFCNTBDOEM4AA==\",\"lead_id\":13301706}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0068",
+    "nome": "Felipe Melo Borges",
+    "lead_id": 12983878,
+    "status_id": 96441724,
+    "convenio": "saúde caixa",
+    "primeiro_nome": "Felipe",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556184250590\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTg0MjUwNTkwFQIAERgSMjI4M0M0MDM4NjA3NkQzNEJFAA==\",\"lead_id\":12983878}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0069",
+    "nome": "Noah Barbosa Gonçalves",
+    "lead_id": 13185856,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Noah",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556193752006\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkzNzUyMDA2FQIAERgSOTRDNkVERTUwOThDODA0NTRBAA==\",\"lead_id\":13185856}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0070",
+    "nome": "Pedro Mayer de Camargo",
+    "lead_id": 11214748,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Pedro",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556196830095\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk2ODMwMDk1FQIAERgSQzhCQzlFNThEODVCMURDQTA1AA==\",\"lead_id\":11214748}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0071",
+    "nome": "Vitoria Altfuldisck Soares",
+    "lead_id": 22670546,
+    "status_id": 102560495,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Ana",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556199719678\",\"nome\":\"Ana Cristina\",\"primeiro_nome\":\"Ana\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk5NzE5Njc4FQIAERgSNEY0NTFDMzE1NUZFNTVGRjM3AA==\",\"lead_id\":22670546}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0072",
+    "nome": "Tito Neves Weber Pinheiro",
+    "lead_id": 13423188,
+    "status_id": 96441724,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Aline",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181210006\",\"nome\":\"Aline Weber\",\"primeiro_nome\":\"Aline\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxMjEwMDA2FQIAERgSMjc1OTEwQzI0Qjg2NzIyMzAwAA==\",\"lead_id\":13423188}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0074",
+    "nome": "Osman Farias Filho",
+    "lead_id": 13422490,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Osman",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556199277950\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk5Mjc3OTUwFQIAERgSNkM1NzQ0MkY1MzgyMDUzNjg2AA==\",\"lead_id\":13422490}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0075",
+    "nome": "Sophia Pan Teixeira",
+    "lead_id": 13425010,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Sophia",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556182745772\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgyNzQ1NzcyFQIAERgSMERDNjA0RUYwRjFDMTFEQTZCAA==\",\"lead_id\":13425010}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0076",
+    "nome": "Martin Rideyoshi Teijeira Guibo",
+    "lead_id": 13460132,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Martin",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"5535997256222\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTUzNTk3MjU2MjIyFQIAERgSMEJBNUUwMkRBNkM4MTVCMkY2AA==\",\"lead_id\":13460132}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0078",
+    "nome": "Jade de Oliveira Cabral",
+    "lead_id": 12875946,
+    "status_id": 96441724,
+    "convenio": "saúde caixa",
+    "primeiro_nome": "Kelly",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556184192910\",\"nome\":\"Kelly\",\"primeiro_nome\":\"Kelly\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTg0MTkyOTEwFQIAERgSNzMxRTk1N0Y5MjZDMEE3NEQxAA==\",\"lead_id\":12875946}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0081",
+    "nome": "Enrico de Lima Santana",
+    "lead_id": 13463274,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Enrico",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556192222365\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkyMjIyMzY1FQIAERgSMEUxRUIwMzRDNUE0NzhDRDQ0AA==\",\"lead_id\":13463274}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0082",
+    "nome": "Clara Carvalho Jordão",
+    "lead_id": 21189747,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Aline",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556198778779\",\"nome\":\"Aline\",\"primeiro_nome\":\"Aline\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk4Nzc4Nzc5FQIAERgSQjI5QUI1MEQ0NUFGMTBBRDVGAA==\",\"lead_id\":21189747}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0083",
+    "nome": "Júlia Requião de Andrade",
+    "lead_id": 9785130,
+    "status_id": 96441724,
+    "convenio": "tjdft pró-saúde",
+    "primeiro_nome": "Andrea",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181041899\",\"nome\":\"Andrea\",\"primeiro_nome\":\"Andrea\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxMDQxODk5FQIAERgSNkRBNEI1Mjk1NDlGNEUzQkUxAA==\",\"lead_id\":9785130}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0090",
+    "nome": "Beatriz Lobosque de Almeida Cunha",
+    "lead_id": 16843614,
+    "status_id": 96441724,
+    "convenio": "plan assiste - mpf (mpu)",
+    "primeiro_nome": "Beatriz",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556191946555\",\"nome\":\"Beatriz Lobosque de Almeida Cunha\",\"primeiro_nome\":\"Beatriz\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkxOTQ2NTU1FQIAERgSNjRFNEYyNDhCOTgyODJEQUIzAA==\",\"lead_id\":16843614}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0092",
+    "nome": "Lana Marcal de Sousa Barbosa",
+    "lead_id": 13873343,
+    "status_id": 96441724,
+    "convenio": "proasa",
+    "primeiro_nome": "Lana",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556194260121\",\"nome\":\"Lana Marçal de Sousa Barbosa\",\"primeiro_nome\":\"Lana\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk0MjYwMTIxFQIAERgSQTUzNDhDOEI1QTNBMjE3NTM0AA==\",\"lead_id\":13873343}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0093",
+    "nome": "Isaac Cardoso Leite",
+    "lead_id": 17626278,
+    "status_id": 96441724,
+    "convenio": "plan assiste - mpf (mpu)",
+    "primeiro_nome": "Isaac",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556183357073\",\"nome\":\"Isaac Cardoso Leite\",\"primeiro_nome\":\"Isaac\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgzMzU3MDczFQIAERgSNjY0MzAzRjk3MUVEOUM1QkJFAA==\",\"lead_id\":17626278}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0094",
+    "nome": "Selena Deolindo de Carvalho Amaral",
+    "lead_id": 16793000,
+    "status_id": 96441724,
+    "convenio": "saúde caixa",
+    "primeiro_nome": "Selena",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556182664553\",\"nome\":\"Selena Deolindo de Carvalho Amaral\",\"primeiro_nome\":\"Selena\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgyNjY0NTUzFQIAERgSQ0VEQkE3QzMyMkFBMDU4QkRBAA==\",\"lead_id\":16793000}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0096",
+    "nome": "Debora Fernanda Moura dos Santos",
+    "lead_id": 21391615,
+    "status_id": 106157327,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Fge",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"559484442623\",\"nome\":\"FGE TRANSPORTES & CONSTRUÇÕES\",\"primeiro_nome\":\"Fge\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU5NDg0NDQyNjIzFQIAERgSMjc2RUUyRkFBRUNDQzlFRDUyAA==\",\"lead_id\":21391615}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0099",
+    "nome": "Mateus Yoshihiro Matos Lima Tatugawa",
+    "lead_id": 15378319,
+    "status_id": 101508307,
+    "convenio": "tst saúde",
+    "primeiro_nome": "Mateus",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556199754120\",\"nome\":\"MATEUS YOSHIHIRO MATOS LIMA TATUGAWA\",\"primeiro_nome\":\"Mateus\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk5NzU0MTIwFQIAERgSNjM3NENCMjExMjU1NDVDNkU4AA==\",\"lead_id\":15378319}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0102",
+    "nome": "Beatriz Rocha Ferreira de Oliveira",
+    "lead_id": 21429947,
+    "status_id": 106157327,
+    "convenio": "tjdft pró-saúde",
+    "primeiro_nome": "Roberta",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556193700978\",\"nome\":\"Roberta Ferreira\",\"primeiro_nome\":\"Roberta\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkzNzAwOTc4FQIAERgSQUIyOEIyMjkxODFBMDAzQzcxAA==\",\"lead_id\":21429947}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0103",
+    "nome": "Serena Melo Guerra",
+    "lead_id": 12666662,
+    "status_id": 96441724,
+    "convenio": "casec (codevasf)",
+    "primeiro_nome": "Serena",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556191051512\",\"nome\":\"SERENA MELO GUERRA\",\"primeiro_nome\":\"Serena\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkxMDUxNTEyFQIAERgSMjc1NzQ2QjM2NDkwNjIyMzFCAA==\",\"lead_id\":12666662}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0105",
+    "nome": "Arthur Guedes Souza",
+    "lead_id": 22733858,
+    "status_id": 106157327,
+    "convenio": "anafe",
+    "primeiro_nome": "Ariane",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556196112538\",\"nome\":\"Ariane Portela\",\"primeiro_nome\":\"Ariane\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk2MTEyNTM4FQIAERgSMzEyMDBDOEJCQTJCMkY0MjQxAA==\",\"lead_id\":22733858}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0106",
+    "nome": "Isadora Ribeiro Soares",
+    "lead_id": 22141801,
+    "status_id": 101508307,
+    "convenio": "pro ser stj",
+    "primeiro_nome": "Daniella",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181655401\",\"nome\":\"Daniella\",\"primeiro_nome\":\"Daniella\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxNjU1NDAxFQIAERgSMTZDQkE1OEFGNDE0ODkzMEYwAA==\",\"lead_id\":22141801}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0107",
+    "nome": "Priscila Goggin Alves",
+    "lead_id": 18112691,
+    "status_id": 106157327,
+    "convenio": "tjdft pró-saúde",
+    "primeiro_nome": "Eduardo",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556199737798\",\"nome\":\"EDUARDO DE SOUZA COSTA ALVES\",\"primeiro_nome\":\"Eduardo\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk5NzM3Nzk4FQIAERgSQzRGNkU0MDBGNjk4MDAyQkVEAA==\",\"lead_id\":18112691}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0108",
+    "nome": "Ava Gruneich do Amaral",
+    "lead_id": 18374029,
+    "status_id": 101508307,
+    "convenio": "saúde caixa",
+    "primeiro_nome": "Danielle",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556182104014\",\"nome\":\"Danielle Gruneich\",\"primeiro_nome\":\"Danielle\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgyMTA0MDE0FQIAERgSQkQ0OUI2RjE0MDdERkNGQkFFAA==\",\"lead_id\":18374029}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0111",
+    "nome": "Sandra Cristina Ribeiro",
+    "lead_id": 10741982,
+    "status_id": 106157327,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Davi",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181517786\",\"nome\":\"Davi Ribeiro Xavier\",\"primeiro_nome\":\"Davi\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxNTE3Nzg2FQIAERgSMDNEQzRBMTczNTEzRDhGMkIzAA==\",\"lead_id\":10741982}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0114",
+    "nome": "Joao Pedro dos Santos Reis",
+    "lead_id": 17968789,
+    "status_id": 106157327,
+    "convenio": "saúde caixa",
+    "primeiro_nome": "Mariana",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556196297898\",\"nome\":\"MARIANA DOS SANTOS REIS\",\"primeiro_nome\":\"Mariana\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk2Mjk3ODk4FQIAERgSNkFBNzFDRkMzOTFCQzNCMDg2AA==\",\"lead_id\":17968789}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0116",
+    "nome": "Giovana Pereira dos Santos",
+    "lead_id": 2800570,
+    "status_id": 96441724,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Giovana",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556193127974\",\"nome\":\"Giovana Pereira dos Santos\",\"primeiro_nome\":\"Giovana\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkzMTI3OTc0FQIAERgSN0Q2QTY0NDY2RjY0QzFBMzBBAA==\",\"lead_id\":2800570}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0121",
+    "nome": "Gabriela Castro Silva",
+    "lead_id": 13347374,
+    "status_id": 96441724,
+    "convenio": "saúde caixa",
+    "primeiro_nome": "Gabriela",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556191407008\",\"nome\":\"GABRIELA CASTRO SILVA\",\"primeiro_nome\":\"Gabriela\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkxNDA3MDA4FQIAERgSNkE4MkQ5OERDMUI2QkY4QTY3AA==\",\"lead_id\":13347374}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0124",
+    "nome": "Maria Alice Alvarenga Peixoto",
+    "lead_id": 21545155,
+    "status_id": 106157327,
+    "convenio": "não se aplica",
+    "primeiro_nome": "FᥲFᥲ́",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181548381\",\"nome\":\"Fᥲfᥲ́ Aᥣ᥎ᥲrᥱᥒgᥲ\",\"primeiro_nome\":\"FᥲFᥲ́\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxNTQ4MzgxFQIAERgSNDdERUVGMUE0ODVEREY0NjRFAA==\",\"lead_id\":21545155}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0125",
+    "nome": "Luisa Lopes Rocha",
+    "lead_id": 11090640,
+    "status_id": 96441724,
+    "convenio": "fascal",
+    "primeiro_nome": "Daisy",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556185783606\",\"nome\":\"Daisy\",\"primeiro_nome\":\"Daisy\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTg1NzgzNjA2FQIAERgSRERBNzIxQTY5OUNBRUY4Mzc0AA==\",\"lead_id\":11090640}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0126",
+    "nome": "Davi Oliveira Silva",
+    "lead_id": 21431041,
+    "status_id": 96441724,
+    "convenio": "prósaúde (camara dos deputados)",
+    "primeiro_nome": "Lydia",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181605700\",\"nome\":\"Lydia Cecy\",\"primeiro_nome\":\"Lydia\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxNjA1NzAwFQIAERgSNTJCMTBCMEUxQTA3RTk0NTQ1AA==\",\"lead_id\":21431041}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0130",
+    "nome": "Leonardo Machado de Sousa",
+    "lead_id": 9044978,
+    "status_id": 102560495,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Leonardo",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556198778333\",\"nome\":\"Leonardo Machado de Sousa\",\"primeiro_nome\":\"Leonardo\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk4Nzc4MzMzFQIAERgSMkFDMjQ0OEI0RUI5NkE3NzdBAA==\",\"lead_id\":9044978}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0135",
+    "nome": "Isabella Guimaraes Elmasry",
+    "lead_id": 14323899,
+    "status_id": 96441724,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Isabella",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556183283714\",\"nome\":\"Isabella Guimarães Elmasry\",\"primeiro_nome\":\"Isabella\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgzMjgzNzE0FQIAERgSRDNGRDI2MzE4MDYwRjJDNjQyAA==\",\"lead_id\":14323899}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0140",
+    "nome": "Benicio de Matos",
+    "lead_id": 17811442,
+    "status_id": 96441724,
+    "convenio": "fascal",
+    "primeiro_nome": "Benício",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556182349341\",\"nome\":\"Benício de Matos Bonifácio\",\"primeiro_nome\":\"Benício\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgyMzQ5MzQxFQIAERgSNEI2NzM3OEQxOThERjJGODk5AA==\",\"lead_id\":17811442}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0141",
+    "nome": "Arthur Nunes Duarte Martins",
+    "lead_id": 9297648,
+    "status_id": 96441724,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Arthur",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556183659966\",\"nome\":\"ARTHUR NUNES DUARTE MARTINS\",\"primeiro_nome\":\"Arthur\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgzNjU5OTY2FQIAERgSOTUwNDg0MDY1MDEyRDkyMjYxAA==\",\"lead_id\":9297648}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0142",
+    "nome": "Gabriele Vasconcelos Arnaud",
+    "lead_id": 21023793,
+    "status_id": 101508307,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Arnaud",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181508550\",\"nome\":\"Arnaud Halisson\",\"primeiro_nome\":\"Arnaud\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxNTA4NTUwFQIAERgSOURDMzAwQzA4NTQ3OTUzNTgxAA==\",\"lead_id\":21023793}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0144",
+    "nome": "Enzo Olivi Lins de Araujo",
+    "lead_id": 22723784,
+    "status_id": 96441724,
+    "convenio": "tjdft pró-saúde",
+    "primeiro_nome": "Olivi",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556193117810\",\"nome\":\"Olivi Gabriele\",\"primeiro_nome\":\"Olivi\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkzMTE3ODEwFQIAERgSRDNDNTU4NkVGRTcyOUFCNzg1AA==\",\"lead_id\":22723784}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0147",
+    "nome": "Antonio Debortoli Maschio",
+    "lead_id": 6545052,
+    "status_id": 96441724,
+    "convenio": "sis senado",
+    "primeiro_nome": "Antônio",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"554899023533\",\"nome\":\"Antônio Debortoli Maschio\",\"primeiro_nome\":\"Antônio\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU0ODk5MDIzNTMzFQIAERgSODAxMTdDOTIwQ0JDNDFEOUVEAA==\",\"lead_id\":6545052}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0150",
+    "nome": "Henry Gomes dos Reis",
+    "lead_id": 21245589,
+    "status_id": 96441724,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Euziele",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"557788587210\",\"nome\":\"Euziele\",\"primeiro_nome\":\"Euziele\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU3Nzg4NTg3MjEwFQIAERgSODM1RkRERDEyRUVENkJBRDNCAA==\",\"lead_id\":21245589}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0152",
+    "nome": "Luna Cecilia Assis de Mello",
+    "lead_id": 13347190,
+    "status_id": 96441724,
+    "convenio": "plan assiste - mpf (mpu)",
+    "primeiro_nome": "Luna",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181972362\",\"nome\":\"Luna Cecília Assis de Mello\",\"primeiro_nome\":\"Luna\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxOTcyMzYyFQIAERgSMkZGMzA2MTlFQkQxQTdERTYxAA==\",\"lead_id\":13347190}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0157",
+    "nome": "Felipe Magalhaes Meinberg",
+    "lead_id": 2803042,
+    "status_id": 96441724,
+    "convenio": "plan assiste - mpf (mpu)",
+    "primeiro_nome": "Felipe",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181464444\",\"nome\":\"Felipe Magalhaes Meinberg\",\"primeiro_nome\":\"Felipe\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxNDY0NDQ0FQIAERgSNkI2RDA2QkRENUNCM0MzMUE5AA==\",\"lead_id\":2803042}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0159",
+    "nome": "Gael Alves e Domingues Soares",
+    "lead_id": 2803388,
+    "status_id": 96441724,
+    "convenio": "saúde caixa",
+    "primeiro_nome": "Gael",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181166250\",\"nome\":\"GAEL ALVES E DOMINGUES SOARES\",\"primeiro_nome\":\"Gael\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxMTY2MjUwFQIAERgSODY4M0E0NTFCRUM2Mzc4NDc4AA==\",\"lead_id\":2803388}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0163",
+    "nome": "Eduardo Campelo Gomes",
+    "lead_id": 11427628,
+    "status_id": 102560495,
+    "convenio": "prósaúde (camara dos deputados)",
+    "primeiro_nome": "Mariana",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556191892402\",\"nome\":\"Mariana Campelo Gomes\",\"primeiro_nome\":\"Mariana\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTkxODkyNDAyFQIAERgSQ0UwOEU4NUJGOUE4QTlEOEI1AA==\",\"lead_id\":11427628}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0170",
+    "nome": "Aleksander Velozo Pascoal",
+    "lead_id": 17629776,
+    "status_id": 96441724,
+    "convenio": "plan assiste - mpf (mpu)",
+    "primeiro_nome": "Aleksander",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556181830001\",\"nome\":\"ALEKSANDER VELOZO PASCOAL\",\"primeiro_nome\":\"Aleksander\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgxODMwMDAxFQIAERgSQjVBQTFEMzdENDU2NjlDOTQ0AA==\",\"lead_id\":17629776}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0173",
+    "nome": "Maria Helena da Silva Pinto",
+    "lead_id": 19921467,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Maria",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556198354554\",\"nome\":\"Maria Helena da Silva Pinto\",\"primeiro_nome\":\"Maria\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk4MzU0NTU0FQIAERgSQzNBQUJFNTc0QUMzM0Q4NkVFAA==\",\"lead_id\":19921467}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0175",
+    "nome": "Ana Laís Alves da Silva",
+    "lead_id": 19878237,
+    "status_id": 96441724,
+    "convenio": "não se aplica",
+    "primeiro_nome": "Ana",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"558396100906\",\"nome\":\"Ana Laís Alves da Silva\",\"primeiro_nome\":\"Ana\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU4Mzk2MTAwOTA2FQIAERgSRUFBMEM3MTVCRDJBQUI3NDlFAA==\",\"lead_id\":19878237}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0178",
+    "nome": "Elis Dias de Assis",
+    "lead_id": 20365977,
+    "status_id": 106157327,
+    "convenio": "plan assiste - mpf (mpu)",
+    "primeiro_nome": "Elis",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"5561984026562\",\"nome\":\"Elis Dias de Assis\",\"primeiro_nome\":\"Elis\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTg0MDI2NTYyFQIAERgSQzZEMDhBOTg4QzE1NUU1QTVFAA==\",\"lead_id\":20365977}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0180",
+    "nome": "Emanuele Santana Abreu",
+    "lead_id": 13195098,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Emanuele",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556183485322\",\"nome\":\"EMANUELE SANTANA ABREU\",\"primeiro_nome\":\"Emanuele\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTgzNDg1MzIyFQIAERgSOTk2M0I1QTQzMzQxNDIzODg3AA==\",\"lead_id\":13195098}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0181",
+    "nome": "Fábio Junior Francisco Almeida",
+    "lead_id": 20901861,
+    "status_id": 96441724,
+    "convenio": "conab",
+    "primeiro_nome": "Fábio",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556198750725\",\"nome\":\"\",\"primeiro_nome\":\"Você\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTk4NzUwNzI1FQIAERgSNzBBNTlDMjhGNUI2Qzk3QTJEAA==\",\"lead_id\":20901861}",
+      "ok": true
+    }
+  },
+  {
+    "slack_id": "0184",
+    "nome": "Antonio Pereira Abreu",
+    "lead_id": 7953316,
+    "status_id": 96441724,
+    "convenio": "",
+    "primeiro_nome": "Antonio",
+    "disparo": {
+      "status_code": 200,
+      "body": "{\"ok\":true,\"telefone\":\"556184889451\",\"nome\":\"ANTONIO PEREIRA ABREU\",\"primeiro_nome\":\"Antonio\",\"template\":\"blink_proxima_consulta_ferias_v1\",\"wamid\":\"wamid.HBgMNTU2MTg0ODg5NDUxFQIAERgSMjM1RDAxNTRFRDFDMEEwRDFDAA==\",\"lead_id\":7953316}",
+      "ok": true
+    }
+  }
+]

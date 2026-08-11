@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls PLANO_REDIRECT_0710_v2.md)",
+      "Bash(ls voice_agent/evolution.py voice_agent/reativacao_ia.py voice_agent/kommo.py voice_agent/responder.py voice_agent/settings.py)",
+      "Bash(python3 -m pytest tests/test_redirect_0710.py -v)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('voice_agent/webhook.py'\\).read\\(\\)\\); ast.parse\\(open\\('voice_agent/settings.py'\\).read\\(\\)\\); ast.parse\\(open\\('voice_agent/evolution.py'\\).read\\(\\)\\); ast.parse\\(open\\('voice_agent/redirect_0710.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(python3 -c \"from voice_agent import redirect_0710, evolution; print\\('import OK'\\); print\\('is_canal_0710:', evolution.is_canal_0710\\('blink-0710'\\), evolution.is_canal_0710\\(number='5561996630710'\\)\\)\")",
+      "Bash(python3 -m pytest tests/test_redirect_0710.py tests/test_c32_defaults_on.py -q)",
+      "Bash(chmod +x PUSH_REDIRECT_0710_AGENTE_MIGRACAO.command)",
+      "Bash(python3 -m pytest tests/test_redirect_0710.py -q)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('voice_agent/webhook.py'\\).read\\(\\)\\); ast.parse\\(open\\('voice_agent/redirect_0710.py'\\).read\\(\\)\\); ast.parse\\(open\\('voice_agent/settings.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(python3 -c \"from voice_agent.redirect_0710 import deve_rotear_0710, rotear_inbound_se_0710; print\\('imports OK'\\)\")",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('voice_agent/webhook.py'\\).read\\(\\)\\); print\\('webhook syntax OK'\\)\")"
+    ]
+  }
+}

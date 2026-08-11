@@ -1,0 +1,75 @@
+# Batch Fabrício — 2026-06-11T08:48:11.198401
+
+[   1/3384] 9084254 → OK [ACEITO] primeiro=Caio conv=Não se aplica
+[   2/3384] 22355556 → OK [ACEITO] primeiro=olá conv=
+[   3/3384] 9304262 → OK [ACEITO] primeiro=Maite conv=Não se aplica
+[   4/3384] 10808179 → OK [ACEITO] primeiro=Giovanna conv=
+[   5/3384] 10928399 → OK [ACEITO] primeiro=Breno conv=SIS Senado
+
+# RESUMO
+{
+  "OK": 5,
+  "JA_RECEBEU": 0,
+  "SEM_TELEFONE": 0,
+  "ERRO": 0,
+  "FORA_HORARIO": 0
+}
+
+# DETALHES
+[
+  {
+    "lead_id": 9084254,
+    "primeiro_nome": "Caio",
+    "convenio": "Não se aplica",
+    "eh_nao_aceito": false,
+    "disparo": {
+      "status_code": 0,
+      "body": "DRY_RUN",
+      "ok": true
+    }
+  },
+  {
+    "lead_id": 22355556,
+    "primeiro_nome": "olá",
+    "convenio": "",
+    "eh_nao_aceito": false,
+    "disparo": {
+      "status_code": 0,
+      "body": "DRY_RUN",
+      "ok": true
+    }
+  },
+  {
+    "lead_id": 9304262,
+    "primeiro_nome": "Maite",
+    "convenio": "Não se aplica",
+    "eh_nao_aceito": false,
+    "disparo": {
+      "status_code": 0,
+      "body": "DRY_RUN",
+      "ok": true
+    }
+  },
+  {
+    "lead_id": 10808179,
+    "primeiro_nome": "Giovanna",
+    "convenio": "",
+    "eh_nao_aceito": false,
+    "disparo": {
+      "status_code": 0,
+      "body": "DRY_RUN",
+      "ok": true
+    }
+  },
+  {
+    "lead_id": 10928399,
+    "primeiro_nome": "Breno",
+    "convenio": "SIS Senado",
+    "eh_nao_aceito": false,
+    "disparo": {
+      "status_code": 0,
+      "body": "DRY_RUN",
+      "ok": true
+    }
+  }
+]
