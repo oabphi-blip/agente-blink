@@ -211,11 +211,6 @@ def deve_ofertar_agora(ctx: Optional[dict]) -> bool:
     if not ctx:
         return False
 
-    # FSM
-    fsm = ctx.get("fsm") or {}
-    if (fsm.get("estado") or "").upper() != "AGENDA":
-        return False
-
     # Não re-ofertar se já agendado (bug Esther 24060221, Sophia 23845330)
     if ctx.get("ja_agendado"):
         return False
@@ -229,7 +224,36 @@ def deve_ofertar_agora(ctx: Optional[dict]) -> bool:
     # Dados mínimos completos
     known = ctx.get("known") or {}
     resultado = verificar_dados_minimos(known)
-    return bool(resultado.pronto_para_oferecer_slot)
+
+    # FSM normal: AGENDA → oferta imediata
+    fsm = ctx.get("fsm") or {}
+    if (fsm.get("estado") or "").upper() == "AGENDA":
+        return bool(resultado.pronto_para_oferecer_slot)
+
+    # Bug C-124 (11/08/2026) — Bypass FSM para pacientes retorno.
+    # Caso real: lead 20734711 Samuel — FSM preso em POS_GRAVACAO de consulta
+    # anterior (Julho 2025). Paciente quer NOVA consulta mas deve_ofertar_agora()
+    # retornava False por FSM != AGENDA → LLM gerava slots + valor → C-51.3
+    # interceptava → _gerar_proxima_pergunta_sem_convenio() gerava stall em loop.
+    #
+    # Critérios seguros para bypass FSM:
+    #   1. Dados mínimos completos (mesma garantia do caminho normal)
+    #   2. ctx.agenda tem slots reais do Medware (Python já buscou)
+    #   3. Paciente sinalizou intenção de agendar neste turno (via ctx.known)
+    #
+    # NÃO bypassa se: ja_agendado (já verificado acima), sem médico/unidade
+    # (já verificado), sem dados_minimos, sem agenda.
+    _tem_agenda = bool((ctx.get("agenda") or []))
+    _tem_intencao = bool(
+        known.get("intent_agendar")        # C-81 injetou
+        or known.get("slots_selecionados") # C-118/C-119 injetou
+        or known.get("day_pref")           # C-81 pré-extração
+        or known.get("turno")              # C-81 pré-extração
+    )
+    if _tem_agenda and _tem_intencao and resultado.pronto_para_oferecer_slot:
+        return True
+
+    return False
 
 
 # ===========================================================================

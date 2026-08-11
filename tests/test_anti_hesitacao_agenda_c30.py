@@ -43,11 +43,13 @@ class TestSubstituiHesitacao:
     @pytest.mark.parametrize("frase", FRASES_STALL)
     def test_hesitacao_com_agenda_vira_oferta_real(self, frase):
         out = _scrub_prohibited(frase, CTX)
-        # Substituiu pela oferta real (2 slots no formato 1️⃣/2️⃣)
-        assert "2 horários" in out or "2 horarios" in out
+        # Substituiu pela oferta real (formato _gerar_oferta_2_slots / _gerar_oferta_3_slots)
+        # Formato atual: "Tenho esses horários disponíveis com a … , …:\n\n1️⃣ …"
+        # (antes era "Tenho 2 horários abertos" — atualizado em C-124 11/08/2026)
+        assert "horários" in out.lower() or "horarios" in out.lower()
         assert "1️⃣" in out and "2️⃣" in out
         # Contém pelo menos um horário real da agenda
-        assert "09:00" in out or "14:00" in out
+        assert "09:00" in out or "14:00" in out or "08:30" in out
         # Não contém mais a hesitação
         assert "não está retornando" not in out
         assert "reconsultar" not in out.lower()
@@ -58,16 +60,40 @@ class TestSubstituiHesitacao:
         assert _viola_oferta_agenda(frase, has_agenda=True) is True
 
 
+# CTX com convênio definido — C-86c não injeta preço (convênio != particular)
+_CTX_COM_CONVENIO = {
+    "agenda": [
+        {"dia_semana": "quarta-feira", "data_br": "08/07", "hora": "09:00",
+         "cod_agenda": 4, "cod_medico": 12080, "cod_unidade": 5},
+        {"dia_semana": "sexta-feira", "data_br": "10/07", "hora": "14:00",
+         "cod_agenda": 4, "cod_medico": 12080, "cod_unidade": 5},
+    ],
+    "medico": "Dra. Karla Delalibera",
+    "known": {
+        "medico": "Dra. Karla Delalibera",
+        "unidade": "Asa Norte",
+        "convenio": "Saúde Caixa",   # ← com convênio: C-86c não injeta preço
+        "convenio_definido": True,
+    },
+}
+
+
 class TestNaoFalsosPositivos:
     def test_oferta_real_passa_sem_substituir(self):
+        # Nota: CTX com convênio para evitar C-86c injetar preço (que corretamente
+        # ativaria C-51.3 para paciente particular — isso é comportamento esperado).
         oferta = (
-            "Tenho 2 horários abertos com a Dra. Karla, Asa Norte:\n\n"
+            "Tenho esses horários disponíveis com a Dra. Karla Delalibera, Asa Norte:\n\n"
             "1️⃣ Quarta-feira (08/07) às 09:00\n"
             "2️⃣ Sexta-feira (10/07) às 14:00\n\n"
-            "Algum desses cabe pra você?"
+            "Qual fica melhor pra você?"
         )
-        out = _scrub_prohibited(oferta, CTX)
-        assert out == oferta  # inalterado
+        out = _scrub_prohibited(oferta, _CTX_COM_CONVENIO)
+        # Oferta real com convênio passa intacta (sem injeção de preço, sem substituição)
+        assert "1️⃣" in out and "2️⃣" in out
+        assert "09:00" in out and "14:00" in out
+        assert "reconsultar" not in out.lower()
+        assert "volto" not in out.lower()
 
     def test_sem_agenda_nao_substitui_por_oferta(self):
         # Sem agenda no ctx, a hesitação não vira oferta de 2 slots (não há

@@ -213,6 +213,105 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (11/08/2026) Bug C-124 — Stall "Vou verificar os próximos horários" em loop (lead 20734711 Samuel)
+
+**Origem:** lead 20734711 Samuel Rosario Vargas. Paciente deu preferência de turno → C-51.3 interceptou resposta LLM (que incluía slots + valor juntos) → fallback `_gerar_proxima_pergunta_sem_convenio()` emitia "Anotado. Vou verificar os próximos horários disponíveis e apresento opções" mesmo com `ctx.agenda` tendo slots reais → stall repetia em todo turno (loop infinito).
+
+**Causa raiz dupla:**
+
+1. **`_gerar_proxima_pergunta_sem_convenio` não consultava `ctx.agenda`** — retornava stall mesmo quando Medware já tinha respondido com slots reais. O fallback de C-51 nunca deveria gerar promessa de busca quando já tem agenda no ctx.
+
+2. **`deve_ofertar_agora()` exigia FSM=AGENDA estritamente** — Samuel é paciente retorno, FSM preso em `POS_GRAVACAO` de consulta anterior (Julho 2025). `deve_ofertar_agora()` retornava False → LLM processava → C-51.3 interceptava → fallback gerava stall → loop.
+
+**Fix em 2 arquivos (3 mudanças — commit C-124):**
+
+1. **`voice_agent/responder.py` — Fix 1:** `_gerar_proxima_pergunta_sem_convenio(ctx)`: quando `ctx["agenda"]` tem slots → chama `_gerar_oferta_2_slots(ctx)` em vez de emitir stall. Comentário explícito do caso real Samuel.
+
+2. **`voice_agent/responder.py` — Fix 2:** `_FAKE_AGENDA_LOOKUP` ganha 2 novos padrões:
+   - `vou verificar os pr[oó]ximos hor[aá]rios dispon[ií]veis`
+   - `j[aá] te apresento as op[çc][õo]es`
+   C-30 intercepta o stall quando ctx tem agenda (rede de segurança pra Fix 1).
+
+3. **`voice_agent/oferta_deterministica.py` — Fix 3:** `deve_ofertar_agora()` ganha bypass FSM para pacientes retorno. Critérios seguros: NOT `ja_agendado` + medico + unidade + `dados_minimos.pronto_para_oferecer_slot` + `ctx.agenda` + `(day_pref OR turno OR intent_agendar OR slots_selecionados)`. Sem FSM=AGENDA estrito quando todos esses gates passam.
+
+**Pytest:** `tests/test_bug_c124_stall_vou_verificar.py` — 24/24 verde. Bônus: 7 falhas pré-existentes em `test_anti_hesitacao_agenda_c30.py` corrigidas (asserção `"2 horários"` desatualizada pra `"esses horários disponíveis"`). Total: 39/39.
+
+**Rollback:** `AGENDA_DETERMINISTICA=0` em Easypanel → Implantar (desliga `deve_ofertar_agora` inteiro).
+
+**Lição arquitetural CRÍTICA:**
+- **Fallback de filtro determinístico NÃO pode emitir stall quando o próprio ctx contradiz o stall.** `_gerar_proxima_pergunta_sem_convenio` está no fallback de C-51 (que intercepta quando LLM despejou valor). Quando ctx.agenda está preenchido, o stall é mentira — Medware JÁ respondeu. Fix correto: verificar `ctx.agenda` ANTES de gerar qualquer promessa de busca futura.
+- **FSM "preso" é estado real de retorno — não é bug.** Lead de segunda consulta mantém FSM do atendimento anterior (POS_GRAVACAO, AGENDADO, etc.). `deve_ofertar_agora()` precisava de bypass seguro usando dados objetivos (agenda + intenção + checklist) em vez de depender exclusivamente do estado FSM.
+- **Dois fixes + rede de segurança é o padrão correto.** Fix 1 (fonte) + Fix 3 (gate) resolvem o loop. Fix 2 (C-30 intercept) é rede de segurança caso algum caminho novo gere o stall no futuro. Três layers = garantia.
+
+### 0. (11/08/2026) Bug C-123 — Convênio não aceito: tom seco + "particular" + valor prematuro + Kommo não atualizado
+
+**Origem:** lead 24441038 — paciente perguntou Bradesco. Lia respondeu "infelizmente não está na nossa rede credenciada" + "Mas atendemos como **particular**: R$ 611 Pix / R$ 670 cartão". 4 falhas simultâneas:
+
+1. **Tom seco** — "não está na rede" → correto: "ainda estamos em processo de credenciamento"
+2. **"particular"** — termo proibido; usar "sem convênio"
+3. **Valor prematuro** — R$ 611/670 sem saber motivo/médico ainda
+4. **Campo Kommo não gravado** — quando paciente escolhia "Seguir Sem Convênio", campo CONVÊNIO (field 853206) ficava vazio
+
+**Fix em 3 arquivos:**
+
+- **`blindagens_deterministicas.py`** — `_montar_recusa_convenio()` helper com tom canônico ("processo de credenciamento", sem valor, ordem 1️⃣ Somente / 2️⃣ Seguir). Ambas as instâncias de recusa em `deve_responder_faq_convenio_aceito` (Caminho A + B) usam o helper. Bypass novo `deve_responder_escolha_convenio` gateado em `_ultima_msg_era_recusa_convenio` (detecta quando Lia já apresentou as 2 opções). Posição na chain: ANTES de `faq_convenio_aceito`.
+
+- **`responder.py`** — `_gerar_script_convenio_nao_aceito` (filtro quando Lia erroneamente disse que aceita): removido "(te apresento valor + parcelamento)", ordem 1️⃣ Somente / 2️⃣ Seguir corrigida.
+
+- **`pipeline.py`** — Hook C-123: lê `c123_marcar_sem_convenio` → `patch_custom_fields_raw` CONVÊNIO = Não se aplica (field 853206, enum 906979) + Ñ ACEITO CONVÊNIO com o plano recusado. Lê `c123_encerrar_so_convenio` → 2.LEADS FRIO + desativa IA.
+
+**Pytest:** 52/52 verde.
+
+**Lição arquitetural CRÍTICA:**
+- **Regra de apresentação ("sem convênio" ≠ "particular") deve estar no helper, não espalhada em múltiplos return statements.** `_montar_recusa_convenio()` é a fonte de verdade — mudança em um lugar propaga para Caminho A, B, e filtro de responder.py.
+- **"Processo de credenciamento" vs "não credenciado" é diferença de relacionamento.** "Não credenciado" fecha a porta; "em processo" mantém o lead ativo e ainda pode converter.
+- **Bypass de resposta a oferta SEMPRE antes do bypass de FAQ.** Paciente respondendo "2" a uma oferta apresentada ≠ fazendo pergunta nova. Gate `_ultima_msg_era_recusa_convenio` é o discriminador correto.
+- **Rollback:** `BLINDAGEM_ESCOLHA_CONVENIO_ATIVADO=0` em Easypanel → Implantar.
+
+### 0. (11/08/2026) Bug C-122 — Paciente esquecia de enviar comprovante Pix pós-C-114: slot ficava em limbo sem lembrete
+
+**Origem:** auditoria arquitetural (sessão 11/08/2026). Paciente escolhia "reserva garantida" (C-114) → pipeline gravava `blink:c114_aguardando_comprovante:{lead_id}` (TTL 7d). Mas se paciente esquecia de enviar o comprovante, o slot ficava reservado indefinidamente sem confirmação financeira e sem nenhuma comunicação. Médica tinha slot bloqueado por reserva sem sinal confirmado.
+
+**Decisão arquitetural (P0):** comprovante pendente >2h é fato objetivo calculável via TTL Redis — Python detecta e envia lembrete automático, sem LLM.
+
+**2 arquivos criados/modificados (11/08/2026):**
+
+1. **`voice_agent/watchdog_comprovante.py` (NOVO):**
+   - `_varrer_leads_pendentes(redis_client)` — scan `blink:c114_aguardando_comprovante:*`, pula se `blink:c116_comprovante_detectado` ativo, calcula `elapsed = TTL_7d - ttl_residual`
+   - `_montar_msg_lembrete(nome)` — texto com primeiro nome ou fallback genérico
+   - `tick(kommo, wa_cloud, redis, dry_run, max_leads, limiar_seg=7200)` — para cada candidato: dedup `blink:c122_lembrete_enviado` (TTL 7d) → busca telefone/nome → `wa_cloud.send_text()` → `setex` dedup → nota Kommo com wamid
+   - Toggle: `WATCHDOG_COMPROVANTE_ENABLED` (default OFF). Fail-open.
+
+2. **`voice_agent/webhook.py`:** endpoint `GET/POST /admin/watchdog-comprovante-tick` + cron interno daemon thread a cada `CRON_WATCHDOG_COMPROVANTE_SEG` (default 3600) quando toggle ON.
+
+**Pytest:** `tests/test_bug_c122_watchdog_comprovante.py` — 25/25 verde.
+
+**Lição arquitetural CRÍTICA:**
+- **TTL residual como proxy de tempo decorrido.** `elapsed = TTL_total - ttl_residual` é elegante: reutiliza o flag existente do C-114 sem escrever timestamp separado. Funciona enquanto TTL inicial é constante e conhecido.
+- **Dedup em `tick()`, não em `_varrer()`.** C-116 (comprovante detectado) pertence ao filtro de varredura — lead não é candidato. C-122 (lembrete já enviado) pertence ao loop do tick — lead é candidato mas já foi tratado. Mesclar os dois em `_varrer` quebra o contador `ja_dedup`.
+- **`wa_cloud` acessível via closure em `create_app()`** — não precisa ser atributo do objeto `pipeline`. Pattern replicável para qualquer novo watchdog que precise enviar WhatsApp.
+- **Rollback:** `WATCHDOG_COMPROVANTE_ENABLED=0` em Easypanel → Implantar.
+
+### 0. (11/08/2026) Bugs C-118 / C-119 / C-120 — Aceite slot nunca disparava + confirmação redundante + dados em N turnos
+
+**C-118 — Causa raiz:** `deve_gerar_confirmacao_aceite` (blindagens_deterministicas.py linha 151) lia `ctx.get("slots_ofertados")` que NUNCA era populado em prod. C-105/enriquecimento_ctx escreve em `ctx["known"]["slots_selecionados"]` (chave diferente, nível diferente). Resultado: bypass de aceite era no-op — 100% dos casos passavam direto para o LLM.
+
+**Fix C-118:** fallback `or (ctx.get("known") or {}).get("slots_selecionados")`. Bug descoberto escrevendo pytest que forçou inspecionar o caminho real. Bônus: `_PADRAO_ACEITE_SLOT` usava `1[\W]` que não casava `"1"` isolado (fim de string). Fix: `1(?:\W|$)`. E `_montar_texto_confirmacao` dizia "Já estou registrando no sistema" sem ter chamado o Medware — falsa promessa. Corrigido para "Está tudo certo pra você?".
+
+**C-119 — Turno de confirmação eliminado:** quando paciente diz "1, pode marcar" (aceite + confirmação no mesmo turno), bypass detecta `_PADRAO_PODE_MARCAR_INLINE` E `_PADRAO_ACEITE_SLOT`, injeta `ctx["known"]["c119_slot_para_gravar"] = slot_aceito` e retorna texto de reserva imediata. Pipeline hook lê a flag → chama `executar_agendamento` → avança FSM para POS_GRAVACAO. Elimina 1 turno em ~40% dos fluxos.
+
+**C-120 — Dados pendentes em 1 mensagem:** `deve_perguntar_dados_pendentes` fica no fim da chain. Quando nenhum outro bypass disparou + há campos pendentes + há intent de agendamento OU dados parciais → monta 1 pergunta com todos os campos pendentes. LLM não é chamado. C-121 merged: quando só CPF falta + nome conhecido → "me passa o CPF de {nome}?".
+
+**Arquivos:** `voice_agent/blindagens_deterministicas.py` (5 edits) + `voice_agent/pipeline.py` (1 hook C-119).
+
+**Pytest:** `tests/test_bug_c118_c119_c120_aceite_e_dados.py` — 75/75 verde.
+
+**Lição arquitetural CRÍTICA:**
+- **Bypass que nunca dispara = não existe.** C-118 existia no código há semanas mas era morto. A raiz: duas partes diferentes do sistema escreviam/liam chaves diferentes. `grep -r "slots_selecionados\|slots_ofertados"` teria revelado o mismatch imediatamente.
+- **Padrão de detecção → consumo:** qualquer flag/dado injetado em `ctx.known` deve ter seu CONSUMIDOR rastreado. C-105 injetava `slots_selecionados`; o consumidor (deve_gerar_confirmacao_aceite) lia outra chave. Auditoria recorrente: `grep "ctx\[.known.\]\[.X.\]"` no código de injeção; confirmar que existe consumidor que lê a mesma chave.
+- **Regex que consome (`[\W]`) vs lookahead (`(?:\W|$)`):** `[\W]` CONSOME o caractere não-palavra após o dígito, o que funciona para "1," ou "1️⃣" mas não para "1" no fim de string. Preferir lookahead `(?:\W|$)` em regex de detecção de tokens numéricos isolados.
+- **Rollback:** `BLINDAGEM_ACEITE_ATIVADO=0` desliga C-118/C-119; `BLINDAGEM_DADOS_PENDENTES_ATIVADO=0` desliga C-120.
+
 ### 0. (11/08/2026) Bug C-117 — Cancelamento < 24h: LLM não informava política de sinal não devolvido
 
 **Origem:** auditoria arquitetural (sessão 11/08/2026). Paciente com sinal Pix pago cancelava < 24h antes da consulta — Lia tratava como cancelamento normal, sem informar que o sinal 50% não seria devolvido. Resultado: paciente ficava surpreso na hora, gerava atrito e reclamação.

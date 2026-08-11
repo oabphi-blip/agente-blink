@@ -886,6 +886,14 @@ _FAKE_AGENDA_LOOKUP = [
     re.compile(r"(?:reconferir|reconsultar).{0,30}(?:horários|calendário|agenda).{0,30}(?:aqui|correto[sa]?|medware)", re.IGNORECASE | re.DOTALL),
     re.compile(r"reconferir.{0,30}(?:horários|calendário|agenda)\s+do\s+medware", re.IGNORECASE | re.DOTALL),
     re.compile(r"(?:atende\s+)?\*?\*?seg\s*/\s*qua\s*/\s*sex\*?\*?.{0,60}\*?\*?ter\s*/\s*qui\*?\*?", re.IGNORECASE | re.DOTALL),
+    # Bug C-124 (11/08/2026): frase exata gerada pelo fallback de C-51 via
+    # _gerar_proxima_pergunta_sem_convenio quando ctx.agenda está vazio.
+    # Lead 20734711 Samuel repetiu esta frase N vezes em loop.
+    # Quando ctx.agenda TEM slots o Fix 1 já resolve (ofertar direto).
+    # Quando ctx.agenda está VAZIO, esta regex pega a frase se o LLM a gerar
+    # e evita que saia sem alternativa.
+    re.compile(r"vou verificar os pr[oó]ximos hor[aá]rios dispon[ií]veis", re.IGNORECASE),
+    re.compile(r"j[aá] te apresento as op[çc][õo]es", re.IGNORECASE),
 ]
 
 _FAKE_AGENDA_LOOKUP_FALLBACK = (
@@ -3254,6 +3262,13 @@ def _gerar_proxima_pergunta_sem_convenio(ctx: Optional[dict] = None) -> str:
             "Asa Norte ou Águas Claras?"
         )
     # Bug C-97 (07/08/2026) — nunca perguntar dia/turno. Ir direto pra agenda.
+    # Bug C-124 (11/08/2026) — se agenda disponível, ofertar agora (não stall).
+    # Caso real: lead 20734711 Samuel — paciente deu preferência de dia/turno,
+    # C-51.3 interceptou resposta do LLM (que incluía valor junto com slots) e
+    # caiu neste fallback gerando "Vou verificar..." em loop. Com agenda no ctx,
+    # a resposta correta é mostrar os slots, não prometer voltar depois.
+    if (ctx or {}).get("agenda"):
+        return _gerar_oferta_2_slots(ctx)
     return (
         f"{saudacao} Vou verificar os próximos horários disponíveis e já te apresento as opções."
     )
