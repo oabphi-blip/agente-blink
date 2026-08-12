@@ -2208,6 +2208,21 @@ class KommoClient:
                     continue
                 label = id_to_label.get(fid)
                 if not label:
+                    # C-129 (12/08/2026): campo "A FAZER" (1259312) é multiselect
+                    # não mapeado no id_to_label acima (só usado para write).
+                    # Detectar enum_id 925064 ("Pós Consulta") → a_fazer_pos_consulta=True
+                    if fid == 1259312:
+                        vals_c129 = cf.get("values") or []
+                        for v_c129 in vals_c129:
+                            if v_c129.get("enum_id") == 925064 or str(
+                                v_c129.get("value") or ""
+                            ).lower().startswith("pós consul"):
+                                out["known"]["a_fazer_pos_consulta"] = True
+                                log.debug(
+                                    "[C-129] a_fazer_pos_consulta=True lead=%s",
+                                    lead_id,
+                                )
+                                break
                     continue
                 vals = cf.get("values") or []
                 if vals:

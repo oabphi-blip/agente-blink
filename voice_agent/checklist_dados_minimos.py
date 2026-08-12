@@ -67,8 +67,18 @@ def data_nascimento_ok(data_nasc: Optional[object]) -> bool:
         return True
     if isinstance(data_nasc, str):
         # ISO YYYY-MM-DD ou BR DD/MM/YYYY ou DD/MM/YY
-        return bool(re.match(r"^\d{4}-\d{1,2}-\d{1,2}$", data_nasc)
-                    or re.match(r"^\d{1,2}/\d{1,2}/\d{2,4}$", data_nasc))
+        # C-130 (12/08/2026): aceitar 3 dígitos no mês (typo "27/012/2024") —
+        # regex original \d{1,2} rejeitava e causava loop infinito.
+        # Validação estrita fica a cargo do Medware; aqui só queremos saber
+        # se o campo foi preenchido com algo que parece uma data.
+        s = data_nasc.strip()
+        if not s:
+            return False
+        return bool(
+            re.match(r"^\d{4}-\d{1,2}-\d{1,2}$", s)       # ISO
+            or re.match(r"^\d{1,2}[/\-\.]\d{1,4}[/\-\.]\d{2,4}$", s)  # BR lenient (typos ok)
+            or re.search(r"\d{1,2}[/\-\.]\d{1,4}[/\-\.]\d{2,4}", s)   # embeddado em texto
+        )
     return False
 
 

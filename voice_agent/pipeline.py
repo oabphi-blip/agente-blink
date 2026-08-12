@@ -1266,6 +1266,66 @@ class VoicePipeline:
         except Exception as _e_c109_pipe:  # noqa: BLE001
             log.warning("[C-109 PIPELINE] check falhou (fail-open): %s", _e_c109_pipe)
 
+        # 3a-C129 (12/08/2026) — Pós-consulta → escalar para 1-ATENDIMENTO HUMANO.
+        # pos_consulta.py gravou flag blink:c129_pos_consulta:{lead_id} (TTL 24h)
+        # quando paciente pediu recibo/reembolso/laudo/etc OU a_fazer_pos_consulta=True.
+        # Aqui: desativar IA + mover pra 1-ATENDIMENTO HUMANO + nota Kommo.
+        try:
+            _redis_c129 = getattr(self, "_redis", None)
+            _lid_c129 = (
+                caller_context.get("lead_id") if isinstance(caller_context, dict) else None
+            )
+            if _redis_c129 and _lid_c129:
+                _flag_c129 = _redis_c129.get(f"blink:c129_pos_consulta:{_lid_c129}")
+                if _flag_c129:
+                    log.info(
+                        "[C-129 PIPELINE] pos-consulta lead=%s — "
+                        "desativando IA + movendo pra 1-ATENDIMENTO HUMANO",
+                        _lid_c129,
+                    )
+                    _redis_c129.delete(f"blink:c129_pos_consulta:{_lid_c129}")
+                    if self.kommo is not None:
+                        _status_c129 = (
+                            caller_context.get("status_id")
+                            if isinstance(caller_context, dict) else None
+                        )
+                        _ETAPAS_FINAIS_C129 = {142, 143, 91486864}
+                        # (1) Desativar IA
+                        try:
+                            self.kommo.update_lead_fields(
+                                _lid_c129, {"ativado_ia": "DESATIVADO"}
+                            )
+                        except Exception as _e_c129_ia:  # noqa: BLE001
+                            log.warning("[C-129] desativar IA falhou: %s", _e_c129_ia)
+                        # (2) Mover pra 1-ATENDIMENTO HUMANO (106563343)
+                        if _status_c129 and _status_c129 not in _ETAPAS_FINAIS_C129:
+                            try:
+                                self.kommo.update_lead_status(_lid_c129, 106563343)
+                                log.info(
+                                    "[C-129] lead %s movido → 1-ATENDIMENTO HUMANO",
+                                    _lid_c129,
+                                )
+                            except Exception as _e_c129_st:  # noqa: BLE001
+                                log.warning(
+                                    "[C-129] mover status falhou lead=%s: %s",
+                                    _lid_c129, _e_c129_st,
+                                )
+                        # (3) Nota Kommo
+                        try:
+                            import datetime as _dt_c129
+                            _nota_c129 = (
+                                f"📋 [LIA C-129 {_dt_c129.datetime.now().strftime('%H:%M %d/%m')}] "
+                                "Mensagem pós-consulta detectada — paciente pode estar pedindo "
+                                "recibo/resultado/atestado ou tem a_fazer=Pós Consulta. "
+                                "IA desativada. Equipe humana responde. "
+                                f"Msg paciente: \"{user_text[:200]}\""
+                            )
+                            self.kommo.add_note(_lid_c129, _nota_c129)
+                        except Exception:  # noqa: BLE001
+                            pass
+        except Exception as _e_c129_pipe:  # noqa: BLE001
+            log.warning("[C-129 PIPELINE] check falhou (fail-open): %s", _e_c129_pipe)
+
         # 3a-C119 (11/08/2026) — Aceite slot + "pode marcar" inline.
         # deve_gerar_confirmacao_aceite (blindagens_deterministicas.py) injetou
         # ctx["known"]["c119_slot_para_gravar"] = slot. Aqui: gravar Medware e

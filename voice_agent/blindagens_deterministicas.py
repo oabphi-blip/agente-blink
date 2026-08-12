@@ -1557,6 +1557,67 @@ _CAMPOS_COLETADOS_C120 = (
     "urgency_level", "unidade_detectada", "medico_detectado",
 )
 
+# ─── C-130: Anti-loop "resposta ao C-125 não reconhecida" (12/08/2026) ─────────
+# Causa raiz: C-125 pergunta "Qual a data de nascimento?" e paciente responde
+# "27/012/2024" (typo) → data_nascimento_ok() falha (regex não aceita "012") →
+# C-125 volta a pedir → loop 3x (lead 24447784 Bento).
+# Fix: detectar quando inbound é resposta à última pergunta C-125 → return None
+# → LLM extrai e armazena o valor com tolerância a typos.
+_RE_DATA_RESP_C130 = re.compile(
+    r"\b\d{1,2}[/\-\.]\d{1,3}[/\-\.]\d{2,4}\b"  # "27/012/2024", "27/12/2024"
+    r"|\b\d{4}[/\-\.]\d{1,2}[/\-\.]\d{1,2}\b",   # ISO: "2024-12-27"
+    re.IGNORECASE,
+)
+_RE_CPF_RESP_C130 = re.compile(
+    r"\b\d{3}[\.\- ]?\d{3}[\.\- ]?\d{3}[\.\- ]?\d{2}\b|\b\d{11}\b"
+)
+_RE_ULTIMA_PERGUNTOU_DATA_C130 = re.compile(r"data de nascimento", re.IGNORECASE)
+_RE_ULTIMA_PERGUNTOU_NOME_C130 = re.compile(r"nome completo", re.IGNORECASE)
+_RE_ULTIMA_PERGUNTOU_CPF_C130 = re.compile(r"\bcpf\b", re.IGNORECASE)
+_RE_ULTIMA_PERGUNTOU_CONV_C130 = re.compile(
+    r"conv[eê]nio\s+ou\s+sem|por\s+conv[eê]nio", re.IGNORECASE
+)
+
+
+def _inbound_responde_ultima_pergunta_c130(ctx: Optional[dict], user_text: str) -> bool:
+    """True quando o inbound parece ser resposta à última pergunta de dado do C-125.
+
+    Se True → return None em deve_perguntar_dados_pendentes → LLM extrai o valor.
+
+    Casos cobertos:
+    - data de nascimento pedida + inbound tem padrão de data (aceita typos: "27/012/2024")
+    - CPF pedido + inbound tem 11 dígitos
+    - nome completo pedido + inbound parece nome curto (sem interrogação, sem data)
+    - convênio pedido + inbound tem sim/não/nome de convênio
+    """
+    ultima = ((ctx or {}).get("known") or {}).get("ultima_msg_outbound") or ""
+    if not ultima:
+        return False
+    ut = user_text.strip()
+    if not ut:
+        return False
+
+    # Data de nascimento pedida → inbound parece data (tolera typos como "012")
+    if _RE_ULTIMA_PERGUNTOU_DATA_C130.search(ultima):
+        return bool(_RE_DATA_RESP_C130.search(ut))
+
+    # CPF pedido → inbound tem 11 dígitos (com ou sem máscara)
+    if _RE_ULTIMA_PERGUNTOU_CPF_C130.search(ultima):
+        return bool(_RE_CPF_RESP_C130.search(ut))
+
+    # Nome completo pedido → inbound parece nome (sem data, >= 2 palavras, sem "?")
+    if _RE_ULTIMA_PERGUNTOU_NOME_C130.search(ultima):
+        palavras = [p for p in ut.split() if p.isalpha()]
+        return len(palavras) >= 2 and "?" not in ut and not _RE_DATA_RESP_C130.search(ut)
+
+    # Convênio pedido → qualquer resposta substantiva (≥3 chars, sem "?")
+    # Cobre: "sim", "não", "particular", "Saúde Caixa", "Bacen", etc.
+    # LLM extrai o plano/intenção — não precisamos casar o nome exato.
+    if _RE_ULTIMA_PERGUNTOU_CONV_C130.search(ultima):
+        return len(ut) >= 3 and "?" not in ut
+
+    return False
+
 
 def deve_perguntar_dados_pendentes(ctx: Optional[dict], user_text: str) -> Optional[str]:
     """C-120: Python gera a pergunta de dados pendentes sem chamar o LLM.
@@ -1666,6 +1727,14 @@ def deve_perguntar_dados_pendentes(ctx: Optional[dict], user_text: str) -> Optio
     has_intent = bool(_INTENT_AGENDAR_C120.search(user_text))
     if not has_data and not has_intent:
         return None  # LLM lida com FAQ, curiosos, perguntas de serviço
+
+    # C-130 (12/08/2026): Anti-loop — se paciente está respondendo à última pergunta
+    # de dado do C-125, deixar o LLM extrair e armazenar o valor.
+    # Caso real: lead 24447784 Bento — "27/012/2024" (typo) → C-125 disparava 3x
+    # porque a data não passava na regex e nunca chegava ao LLM para extração.
+    if _inbound_responde_ultima_pergunta_c130(ctx, user_text):
+        log.debug("[C-130] inbound responde ultima pergunta C-125 — fall-through para LLM")
+        return None
 
     return _montar_pergunta_dados_c125(resultado, ctx, user_text)
 
@@ -1966,6 +2035,22 @@ def tentar_bypass_deterministico(
                 return False
             except Exception:
                 return False
+
+        # Bug C-129 (12/08/2026): Pós-consulta → escalar para humano.
+        # Qualquer paciente que pergunta sobre recibo, reembolso, laudo, resultado,
+        # atestado ou qualquer questão administrativa pós-consulta deve ir para
+        # atendente humana — Lia não tem acesso a esses dados.
+        # Camada A: pedido de documento (sempre escalar).
+        # Camada B: ctx.known.a_fazer_pos_consulta=True + msg não é novo agendamento.
+        # Vem ANTES de C-117 (cancelamento) — se o paciente está em pós-consulta,
+        # qualquer comunicação que não seja "quero marcar nova consulta" vai ao humano.
+        try:
+            from voice_agent.pos_consulta import deve_escalar_pos_consulta
+            t = deve_escalar_pos_consulta(ctx, user_text)
+            if t:
+                return ("pos_consulta_c129", t)
+        except Exception as _e129:
+            log.warning("[C-129] bypass pos_consulta falhou: %s", _e129)
 
         # Bug C-117 (11/08/2026): Cancelamento < 24h → informa política de sinal.
         # Vem PRIMEIRO na chain — se paciente tem consulta em < 24h e quer cancelar,
