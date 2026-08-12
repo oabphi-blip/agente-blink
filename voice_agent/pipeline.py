@@ -1712,11 +1712,18 @@ class VoicePipeline:
         except Exception as _dedup_err:  # noqa: BLE001
             log.warning("[DEDUP OUTBOUND] check falhou (ignora): %s", _dedup_err)
 
+        # Bug C-127 Fix 1 (12/08/2026) — Tom conversacional: enviar em chunks.
+        # Mensagens longas são quebradas em 2-3 partes com delay de ~1.2s.
+        # Toggle: MESSAGE_SPLIT_ENABLED=0 em Easypanel → desliga splitting.
         try:
-            self.evolution.send_text(
-                number=reply_to_number,
-                text=answer,
-                quoted_message_id=quoted_message_id,
+            from voice_agent.message_splitter import send_split as _send_split
+            _send_split(
+                lambda _t: self.evolution.send_text(
+                    number=reply_to_number,
+                    text=_t,
+                    quoted_message_id=quoted_message_id,
+                ),
+                answer,
             )
         except EvolutionError as e:
             log.exception("envio Evolution falhou")

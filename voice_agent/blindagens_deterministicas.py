@@ -612,6 +612,62 @@ def _resposta_tabela_geral_valores(nome: str) -> str:
     )
 
 
+def _escuta_universal(user_text: str, ctx: Optional[dict]) -> str:
+    """C-127 Fix 3 (12/08/2026) — Prova de escuta leve para qualquer bypass.
+
+    Extrai 1-2 elementos informativos do que o paciente acabou de mandar e
+    retorna um prefixo de acknowledgment curto.
+
+    Ex: "meu filho tem 5 anos, quero saber o valor"
+        → "Entendido! "  (se já tem médico/motivo em ctx)
+        → "Anotado — filho de 5 anos! " (se extrai algo novo)
+
+    Retorna "" se não extraiu nada relevante (sem prefixo).
+    Fail-open: qualquer exceção → "".
+    """
+    try:
+        if not user_text:
+            return ""
+        known = (ctx or {}).get("known") or {}
+        partes: list[str] = []
+
+        # Filho/bebê com idade (não foi parseado ainda em known)
+        if not known.get("data_nasc"):
+            m = re.search(
+                r"(?:filho|filha|beb[êe]|crian[çc]a)[^\d]{0,10}(\d+)\s*(anos?|meses?|m[êe]s)",
+                user_text, re.IGNORECASE
+            )
+            if m:
+                n, unid = m.group(1), m.group(2).lower()
+                if "ano" in unid:
+                    partes.append(f"filho de {n} {'ano' if n == '1' else 'anos'}")
+                else:
+                    partes.append(f"bebê de {n} {'mês' if n == '1' else 'meses'}")
+
+        # Convênio mencionado mas não parseado
+        if not known.get("convenio"):
+            m2 = re.search(
+                r"\b(bacen|saúde caixa|serpro|omint|care plus|fascal|sis senado"
+                r"|pf saúde|afego|proasa|casec|conab)\b",
+                user_text, re.IGNORECASE
+            )
+            if m2:
+                partes.append(f"plano {m2.group(1).title()}")
+
+        # Unidade mencionada mas não parseada
+        if not known.get("unidade"):
+            if re.search(r"asa\s+norte", user_text, re.IGNORECASE):
+                partes.append("Asa Norte")
+            elif re.search(r"águas?\s+claras?", user_text, re.IGNORECASE):
+                partes.append("Águas Claras")
+
+        if not partes:
+            return ""
+        return "Anotado — " + ", ".join(partes) + "! "
+    except Exception:
+        return ""
+
+
 def deve_responder_valor(ctx: Optional[dict], user_text: str) -> Optional[str]:
     """Se paciente perguntou valor, retorna resposta canônica.
 
@@ -766,8 +822,12 @@ def deve_responder_valor(ctx: Optional[dict], user_text: str) -> Optional[str]:
     # C-68 v2 (Fábio 21/07/2026, modelo humano lead Layssa):
     # Copia formato usado pelo atendimento humano — mais claro, mais rico.
     # Estrutura: intro → exames descritos → especialistas → voucher → valor inline → CTA.
+    # C-127 Fix 3: prova de escuta antes do corpo (ex: "Anotado — filho de 3 meses!")
     nome_apenas = nome.rstrip(",").strip() if nome else ""
-    abertura = f"Olá, {nome_apenas}\n\n" if nome_apenas else ""
+    _escuta_valor = _escuta_universal(user_text, ctx)
+    abertura = (f"{_escuta_valor}\n\n" if _escuta_valor else "") + (
+        f"Olá, {nome_apenas}\n\n" if nome_apenas else ""
+    )
     return (
         f"{abertura}"
         f"Para entender exatamente o que está incluso na {servico}, segue um resumo:\n\n"
@@ -1211,7 +1271,7 @@ _RE_ESCOLHA_SO_CONVENIO_C123 = re.compile(
 )
 
 
-def _montar_recusa_convenio(conv_display: str, saud: str = "") -> str:
+def _montar_recusa_convenio(conv_display: str, saud: str = "", escuta_pfx: str = "") -> str:
     """Tom canônico para convênio não credenciado — C-123.
 
     Regras:
@@ -1219,9 +1279,13 @@ def _montar_recusa_convenio(conv_display: str, saud: str = "") -> str:
     - NÃO usa "particular" (usar "sem convênio")
     - NÃO oferece valor (não sabe motivo/médico ainda)
     - Apresenta 2 opções canônicas: 1️⃣ Somente com Convênio / 2️⃣ Seguir Sem Convênio
+
+    C-127 Fix 3: escuta_pfx injeta prova de escuta antes do corpo principal.
+    Ex: "Anotado — filho de 5 anos! " + corpo canônico.
     """
+    pfx = f"{escuta_pfx}\n\n" if escuta_pfx else ""
     return (
-        f"{saud}o **{conv_display}** é um convênio que ainda estamos em processo "
+        f"{pfx}{saud}o **{conv_display}** é um convênio que ainda estamos em processo "
         "de credenciamento. 😊\n\n"
         "Mas temos condições diferenciadas para atendimento sem convênio! "
         "Qual a sua preferência?\n\n"
@@ -1352,7 +1416,10 @@ def deve_responder_faq_convenio_aceito(
                 # C-123: tom canônico — processo de credenciamento + sem "particular" + sem valor prematuro
                 if isinstance(ctx, dict) and isinstance(ctx.get("known"), dict):
                     ctx["known"]["convenio_nao_aceito_nome"] = conv_display
-                return _montar_recusa_convenio(conv_display, saud)
+                return _montar_recusa_convenio(
+                    conv_display, saud,
+                    escuta_pfx=_escuta_universal(user_text, ctx),  # C-127 Fix 3
+                )
 
         # ── Caminho B: convenio_aceito não computado ─────────────────────────
         # Gatilho: padrão FAQ genérico OU ctx.known.convenio aparece no user_text
@@ -1397,7 +1464,10 @@ def deve_responder_faq_convenio_aceito(
             # C-123: tom canônico — processo de credenciamento + sem "particular" + sem valor prematuro
             if isinstance(ctx, dict) and isinstance(ctx.get("known"), dict):
                 ctx["known"]["convenio_nao_aceito_nome"] = conv_display
-            return _montar_recusa_convenio(conv_display, saud)
+            return _montar_recusa_convenio(
+                conv_display, saud,
+                escuta_pfx=_escuta_universal(user_text, ctx),  # C-127 Fix 3
+            )
 
     except Exception as e:  # noqa: BLE001
         log.warning("[C-104] faq_convenio_aceito falhou: %s", e)
@@ -1794,6 +1864,59 @@ def tentar_bypass_deterministico(
         except Exception as _e126_c84:
             log.warning("[C-126/C-84] bypass atendente falhou: %s", _e126_c84)
 
+        # === Bug C-127 Fix 2 (12/08/2026): Anti-repetição universal ===
+        # Problema: bypasses ignoram o histórico recente. Se o paciente já recebeu
+        # "Qual o nome do paciente?" como última outbound, e algo leva ao mesmo bypass,
+        # a mesma pergunta é enviada de novo → parece robô de disco travado.
+        #
+        # Solução: ANTES de qualquer bypass, armazenar a última outbound e, após gerar
+        # a resposta candidata, verificar se ela seria repetição substancial.
+        # Se sim → return None (LLM tenta uma variação diferente).
+        #
+        # Implementado como closure: _guard_repeticao(candidata) → bool
+        # Fail-open: qualquer exceção → não bloqueia.
+        _ultima_outbound_c127 = ""
+        try:
+            _ultima_outbound_c127 = str(
+                ((ctx or {}).get("known") or {}).get("ultima_msg_outbound") or ""
+            ).strip().lower()
+        except Exception:
+            pass
+
+        def _repete_ultima_outbound(candidata: str) -> bool:
+            """True se a candidata é repetição substancial da última outbound."""
+            if not _ultima_outbound_c127 or not candidata:
+                return False
+            try:
+                cand_lower = candidata.strip().lower()
+                # Extrai palavras-chave da candidata (3+ chars, sem stop words)
+                _stop = {"que", "com", "para", "por", "uma", "seu", "sua", "qual",
+                         "como", "mais", "não", "sim", "ok", "ola", "oi", "bom",
+                         "dia", "tarde", "boa", "noite", "tudo"}
+                palavras_cand = {
+                    w for w in re.findall(r"\b\w{3,}\b", cand_lower, re.UNICODE)
+                    if w not in _stop
+                }
+                palavras_ult = {
+                    w for w in re.findall(r"\b\w{3,}\b", _ultima_outbound_c127, re.UNICODE)
+                    if w not in _stop
+                }
+                if not palavras_cand or not palavras_ult:
+                    return False
+                intersecao = palavras_cand & palavras_ult
+                # Repetição se > 70% das palavras-chave coincidem
+                overlap = len(intersecao) / min(len(palavras_cand), len(palavras_ult))
+                if overlap >= 0.70:
+                    log.debug(
+                        "[C-127/ANTI-REP] suprimindo repetição overlap=%.0f%% "
+                        "cand=%r ult=%r",
+                        overlap * 100, candidata[:60], _ultima_outbound_c127[:60],
+                    )
+                    return True
+                return False
+            except Exception:
+                return False
+
         # Bug C-117 (11/08/2026): Cancelamento < 24h → informa política de sinal.
         # Vem PRIMEIRO na chain — se paciente tem consulta em < 24h e quer cancelar,
         # Python calcula o delta, informa a política de sinal (50% não devolvido)
@@ -1803,7 +1926,10 @@ def tentar_bypass_deterministico(
             from voice_agent.cancelamento_24h import deve_informar_politica_cancelamento_24h as _cancel_24h
             t = _cancel_24h(ctx, user_text)
             if t:
-                return ("cancelamento_24h", t)
+                if _repete_ultima_outbound(t):
+                    pass  # não bloqueia C-117 (política de sinal nunca deve ser suprimida)
+                else:
+                    return ("cancelamento_24h", t)
         except Exception as _e117:
             log.warning("[C-117] bypass cancelamento_24h falhou: %s", _e117)
 
@@ -1907,13 +2033,13 @@ def tentar_bypass_deterministico(
         # Bug C-87 (05/08/2026): FAQ endereço — "onde fica?", "qual o endereço?"
         # Resposta determinística com link Maps. Zero Medware, zero LLM.
         t = deve_responder_faq_endereco(ctx, user_text)
-        if t:
+        if t and not _repete_ultima_outbound(t):
             return ("faq_endereco", t)
 
         # Bug C-74 (26/07/2026): FAQ especialidade/médico — resposta KB pura,
         # zero LLM. Evita circuit breaker C-56 em perguntas simples.
         t = deve_responder_faq_especialidade(ctx, user_text)
-        if t:
+        if t and not _repete_ultima_outbound(t):
             return ("faq_especialidade", t)
 
         # Bug C-123 (11/08/2026): Escolha pós-recusa de convênio.
@@ -1924,6 +2050,7 @@ def tentar_bypass_deterministico(
         # oferta já apresentada, não fazendo uma pergunta nova de FAQ.
         t = deve_responder_escolha_convenio(ctx, user_text)
         if t:
+            # Escolha de convênio nunca suprimida — é ação, não FAQ
             return ("escolha_convenio_c123", t)
 
         # Bug C-104 (11/08/2026): FAQ convênio aceito usando ctx.known.convenio_aceito
@@ -1931,7 +2058,7 @@ def tentar_bypass_deterministico(
         # sem LLM e sem Medware. Vem ANTES do classificador_convenio para usar
         # o ctx.known já enriquecido quando disponível.
         t = deve_responder_faq_convenio_aceito(ctx, user_text)
-        if t:
+        if t and not _repete_ultima_outbound(t):
             return ("faq_convenio_aceito", t)
 
         # Bug C-60 (20/07/2026): classificador convênio ANTES do valor,
@@ -1939,7 +2066,7 @@ def tentar_bypass_deterministico(
         try:
             from voice_agent.classificador_convenio import deve_responder_convenio
             t = deve_responder_convenio(ctx, user_text)
-            if t:
+            if t and not _repete_ultima_outbound(t):
                 return ("convenio", t)
         except Exception as e:  # noqa: BLE001
             log.warning("bypass convênio falhou: %s", e)
@@ -1951,21 +2078,22 @@ def tentar_bypass_deterministico(
         try:
             from voice_agent.objecao_preco import deve_responder_objecao_preco
             t = deve_responder_objecao_preco(ctx, user_text)
-            if t:
+            if t and not _repete_ultima_outbound(t):
                 return ("objecao_preco", t)
         except Exception as _e107:
             log.warning("[C-107] bypass objecao_preco falhou: %s", _e107)
 
         t = deve_responder_valor(ctx, user_text)
-        if t:
+        if t and not _repete_ultima_outbound(t):
             return ("valor", t)
 
         t = deve_gerar_confirmacao_aceite(ctx, user_text)
         if t:
+            # Aceite de slot nunca suprimido — é ação crítica de agendamento
             return ("aceite_slot", t)
 
         t = deve_enviar_endereco_pos_agenda(ctx)
-        if t:
+        if t and not _repete_ultima_outbound(t):
             return ("endereco_pos_agenda", t)
 
         # Bug C-114 (11/08/2026): Política de comparecimento — sinal 50% para PARTICULAR.
@@ -1980,7 +2108,7 @@ def tentar_bypass_deterministico(
             from voice_agent.politica_comparecimento import deve_solicitar_sinal_particular as _solicitar_sinal
             _redis_c114 = getattr(ctx, "_redis", None) if not isinstance(ctx, dict) else None
             t = _solicitar_sinal(ctx, user_text, _redis_c114)
-            if t:
+            if t and not _repete_ultima_outbound(t):
                 return ("sinal_particular_c114", t)
         except Exception as _e114:
             log.warning("[C-114] bypass sinal_particular falhou: %s", _e114)
@@ -1990,7 +2118,7 @@ def tentar_bypass_deterministico(
         # têm prioridade. Só chega aqui quando nenhum outro bypass quis o turno.
         try:
             t = deve_perguntar_dados_pendentes(ctx, user_text)
-            if t:
+            if t and not _repete_ultima_outbound(t):
                 return ("dados_pendentes_c120", t)
         except Exception as _e120:
             log.warning("[C-120] bypass dados_pendentes falhou: %s", _e120)
