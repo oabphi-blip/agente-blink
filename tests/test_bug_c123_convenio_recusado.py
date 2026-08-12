@@ -81,15 +81,16 @@ def _ctx(convenio="", aceito=None, convenio_aceito_known=True, ultima_msg="", le
 
 
 _ULTIMA_OPCOES = (
-    "Temos condições diferenciadas para atendimento sem convênio! "
-    "Qual a sua preferência?\n\n"
-    "1️⃣ Somente com Convênio\n"
-    "2️⃣ Seguir Sem Convênio"
+    "temos incentivos especiais "
+    "para pacientes com convênios que ainda não cobrimos. "
+    "Como prefere seguir?\n\n"
+    "1️⃣ Seguir sem convênio\n"
+    "2️⃣ Somente com convênio"
 )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 1. HELPER _montar_recusa_convenio — verificar tom canônico
+# 1. HELPER _montar_recusa_convenio — verificar tom amistoso C-128
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestMontagemRecusaConvenio:
@@ -104,31 +105,74 @@ class TestMontagemRecusaConvenio:
         assert "670" not in msg
         assert "R$" not in msg
 
-    def test_processo_credenciamento_presente(self):
+    def test_credenciado_presente(self):
+        """C-128: texto direto 'ainda não está credenciado' em vez de 'processo de credenciamento'."""
         msg = _bd._montar_recusa_convenio("Bradesco")
-        assert "processo de credenciamento" in msg.lower()
+        assert "credenciado" in msg.lower()
 
-    def test_opcao_1_somente_convenio(self):
+    def test_opcao_1_seguir_sem_convenio(self):
+        """C-128: opção 1 é agora 'Seguir sem convênio' (conversão prioritária)."""
         msg = _bd._montar_recusa_convenio("Bradesco")
         assert "1️⃣" in msg
-        assert "Somente com Convênio" in msg
+        assert "Seguir sem convênio" in msg
 
-    def test_opcao_2_seguir_sem_convenio(self):
+    def test_opcao_2_somente_convenio(self):
+        """C-128: opção 2 é 'Somente com convênio'."""
         msg = _bd._montar_recusa_convenio("Bradesco")
         assert "2️⃣" in msg
-        assert "Seguir Sem Convênio" in msg
+        assert "Somente com convênio" in msg
 
-    def test_saudacao_inclusa(self):
-        msg = _bd._montar_recusa_convenio("Amil", saud="Carlos, ")
-        assert msg.startswith("Carlos, ")
+    def test_incentivos_especiais(self):
+        """C-128: 'incentivos especiais' em vez de 'condições diferenciadas'."""
+        msg = _bd._montar_recusa_convenio("Bradesco")
+        assert "incentivos especiais" in msg.lower()
+        assert "condições diferenciadas" not in msg.lower()
 
-    def test_sem_saudacao_vazia(self):
-        msg = _bd._montar_recusa_convenio("Bradesco", saud="")
-        assert msg.startswith("o **Bradesco**")
+    def test_como_prefere_seguir(self):
+        """C-128: 'Como prefere seguir?' em vez de 'Qual a sua preferência?'."""
+        msg = _bd._montar_recusa_convenio("Bradesco")
+        assert "Como prefere seguir" in msg
+
+    def test_abertura_com_nome_contato(self):
+        """C-128: quando ctx tem nome_contato, abre com 'Entendi, {nome}.'"""
+        ctx = {"known": {"nome_contato": "Juliene Souza", "nome_paciente": "Daniel"}}
+        msg = _bd._montar_recusa_convenio("Amil", ctx=ctx)
+        assert msg.startswith("Entendi, Juliene.")
+
+    def test_referencia_nome_paciente(self):
+        """C-128: quando paciente != contato, usa 'o {nome_paciente}' no corpo."""
+        ctx = {"known": {"nome_contato": "Juliene Souza", "nome_paciente": "Daniel"}}
+        msg = _bd._montar_recusa_convenio("Amil", ctx=ctx)
+        assert "o Daniel" in msg
+
+    def test_sem_nome_usa_voce(self):
+        """C-128: sem nome_paciente → 'deixar você sem solução'."""
+        msg = _bd._montar_recusa_convenio("Amil")
+        assert "você" in msg
+
+    def test_sem_nome_contato_sem_entendi(self):
+        """C-128: sem nome_contato → não abre com 'Entendi,'."""
+        msg = _bd._montar_recusa_convenio("Amil")
+        assert not msg.startswith("Entendi,")
+        # começa direto com o nome do convênio
+        assert msg.startswith("O **Amil**")
 
     def test_nome_conv_exibido(self):
         msg = _bd._montar_recusa_convenio("Sul América")
         assert "Sul América" in msg
+
+    def test_caso_real_juliene_daniel_amil(self):
+        """Caso real lead 24446300 — Juliene (contato), Daniel (paciente), Amil."""
+        ctx = {"known": {"nome_contato": "Juliene", "nome_paciente": "Daniel"}}
+        msg = _bd._montar_recusa_convenio("Amil", ctx=ctx)
+        assert "Entendi, Juliene." in msg
+        assert "**Amil**" in msg
+        assert "o Daniel" in msg
+        assert "incentivos especiais" in msg
+        assert "Como prefere seguir" in msg
+        assert "1️⃣ Seguir sem convênio" in msg
+        assert "2️⃣ Somente com convênio" in msg
+        assert "particular" not in msg.lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -154,21 +198,23 @@ class TestFaqConvenioAceito:
         assert "R$" not in r
         assert "611" not in r
 
-    def test_recusa_bradesco_processo_credenciamento(self):
+    def test_recusa_bradesco_credenciado(self):
+        """C-128: texto usa 'credenciado' — não mais 'processo de credenciamento'."""
         ctx = _ctx(convenio="Bradesco", aceito=False)
         r = _bd.deve_responder_faq_convenio_aceito(
             ctx, "atende bradesco saude?"
         )
         assert r is not None
-        assert "processo de credenciamento" in r.lower()
+        assert "credenciado" in r.lower()
 
     def test_recusa_bradesco_opcoes_canonicas(self):
+        """C-128: 1️⃣ Seguir sem convênio / 2️⃣ Somente com convênio."""
         ctx = _ctx(convenio="Bradesco", aceito=False)
         r = _bd.deve_responder_faq_convenio_aceito(
             ctx, "vocês aceitam Bradesco?"
         )
-        assert "1️⃣ Somente com Convênio" in r
-        assert "2️⃣ Seguir Sem Convênio" in r
+        assert "1️⃣ Seguir sem convênio" in r
+        assert "2️⃣ Somente com convênio" in r
 
     def test_aceite_bacen_intacto(self):
         ctx = _ctx(convenio="Bacen", aceito=True)
@@ -234,18 +280,20 @@ class TestEscolhaConvenio:
         ctx["known"]["convenio_nao_aceito_nome"] = convenio_recusado
         return ctx
 
-    # ── Opção 2: Seguir Sem Convênio ─────────────────────────────────────────
+    # ── Opção 1: Seguir sem convênio (C-128: era opção 2) ────────────────────
 
-    def test_detecta_opcao_2_numeral(self):
+    def test_detecta_opcao_1_numeral_sem_convenio(self):
+        """C-128: '1' agora = Seguir sem convênio."""
         ctx = self._ctx_pos_recusa()
-        r = _bd.deve_responder_escolha_convenio(ctx, "2")
+        r = _bd.deve_responder_escolha_convenio(ctx, "1")
         assert r is not None
         assert ctx["known"].get("convenio") == "Não se aplica"
         assert ctx["known"].get("c123_marcar_sem_convenio") is True
 
-    def test_detecta_emoji_2(self):
+    def test_detecta_emoji_1_sem_convenio(self):
+        """C-128: '1️⃣' agora = Seguir sem convênio."""
         ctx = self._ctx_pos_recusa()
-        r = _bd.deve_responder_escolha_convenio(ctx, "2️⃣")
+        r = _bd.deve_responder_escolha_convenio(ctx, "1️⃣")
         assert r is not None
         assert ctx["known"].get("c123_marcar_sem_convenio") is True
 
@@ -262,13 +310,13 @@ class TestEscolhaConvenio:
 
     def test_resposta_sem_convenio_pede_motivo(self):
         ctx = self._ctx_pos_recusa()
-        r = _bd.deve_responder_escolha_convenio(ctx, "2")
+        r = _bd.deve_responder_escolha_convenio(ctx, "1")
         assert r is not None
         assert "motivo" in r.lower() or "consulta" in r.lower()
 
     def test_resposta_sem_convenio_sem_particular(self):
         ctx = self._ctx_pos_recusa()
-        r = _bd.deve_responder_escolha_convenio(ctx, "2")
+        r = _bd.deve_responder_escolha_convenio(ctx, "1")
         assert r is not None
         assert "particular" not in r.lower()
 
@@ -278,17 +326,19 @@ class TestEscolhaConvenio:
         # convenio_nao_aceito_nome deve ser preservado para Ñ ACEITO CONVÊNIO no Kommo
         assert "Bradesco" in (ctx["known"].get("c123_convenio_recusado") or "")
 
-    # ── Opção 1: Somente com Convênio ────────────────────────────────────────
+    # ── Opção 2: Somente com convênio (C-128: era opção 1) ──────────────────
 
-    def test_detecta_opcao_1_numeral(self):
+    def test_detecta_opcao_2_numeral_so_convenio(self):
+        """C-128: '2' agora = Somente com convênio."""
         ctx = self._ctx_pos_recusa()
-        r = _bd.deve_responder_escolha_convenio(ctx, "1")
+        r = _bd.deve_responder_escolha_convenio(ctx, "2")
         assert r is not None
         assert ctx["known"].get("c123_encerrar_so_convenio") is True
 
-    def test_detecta_emoji_1(self):
+    def test_detecta_emoji_2_so_convenio(self):
+        """C-128: '2️⃣' agora = Somente com convênio."""
         ctx = self._ctx_pos_recusa()
-        r = _bd.deve_responder_escolha_convenio(ctx, "1️⃣")
+        r = _bd.deve_responder_escolha_convenio(ctx, "2️⃣")
         assert r is not None
         assert ctx["known"].get("c123_encerrar_so_convenio") is True
 
@@ -306,7 +356,7 @@ class TestEscolhaConvenio:
 
     def test_resposta_so_convenio_sem_valor(self):
         ctx = self._ctx_pos_recusa()
-        r = _bd.deve_responder_escolha_convenio(ctx, "1")
+        r = _bd.deve_responder_escolha_convenio(ctx, "2")  # C-128: 2 = só convênio
         assert r is not None
         assert "R$" not in r
         assert "611" not in r
@@ -433,22 +483,24 @@ class TestCasoReal24441038:
         assert "R$" not in r
         assert "611" not in r
 
-    def test_bradesco_processo_credenciamento(self):
+    def test_bradesco_credenciado(self):
+        """C-128: 'credenciado' presente em vez de 'processo de credenciamento'."""
         ctx = _ctx(convenio="Bradesco", aceito=False)
         r = _bd.deve_responder_faq_convenio_aceito(ctx, "vocês atendem bradesco?")
         assert r is not None
-        assert "processo de credenciamento" in r.lower()
+        assert "credenciado" in r.lower()
 
     def test_bradesco_opcoes_canonicas(self):
+        """C-128: 1️⃣ Seguir sem convênio / 2️⃣ Somente com convênio."""
         ctx = _ctx(convenio="Bradesco", aceito=False)
         r = _bd.deve_responder_faq_convenio_aceito(ctx, "vocês atendem bradesco?")
         assert r is not None
-        assert "1️⃣ Somente com Convênio" in r
-        assert "2️⃣ Seguir Sem Convênio" in r
+        assert "1️⃣ Seguir sem convênio" in r
+        assert "2️⃣ Somente com convênio" in r
 
-    def test_fluxo_completo_bradesco_escolhe_2(self):
-        """Simula: (1) Lia detecta Bradesco não aceito → apresenta opções.
-        (2) Paciente responde '2' → bypass injecta sem convênio."""
+    def test_fluxo_completo_bradesco_escolhe_1(self):
+        """C-128: Simula: (1) Lia detecta Bradesco não aceito → apresenta opções.
+        (2) Paciente responde '1' (Seguir sem convênio) → bypass injeta sem convênio."""
         # Passo 1: FAQ convênio
         ctx = _ctx(convenio="Bradesco", aceito=False)
         r1 = _bd.deve_responder_faq_convenio_aceito(ctx, "vocês atendem bradesco?")
@@ -456,8 +508,8 @@ class TestCasoReal24441038:
         # Registrar que Lia enviou as opções
         ctx["known"]["ultima_msg_outbound"] = r1
 
-        # Passo 2: Paciente escolhe opção 2
-        r2 = _bd.deve_responder_escolha_convenio(ctx, "2")
+        # Passo 2: Paciente escolhe opção 1 (= Seguir sem convênio no C-128)
+        r2 = _bd.deve_responder_escolha_convenio(ctx, "1")
         assert r2 is not None
         assert ctx["known"]["convenio"] == "Não se aplica"
         assert ctx["known"].get("c123_marcar_sem_convenio") is True

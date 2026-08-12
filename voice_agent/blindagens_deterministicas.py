@@ -1243,8 +1243,8 @@ _CONV_NOME_INTEXT_RE = re.compile(
 _RE_ESCOLHA_SEM_CONVENIO_C123 = re.compile(
     r"(?:^|\s)"
     r"(?:"
-    r"2️⃣|"
-    r"2\s*[.,)✔]?(?:\s|$)|"
+    r"1️⃣|"                          # C-128: Seguir sem convênio é agora opção 1
+    r"1\s*[.,)✔]?(?:\s|$)|"
     r"seguir\s+sem\s+conv[eê]nio|"
     r"sem\s+conv[eê]nio\b|"
     r"prefiro\s+sem|"
@@ -1259,8 +1259,8 @@ _RE_ESCOLHA_SEM_CONVENIO_C123 = re.compile(
 _RE_ESCOLHA_SO_CONVENIO_C123 = re.compile(
     r"(?:^|\s)"
     r"(?:"
-    r"1️⃣|"
-    r"1\s*[.,)✔]?(?:\s|$)|"
+    r"2️⃣|"                          # C-128: Somente com convênio é agora opção 2
+    r"2\s*[.,)✔]?(?:\s|$)|"
     r"somente\s+com\s+conv[eê]nio|"
     r"s[oó]\s+com\s+conv[eê]nio|"
     r"somente\s+conv[eê]nio|"
@@ -1271,33 +1271,81 @@ _RE_ESCOLHA_SO_CONVENIO_C123 = re.compile(
 )
 
 
-def _montar_recusa_convenio(conv_display: str, saud: str = "", escuta_pfx: str = "") -> str:
-    """Tom canônico para convênio não credenciado — C-123.
+def _montar_recusa_convenio(
+    conv_display: str,
+    saud: str = "",
+    escuta_pfx: str = "",
+    ctx: Optional[dict] = None,
+) -> str:
+    """Tom amistoso para convênio não credenciado — C-123 / C-128.
 
-    Regras:
-    - NÃO usa "não está na nossa rede credenciada" (seco demais)
+    C-128 (12/08/2026): tom empático personalizado:
+    - Abre "Entendi, {nome_contato}." quando nome disponível
+    - "não quero deixar o {nome_paciente} sem solução"
+    - "incentivos especiais" (era "condições diferenciadas")
+    - "Como prefere seguir?" (era "Qual a sua preferência?")
+    - Ordem: 1️⃣ Seguir sem convênio (conversão) / 2️⃣ Somente com convênio
+
+    Regras mantidas do C-123:
     - NÃO usa "particular" (usar "sem convênio")
     - NÃO oferece valor (não sabe motivo/médico ainda)
-    - Apresenta 2 opções canônicas: 1️⃣ Somente com Convênio / 2️⃣ Seguir Sem Convênio
 
-    C-127 Fix 3: escuta_pfx injeta prova de escuta antes do corpo principal.
-    Ex: "Anotado — filho de 5 anos! " + corpo canônico.
+    Args:
+        conv_display: Nome do convênio para exibição (ex: "Amil")
+        saud: (legado, ignorado) mantido para compatibilidade de assinatura
+        escuta_pfx: prova de escuta C-127 Fix 3 (ex: "Anotado — bebê 7 meses!")
+        ctx: caller context para extrair nome_contato e nome_paciente
     """
     pfx = f"{escuta_pfx}\n\n" if escuta_pfx else ""
+
+    # Extrai nomes do ctx ─────────────────────────────────────────────────────
+    try:
+        known = (ctx or {}).get("known") or {}
+        # nome_contato: quem está no WhatsApp (pode ser responsável/mãe/pai)
+        _nc_raw = (
+            known.get("nome_contato")
+            or known.get("nome_paciente")
+            or known.get("nome_completo_paciente")
+            or known.get("nome")
+            or ""
+        ).strip()
+        nome_contato = _nc_raw.split()[0] if _nc_raw else ""
+
+        # nome_paciente: quem vai consultar (pode diferir do contato)
+        _np_raw = (
+            known.get("nome_paciente")
+            or known.get("nome_completo_paciente")
+            or ""
+        ).strip()
+        nome_paciente = _np_raw.split()[0] if _np_raw else ""
+    except Exception:
+        nome_contato = ""
+        nome_paciente = ""
+
+    # Monta mensagem ──────────────────────────────────────────────────────────
+    abertura = f"Entendi, {nome_contato}. " if nome_contato else ""
+    ref_paciente = f"o {nome_paciente}" if nome_paciente else "você"
+
     return (
-        f"{pfx}{saud}o **{conv_display}** é um convênio que ainda estamos em processo "
-        "de credenciamento. 😊\n\n"
-        "Mas temos condições diferenciadas para atendimento sem convênio! "
-        "Qual a sua preferência?\n\n"
-        "1️⃣ Somente com Convênio\n"
-        "2️⃣ Seguir Sem Convênio"
+        f"{pfx}{abertura}O **{conv_display}** ainda não está credenciado na nossa rede.\n\n"
+        f"Mas não quero deixar {ref_paciente} sem solução — temos incentivos especiais "
+        "para pacientes com convênios que ainda não cobrimos. "
+        "Como prefere seguir?\n\n"
+        "1️⃣ Seguir sem convênio\n"
+        "2️⃣ Somente com convênio"
     )
 
 
 def _ultima_msg_era_recusa_convenio(ctx: Optional[dict]) -> bool:
-    """Verifica se o último outbound da Lia apresentou as 2 opções de convênio."""
+    """Verifica se o último outbound da Lia apresentou as 2 opções de convênio.
+
+    C-128: usa regex case-insensitive — funciona com formato legado (C-123) e
+    novo (C-128) independente de capitalização ou ordem das opções.
+    """
     ultima = (((ctx or {}).get("known") or {}).get("ultima_msg_outbound") or "").strip()
-    return "Somente com Convênio" in ultima and "Seguir Sem Convênio" in ultima
+    tem_sem = bool(re.search(r"seguir\s+sem\s+conv[eê]nio", ultima, re.IGNORECASE))
+    tem_so = bool(re.search(r"somente\s+com\s+conv[eê]nio", ultima, re.IGNORECASE))
+    return tem_sem and tem_so
 
 
 def deve_responder_escolha_convenio(
@@ -1417,8 +1465,9 @@ def deve_responder_faq_convenio_aceito(
                 if isinstance(ctx, dict) and isinstance(ctx.get("known"), dict):
                     ctx["known"]["convenio_nao_aceito_nome"] = conv_display
                 return _montar_recusa_convenio(
-                    conv_display, saud,
+                    conv_display,
                     escuta_pfx=_escuta_universal(user_text, ctx),  # C-127 Fix 3
+                    ctx=ctx,  # C-128: nomes para tom personalizado
                 )
 
         # ── Caminho B: convenio_aceito não computado ─────────────────────────
@@ -1461,12 +1510,13 @@ def deve_responder_faq_convenio_aceito(
                 "qual unidade fica melhor para você: **Asa Norte** ou **Águas Claras**?"
             )
         else:
-            # C-123: tom canônico — processo de credenciamento + sem "particular" + sem valor prematuro
+            # C-123 / C-128: tom amistoso + sem "particular" + sem valor prematuro
             if isinstance(ctx, dict) and isinstance(ctx.get("known"), dict):
                 ctx["known"]["convenio_nao_aceito_nome"] = conv_display
             return _montar_recusa_convenio(
-                conv_display, saud,
+                conv_display,
                 escuta_pfx=_escuta_universal(user_text, ctx),  # C-127 Fix 3
+                ctx=ctx,  # C-128: nomes para tom personalizado
             )
 
     except Exception as e:  # noqa: BLE001

@@ -213,6 +213,34 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (12/08/2026) Bug C-128 — Recusa convênio: tom genérico sem nome do paciente, "condições diferenciadas", ordem invertida errada
+
+**Origem:** lead 24446300 (Juliene = contato/mãe, Daniel = paciente, Amil = convênio não aceito). `_montar_recusa_convenio` gerava mensagem genérica sem personalização — não abria com nome do contato, não citava o paciente pelo nome, usava "condições diferenciadas" em vez de "incentivos especiais", e colocava opção de conversão (seguir sem convênio) em segundo lugar.
+
+**Fix em `voice_agent/blindagens_deterministicas.py`:**
+
+1. **`_montar_recusa_convenio(conv_display, saud, escuta_pfx, ctx)`** — reescrita total (C-128):
+   - Extrai `nome_contato` (quem está no WhatsApp) e `nome_paciente` (quem vai consultar) de `ctx.known`
+   - Abre com `"Entendi, {nome_contato}. "` quando nome disponível
+   - Referencia paciente: `"não quero deixar o {nome_paciente} sem solução"` ou `"você"` como fallback
+   - `"incentivos especiais"` (era `"condições diferenciadas"`)
+   - `"Como prefere seguir?"` (era `"Qual a sua preferência?"`)
+   - Ordem: `1️⃣ Seguir sem convênio` / `2️⃣ Somente com convênio` (era invertida)
+
+2. **`_RE_ESCOLHA_SEM_CONVENIO_C123`** — agora casa `1️⃣`/`"1"` (Seguir sem convênio = opção 1)
+3. **`_RE_ESCOLHA_SO_CONVENIO_C123`** — agora casa `2️⃣`/`"2"` (Somente com convênio = opção 2)
+4. **`_ultima_msg_era_recusa_convenio`** — atualizada de match exato para `re.search` regex — compatível com formato antigo (C-123) e novo (C-128)
+
+**Pytest:** `tests/test_bug_c123_convenio_recusado.py` — 57/57 verde.
+
+**Rollback:** revert commit (não há toggle separado).
+
+**Lição arquitetural CRÍTICA:**
+- **Opção de conversão positiva SEMPRE em primeiro lugar.** Paciente que quer continuar sem convênio clica `1`. Colocar somente-convênio como `1` priorizava o caminho que encerra a conversa.
+- **Nome do contato ≠ nome do paciente.** Em consultas pediátricas, `nome_contato` = mãe/pai, `nome_paciente` = filho. Citar o filho pelo nome cria empatia real: "não quero deixar o Daniel sem solução".
+- **"incentivos especiais" > "condições diferenciadas".** Tom mais positivo e menos burocrático.
+- **`_ultima_msg_era_recusa_convenio` com regex vs exact match.** Leads em mid-conversation têm o formato antigo em `ultima_msg_outbound` — regex garante backward compatibility.
+
 ### 0. (12/08/2026) Bug C-127 — Tom robótico: mensagens em bloco + repetição + bypasses ignoravam o que paciente disse
 
 **Origem:** Fábio: "está enviando mensagens em bloco, e mensagens repetidas, sem considerar o que os pacientes enviaram antes."

@@ -260,7 +260,8 @@ def test_escuta_universal_falha_graciosamente():
 def test_recusa_convenio_sem_escuta():
     from voice_agent.blindagens_deterministicas import _montar_recusa_convenio
     r = _montar_recusa_convenio("GDF Saúde", "João, ")
-    assert "processo de credenciamento" in r
+    # C-128: texto agora diz "credenciado" (sem "processo de credenciamento")
+    assert "credenciado" in r
     assert "1️⃣" in r and "2️⃣" in r
     assert "GDF Saúde" in r
 
@@ -273,7 +274,8 @@ def test_recusa_convenio_com_escuta():
     )
     assert "Anotado — filho de 3 meses!" in r
     assert "Bradesco" in r
-    assert "processo de credenciamento" in r
+    # C-128: texto agora diz "credenciado" (sem "processo de credenciamento")
+    assert "credenciado" in r
     assert "1️⃣" in r
 
 
@@ -298,7 +300,8 @@ def test_faq_convenio_aceito_refusado_com_escuta_filho(monkeypatch):
     }
     r = bd.deve_responder_faq_convenio_aceito(ctx, "atende Bradesco? É para meu filho de 4 anos")
     if r is not None:
-        assert "credenciamento" in r or "Bradesco" in r.lower()
+        # C-128: texto usa "credenciado" em vez de "credenciamento"
+        assert "credenciado" in r or "bradesco" in r.lower()
         # escuta pode ou não aparecer (depende do que _escuta_universal detecta)
         # mas a resposta não deve começar com texto seco
         assert "1️⃣" in r or "credenciamento" in r
