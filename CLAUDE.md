@@ -213,6 +213,47 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (12/08/2026) Bug C-127 — Tom robótico: mensagens em bloco + repetição + bypasses ignoravam o que paciente disse
+
+**Origem:** Fábio: "está enviando mensagens em bloco, e mensagens repetidas, sem considerar o que os pacientes enviaram antes."
+
+**3 causas simultâneas:**
+
+1. **Mensagens em bloco**: Python bypasses geravam 1 string longa → pipeline mandava tudo de uma vez → WhatsApp mostrava como "parede de texto". Parecia robô.
+
+2. **Repetição**: quando bypass disparava, não verificava se a resposta era idêntica ao `ultima_msg_outbound`. Paciente perguntava endereço 2x → recebia o mesmo texto palavra por palavra.
+
+3. **Ignorava contexto do paciente**: bypasses de valor e convênio não reconheciam o que o paciente havia dito ("meu filho de 7 meses", "Bacen", "Asa Norte"). Resposta começava direto no conteúdo sem nenhum "Anotado — ...".
+
+**Fix em 3 camadas (commit C-127, 12/08/2026):**
+
+1. **`voice_agent/message_splitter.py` (NOVO):**
+   - `split_message()` divide em 2-3 partes em pontos naturais (fim de frase, linha em branco)
+   - Protege blocos `1️⃣/2️⃣` (menu nunca cortado)
+   - `send_split()` envia com delay 1.2s entre chunks
+   - Toggle: `MESSAGE_SPLIT_ENABLED=0` desliga (default ON)
+   - Plugado em `pipeline.py` no caminho Evolution
+
+2. **Anti-repetição universal em `tentar_bypass_deterministico()`:**
+   - Closure `_repete_ultima_outbound()`: overlap ≥ 70% de palavras relevantes → suprime bypass
+   - Aplicado em: `faq_endereco`, `faq_especialidade`, `faq_convenio_aceito`, `convenio`, `objecao_preco`, `valor`, `endereco_pos_agenda`, `sinal_particular_c114`, `dados_pendentes_c120`
+   - NUNCA suprime: `aceite_slot`, `escolha_convenio_c123`, `cancelamento_24h`, `desistencia`, `urgencia`, `comprovante_pix_c116`, `sinal_noshow` (ações críticas)
+
+3. **`_escuta_universal(user_text, ctx)` (NOVO):**
+   - Extrai elementos mencionados pelo paciente que NÃO estão em `ctx.known`: filho/bebê com idade, convênio, unidade
+   - Retorna `"Anotado — bebê de 7 meses! "` ou `""` se nada novo
+   - Injetado em `deve_responder_valor()` (no abertura) e `_montar_recusa_convenio()` (antes do corpo)
+
+**Pytest:** `tests/test_bug_c127_tom_conversacional.py` — 32/32 verde.
+
+**Rollback:** `MESSAGE_SPLIT_ENABLED=0` em Easypanel → Implantar (desliga Fix 1). Fix 2/3 = revert commit.
+
+**Lição arquitetural CRÍTICA:**
+- **"Parece robô" = 3 sintomas diferentes com 3 causas raiz.** Não basta corrigir o LLM — os bypasses Python também precisam ser conversacionais.
+- **Split de mensagem é UX obrigatória em WhatsApp.** Mensagem de 400 chars com 4 frases = 2-3 mensagens de 130-200 chars cada, com delay. Parece digitação humana.
+- **Anti-repetição via overlap léxico é mais robusto que hash.** Hash exato falha quando o mesmo conteúdo muda uma palavra. Overlap 70% captura o caso real sem falso positivo.
+- **`_escuta_universal` é mais leve que `_prova_de_escuta_c125`.** C-125 é para formulário de dados (extração detalhada). C-127 é para cualquer bypass (só extrai o que o paciente mencionou E ainda não está em `ctx.known`).
+
 ### 0. (11/08/2026) Bug C-125 — Regressão C-120: formulário multi-campo sem "prova de escuta" (lead 24441434 Janaina Melo)
 
 **Origem:** lead 24441434 Janaina Melo. Paciente disse: "Gostaria de agendar com a Dra. Karla. É para o meu filho de 7 meses. Consulta de rotina solicitada pelo pediatra." — Lia despejou TODOS os campos pendentes em uma mensagem sem reconhecer o que a paciente havia informado: "me passa: nome completo, data de nascimento, convênio, médico e unidade?" Fábio: *"não ouviu o que o paciente disse, faltando a prova da escuta... passar solicitações de forma gradual e atômica."*
@@ -331,26 +372,6 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 - **Dedup em `tick()`, não em `_varrer()`.** C-116 (comprovante detectado) pertence ao filtro de varredura — lead não é candidato. C-122 (lembrete já enviado) pertence ao loop do tick — lead é candidato mas já foi tratado. Mesclar os dois em `_varrer` quebra o contador `ja_dedup`.
 - **`wa_cloud` acessível via closure em `create_app()`** — não precisa ser atributo do objeto `pipeline`. Pattern replicável para qualquer novo watchdog que precise enviar WhatsApp.
 - **Rollback:** `WATCHDOG_COMPROVANTE_ENABLED=0` em Easypanel → Implantar.
-
-### 0. (11/08/2026) Bugs C-118 / C-119 / C-120 — Aceite slot nunca disparava + confirmação redundante + dados em N turnos
-
-**C-118 — Causa raiz:** `deve_gerar_confirmacao_aceite` (blindagens_deterministicas.py linha 151) lia `ctx.get("slots_ofertados")` que NUNCA era populado em prod. C-105/enriquecimento_ctx escreve em `ctx["known"]["slots_selecionados"]` (chave diferente, nível diferente). Resultado: bypass de aceite era no-op — 100% dos casos passavam direto para o LLM.
-
-**Fix C-118:** fallback `or (ctx.get("known") or {}).get("slots_selecionados")`. Bug descoberto escrevendo pytest que forçou inspecionar o caminho real. Bônus: `_PADRAO_ACEITE_SLOT` usava `1[\W]` que não casava `"1"` isolado (fim de string). Fix: `1(?:\W|$)`. E `_montar_texto_confirmacao` dizia "Já estou registrando no sistema" sem ter chamado o Medware — falsa promessa. Corrigido para "Está tudo certo pra você?".
-
-**C-119 — Turno de confirmação eliminado:** quando paciente diz "1, pode marcar" (aceite + confirmação no mesmo turno), bypass detecta `_PADRAO_PODE_MARCAR_INLINE` E `_PADRAO_ACEITE_SLOT`, injeta `ctx["known"]["c119_slot_para_gravar"] = slot_aceito` e retorna texto de reserva imediata. Pipeline hook lê a flag → chama `executar_agendamento` → avança FSM para POS_GRAVACAO. Elimina 1 turno em ~40% dos fluxos.
-
-**C-120 — Dados pendentes em 1 mensagem:** `deve_perguntar_dados_pendentes` fica no fim da chain. Quando nenhum outro bypass disparou + há campos pendentes + há intent de agendamento OU dados parciais → monta 1 pergunta com todos os campos pendentes. LLM não é chamado. C-121 merged: quando só CPF falta + nome conhecido → "me passa o CPF de {nome}?".
-
-**Arquivos:** `voice_agent/blindagens_deterministicas.py` (5 edits) + `voice_agent/pipeline.py` (1 hook C-119).
-
-**Pytest:** `tests/test_bug_c118_c119_c120_aceite_e_dados.py` — 75/75 verde.
-
-**Lição arquitetural CRÍTICA:**
-- **Bypass que nunca dispara = não existe.** C-118 existia no código há semanas mas era morto. A raiz: duas partes diferentes do sistema escreviam/liam chaves diferentes. `grep -r "slots_selecionados\|slots_ofertados"` teria revelado o mismatch imediatamente.
-- **Padrão de detecção → consumo:** qualquer flag/dado injetado em `ctx.known` deve ter seu CONSUMIDOR rastreado. C-105 injetava `slots_selecionados`; o consumidor (deve_gerar_confirmacao_aceite) lia outra chave. Auditoria recorrente: `grep "ctx\[.known.\]\[.X.\]"` no código de injeção; confirmar que existe consumidor que lê a mesma chave.
-- **Regex que consome (`[\W]`) vs lookahead (`(?:\W|$)`):** `[\W]` CONSOME o caractere não-palavra após o dígito, o que funciona para "1," ou "1️⃣" mas não para "1" no fim de string. Preferir lookahead `(?:\W|$)` em regex de detecção de tokens numéricos isolados.
-- **Rollback:** `BLINDAGEM_ACEITE_ATIVADO=0` desliga C-118/C-119; `BLINDAGEM_DADOS_PENDENTES_ATIVADO=0` desliga C-120.
 
 ### 0. (11/08/2026) Bug C-117 — Cancelamento < 24h: LLM não informava política de sinal não devolvido
 
