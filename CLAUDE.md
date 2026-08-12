@@ -213,6 +213,46 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (11/08/2026) Bug C-125 — Regressão C-120: formulário multi-campo sem "prova de escuta" (lead 24441434 Janaina Melo)
+
+**Origem:** lead 24441434 Janaina Melo. Paciente disse: "Gostaria de agendar com a Dra. Karla. É para o meu filho de 7 meses. Consulta de rotina solicitada pelo pediatra." — Lia despejou TODOS os campos pendentes em uma mensagem sem reconhecer o que a paciente havia informado: "me passa: nome completo, data de nascimento, convênio, médico e unidade?" Fábio: *"não ouviu o que o paciente disse, faltando a prova da escuta... passar solicitações de forma gradual e atômica."*
+
+**Causa raiz — C-120 gerava formulário sem contexto:**
+`_montar_pergunta_dados_c120` listava todos os `campos_pendentes` de uma vez, sem:
+1. Reconhecer o que o paciente já havia dito (médico, perfil, motivo)
+2. Perguntar apenas 1 campo por vez
+3. Personalizar a pergunta pelo contexto (bebê, criança, adulto)
+
+**Fix — 3 funções novas em `blindagens_deterministicas.py`:**
+
+1. **`_prova_de_escuta_c125(user_text, known)`** — extrai e reformula o que o paciente informou:
+   - Médico mencionado ("Karla" → "Dra. Karla Delalíbera")
+   - Perfil do paciente ("filho de 7 meses" → "bebê de 7 meses"; "filha de 5 anos" → "criança de 5 anos")
+   - Motivo ("rotina", "retorno")
+   - Encaminhamento/pediatra → "com encaminhamento"
+   - Retorna "Anotado — [elementos]" ou "" se nada identificado
+
+2. **`_campo_prioritario_c125(pendentes)`** — retorna APENAS 1 campo (nunca "médico"):
+   - Prioridade: nome → data_nasc → convênio → cpf → unidade
+   - "médico" é pulado — Python deriva via C-101/enriquecimento_ctx
+   - Retorna None se só médico restava → fail-open, LLM continua
+
+3. **`_montar_pergunta_dados_c125(resultado, ctx, user_text)`** — combina escuta + pergunta atômica:
+   - Pergunta personalizada por campo + contexto (bebê/criança/adulto)
+   - Com escuta: "Anotado — Dra. Karla Delalíbera, bebê de 7 meses, consulta de rotina! 😊 Qual o nome completo do bebê?"
+   - Sem escuta + nome coletado: "Maria, qual a data de nascimento de Maria?" (evita repetição)
+   - `deve_perguntar_dados_pendentes()` agora chama `_montar_pergunta_dados_c125()` em vez de `_montar_pergunta_dados_c120()`
+
+**Pytest:** `tests/test_bug_c125_prova_escuta_uma_pergunta.py` — 60/60 verde. Cobre: caso real Janaina 24441434, 13 padrões `_prova_de_escuta_c125`, `_campo_prioritario_c125` nunca pergunta médico, 1 campo por turno, formulário banido, C-120 retrocompat 75/75.
+
+**Rollback:** `BLINDAGEM_DADOS_PENDENTES_ATIVADO=0` em Easypanel → Implantar (mesmo toggle de C-120).
+
+**Lição arquitetural CRÍTICA:**
+- **"Prova de escuta" é UX obrigatória em WhatsApp.** Paciente que forneceu 4 informações e recebe "me passa nome, data, convênio e médico?" sente que foi ignorada. O padrão correto: acknowledge → 1 pergunta. Não é cosmético — é taxa de conversão.
+- **`campos_pendentes` como lista de perguntas = anti-padrão.** C-120 criou a lista corretamente mas errou ao despejá-la inteira. A lista é para SEQUÊNCIA — perguntar item[0] agora, item[1] após resposta, etc.
+- **Personalização por perfil é esperada pelo usuário.** "Qual o nome completo do paciente?" é frio. "Qual o nome completo do bebê?" é natural. O contexto (bebê/criança/adulto) já está no `user_text` — extrair e usar é zero custo extra.
+- **Nunca perguntar médico via Python.** C-101 deriva médico por idade/motivo. Se C-125 perguntasse "Dra. Karla ou Dr. Fabrício?", conflitaria com C-101. Regra: se só médico está pendente → None → LLM (ou C-101 derivou e não propagou ainda).
+
 ### 0. (11/08/2026) Bug C-124 — Stall "Vou verificar os próximos horários" em loop (lead 20734711 Samuel)
 
 **Origem:** lead 20734711 Samuel Rosario Vargas. Paciente deu preferência de turno → C-51.3 interceptou resposta LLM (que incluía slots + valor juntos) → fallback `_gerar_proxima_pergunta_sem_convenio()` emitia "Anotado. Vou verificar os próximos horários disponíveis e apresento opções" mesmo com `ctx.agenda` tendo slots reais → stall repetia em todo turno (loop infinito).
@@ -390,31 +430,6 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 - **O momento certo é DEPOIS da confirmação de dados.** Perguntar sobre sinal antes de confirmar os dados é pressão indevida.
 - **`_ultima_msg_era_conclusao` é a guarda essencial.** Sem ela, qualquer "sim" dispararia a mensagem em qualquer contexto.
 - **Rollback:** `POLITICA_COMPARECIMENTO_ATIVADO=0` em Easypanel → Implantar.
-
-### 0. (11/08/2026) Bug C-113 — "Para mim e minha filha" / "2 filhos": Lia fazia triagem para 1 paciente e gravava 1 agendamento
-
-**Origem:** auditoria arquitetural (sessão 11/08/2026). Quando paciente dizia "quero agendar para mim e minha filha" ou "meus 2 filhos", o `intent_classifier` (C-81) já extraía `n_patients=2` e injetava em `ctx.known`. Mas NENHUM bypass deterministico usava esse campo — o LLM recebia o contexto mas frequentemente ignorava o segundo paciente e fazia triagem para 1. Resultado: Medware gravava 1 agendamento; segundo paciente ficava sem consulta e sem aviso.
-
-**Decisão arquitetural (P0):** Múltiplos pacientes é fato objetivo detectável — Python bifurca antes do LLM. Bypass entrega mensagem avisando que precisamos de 2 agendamentos separados e já inicia coleta do 1° paciente. LLM só humaniza.
-
-**3 arquivos criados/modificados (11/08/2026):**
-
-1. **`voice_agent/multiplos_pacientes.py` (NOVO):**
-   - `detectar_multiplos_pacientes(user_text, ctx)`: regex PT-BR 16 padrões — "para mim e minha filha", "meus 2 filhos", "minhas duas filhas", "nós dois", etc. + ctx.known.n_patients como fonte prioritária. Falsos positivos guardados: "segunda-feira", "2 horas/minutos".
-   - `deve_orientar_multiplos_pacientes(ctx, user_text, redis)`: bypass retorna mensagem de bifurcação + pede nome/data nascimento do 1° paciente. Redis flag TTL 2h previne repetição. Injeta `known["multiplos_pacientes"]=N` e `known["aguardando_primeiro_paciente"]=True`.
-   - Toggle: `MULTIPLOS_PACIENTES_ATIVADO` (default ON); fail-open: exceção → None
-
-2. **`voice_agent/enriquecimento_ctx.py` — step 18 (C-113-18):** detecta múltiplos pacientes via regex → injeta `known["multiplos_pacientes"]=N` antes do LLM.
-
-3. **`voice_agent/blindagens_deterministicas.py`:** bypass C-113 ANTES de C-112 (protocolo retorno) — bifurca primeiro, depois verifica protocolo.
-
-**Pytest:** `tests/test_bug_c113_multiplos_pacientes.py` — 32/32 verde. Cobre: 9 padrões detecção, 5 falsos positivos guardados, ctx.known.n_patients prioritário, toggle OFF, Redis flag, injeção em known, posição na chain, step 18 em enriquecimento_ctx.
-
-**Lição arquitetural CRÍTICA:**
-- **n_patients no ctx.known = decisão objetiva, não nuance.** C-81 já detectava e injetava. C-113 é a ponte que CONSOME esse dado antes do LLM — sem ela, a detecção era no-op. Padrão: rastrear cada campo injetado em ctx.known até seu ponto de consumo.
-- **Agendamentos múltiplos exigem coleta sequencial, não paralela.** Medware é cadastro individual: cada paciente tem CPF, data de nascimento, histórico próprios. Bifurcar para coleta sequencial é o modelo correto — não tentar gravar os 2 no mesmo turno.
-- **Regex de detecção deve cobrir plural PT-BR.** "minhas" ≠ "minha?" — o plural com "s" foi o bug que fez "minhas duas filhas" escapar na primeira iteração. Regra: ao escrever regex para PT-BR, verificar singular/plural e gênero explicitamente.
-- **Rollback:** `MULTIPLOS_PACIENTES_ATIVADO=0` em Easypanel → Implantar.
 
 ### 0. (11/08/2026) Bug C-111 — Race condition: agendamento.py gravava no Medware sem re-verificar se slot ainda estava livre
 

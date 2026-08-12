@@ -1472,6 +1472,64 @@ def deve_perguntar_dados_pendentes(ctx: Optional[dict], user_text: str) -> Optio
     if ctx.get("ja_agendado") or known.get("ja_agendado"):
         return None
 
+    # C-126 FIX-1 (11/08/2026): se convênio não aceito e paciente ainda não escolheu,
+    # aguardar resposta à oferta C-123 ("1️⃣ Somente / 2️⃣ Seguir sem convênio").
+    # Caso real: lead 24442314 Rafael — após C-123 recusar GDF, paciente mandou
+    # "Asa norte" e C-120 voltou a perguntar convênio (que já era impossível).
+    # INATIVAÇÃO AUTOMÁTICA: após >= 2 turnos sem escolha → escalada + desativa IA.
+    if known.get("convenio_nao_aceito_nome") and not known.get(
+        "c123_marcar_sem_convenio"
+    ) and not known.get("c123_encerrar_so_convenio"):
+        # Contador Redis — quantos turnos sem escolha neste estado
+        _lead_id_c126_f1 = (
+            known.get("lead_id")
+            or ctx.get("lead_id")
+            or (ctx.get("lead") or {}).get("id")
+        )
+        _loop_count = 0
+        try:
+            from voice_agent.redis_client import get_redis as _get_redis_c126f1
+            _r_f1 = _get_redis_c126f1()
+            if _r_f1 and _lead_id_c126_f1:
+                _key_cnt = f"blink:c126_convenio_loop:{_lead_id_c126_f1}"
+                _loop_count = int(_r_f1.incr(_key_cnt) or 1)
+                _r_f1.expire(_key_cnt, 3600)  # TTL 1h — reseta se conversa esfria
+        except Exception:
+            pass
+
+        if _loop_count >= 2:
+            # Loop confirmado: INATIVAR IA AUTOMATICAMENTE → escalar para humano
+            log.error(
+                "[C-126] LOOP CONVENIO count=%d lead=%s — "
+                "escalando para 1-ATENDIMENTO HUMANO + desativando IA",
+                _loop_count, _lead_id_c126_f1,
+            )
+            try:
+                from voice_agent.redis_client import get_redis as _get_redis_c126esc
+                _r_esc = _get_redis_c126esc()
+                if _r_esc and _lead_id_c126_f1:
+                    # Reutiliza flag C-84: pipeline move lead + desativa IA
+                    _r_esc.setex(
+                        f"blink:c84_pede_atendente:{_lead_id_c126_f1}", 86400, "1"
+                    )
+            except Exception:
+                pass
+            _nome_f1 = str(
+                known.get("nome_contato") or known.get("nome_paciente") or ""
+            ).strip()
+            _saud_f1 = (f"{_nome_f1.split()[0]}, " if _nome_f1 else "")
+            return (
+                f"{_saud_f1}vou conectar você com nossa equipe que pode te orientar "
+                "melhor sobre as opções de atendimento. "
+                "Em instantes alguém da Blink responde! 🤝"
+            )
+
+        log.debug(
+            "[C-126] convenio_nao_aceito_nome=%r loop_count=%d — aguardando C-123",
+            known.get("convenio_nao_aceito_nome"), _loop_count,
+        )
+        return None  # C-126: aguardar paciente responder 1️⃣ ou 2️⃣
+
     # Verificar checklist
     try:
         from voice_agent.checklist_dados_minimos import verificar_dados_minimos
@@ -1489,11 +1547,15 @@ def deve_perguntar_dados_pendentes(ctx: Optional[dict], user_text: str) -> Optio
     if not has_data and not has_intent:
         return None  # LLM lida com FAQ, curiosos, perguntas de serviço
 
-    return _montar_pergunta_dados_c120(resultado, ctx)
+    return _montar_pergunta_dados_c125(resultado, ctx, user_text)
 
 
 def _montar_pergunta_dados_c120(resultado, ctx) -> str:
-    """Monta a pergunta dos dados pendentes em linguagem natural (C-120)."""
+    """Monta a pergunta dos dados pendentes em linguagem natural (C-120).
+
+    DEPRECATED: substituído por _montar_pergunta_dados_c125 (Bug C-125 11/08/2026).
+    Mantido por compatibilidade com testes legados.
+    """
     pendentes = resultado.campos_pendentes
     if not pendentes:
         return ""
@@ -1503,7 +1565,6 @@ def _montar_pergunta_dados_c120(resultado, ctx) -> str:
 
     if len(pendentes) == 1:
         campo = pendentes[0]
-        # CPF: personalizar com nome do paciente se disponível
         if "cpf" in campo.lower():
             nome_pac = (
                 (ctx or {}).get("known", {}).get("nome_paciente") or nome or "do paciente"
@@ -1511,13 +1572,159 @@ def _montar_pergunta_dados_c120(resultado, ctx) -> str:
             return f"{saud}me passa o CPF de {nome_pac}?"
         return f"{saud}me passa {campo}?"
 
-    # 2+ pendentes: todos em 1 mensagem → elimina turnos extra de coleta
     if len(pendentes) == 2:
         lista = f"{pendentes[0]} e {pendentes[1]}"
     else:
         lista = ", ".join(pendentes[:-1]) + f" e {pendentes[-1]}"
 
     return f"{saud}antes de garantir o horário, me passa: {lista}?"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# C-125 — PROVA DE ESCUTA + UMA PERGUNTA POR TURNO (Bug C-125 11/08/2026)
+# ═══════════════════════════════════════════════════════════════════════
+# Causa raiz de C-120: despejava TODOS os campos pendentes num formulário
+# sem reconhecer o que o paciente acabou de dizer (lead 24441434 Janaina).
+# C-125 corrige: (1) prova de escuta — acknowledge o que o paciente disse;
+#               (2) UMA só pergunta por turno em ordem de prioridade.
+#               (3) NUNCA pede médico — Python deriva via C-101/enriquecimento.
+# Mesmo toggle: BLINDAGEM_DADOS_PENDENTES_ATIVADO.
+
+_RE_KARLA_C125 = re.compile(r"\bkarla\b", re.IGNORECASE)
+_RE_FABRICIO_C125 = re.compile(r"\bfabr[ií]c[io]o?\b|\bfreitas\b", re.IGNORECASE)
+_RE_BEBE_C125 = re.compile(r"\bb[eê]b[eê]\b|\brecém[- ]nasc\w*", re.IGNORECASE)
+_RE_FILHO_IDADE_C125 = re.compile(
+    r"(?:filho|filha|menino|menina|crian[cç]a|bebê|bebe)\s+de\s+(\d+)\s*(m[eê]s(?:es)?|anos?)",
+    re.IGNORECASE,
+)
+_RE_ROTINA_C125 = re.compile(r"\brotina\b|\bcheck[- ]?up\b|\bpreventiv\w+\b", re.IGNORECASE)
+_RE_RETORNO_C125 = re.compile(r"\bretorno\b|\bvolta\s+(?:ao|para|pra)\b|\bseguimento\b", re.IGNORECASE)
+_RE_ENCAMINHAMENTO_C125 = re.compile(
+    r"\bencaminh\w+\b|\bpedi[aá]tra\b|\bm[eé]dico\s+de\s+fam[ií]lia\b",
+    re.IGNORECASE,
+)
+
+
+def _prova_de_escuta_c125(user_text: str, known: dict) -> str:
+    """Extrai o que o paciente disse e retorna string de acknowledgment (C-125).
+
+    Ex: "Anotado — Dra. Karla Delalíbera, bebê de 7 meses, consulta de rotina"
+    Retorna "" se não houver elementos identificáveis o suficiente.
+    """
+    partes: list[str] = []
+
+    # Médico mencionado explicitamente pelo paciente
+    if _RE_KARLA_C125.search(user_text):
+        partes.append("Dra. Karla Delalíbera")
+    elif _RE_FABRICIO_C125.search(user_text):
+        partes.append("Dr. Fabrício Freitas")
+
+    # Perfil do paciente: filho/bebê com idade
+    m_filho = _RE_FILHO_IDADE_C125.search(user_text)
+    if m_filho:
+        num = m_filho.group(1)
+        unid = m_filho.group(2)
+        if "ano" in unid.lower():
+            s = "s" if int(num) != 1 else ""
+            partes.append(f"criança de {num} ano{s}")
+        else:
+            s = "s" if int(num) != 1 else ""
+            partes.append(f"bebê de {num} mês{s}" if int(num) == 1 else f"bebê de {num} meses")
+    elif _RE_BEBE_C125.search(user_text):
+        partes.append("bebê")
+
+    # Motivo da consulta
+    if _RE_RETORNO_C125.search(user_text):
+        partes.append("retorno")
+    elif _RE_ROTINA_C125.search(user_text):
+        partes.append("consulta de rotina")
+
+    # Encaminhamento / pediatra
+    if _RE_ENCAMINHAMENTO_C125.search(user_text):
+        partes.append("com encaminhamento")
+
+    if not partes:
+        return ""
+
+    return "Anotado — " + ", ".join(partes)
+
+
+def _campo_prioritario_c125(pendentes: tuple) -> Optional[str]:
+    """Retorna APENAS o campo mais prioritário (um só), filtrando 'médico' (C-125).
+
+    Nunca pede médico via C-125 — Python deriva via C-101/enriquecimento_ctx.
+    Prioridade natural: nome → data_nasc → convênio → cpf → unidade.
+    """
+    for campo in pendentes:
+        if "médico" in campo.lower():
+            continue  # Python's job — never ask patient to choose médico
+        return campo
+    return None  # só médico restava → fail-open, LLM continua
+
+
+def _montar_pergunta_dados_c125(resultado, ctx, user_text: str) -> str:
+    """Monta pergunta com prova de escuta + 1 campo prioritário (C-125).
+
+    Formato quando escuta presente:
+        "Anotado — Dra. Karla Delalíbera, bebê de 7 meses, consulta de rotina! 😊
+         Qual o nome completo do bebê?"
+
+    Formato sem escuta (paciente só disse "sim"):
+        "João, o atendimento vai ser por convênio ou sem convênio?"
+    """
+    known = (ctx or {}).get("known") or {}
+    campo = _campo_prioritario_c125(resultado.campos_pendentes)
+    if not campo:
+        return ""  # só médico pendente — Python resolve via C-101
+
+    # Prova de escuta: extrai o que o paciente disse
+    escuta = _prova_de_escuta_c125(user_text, known)
+
+    # Detectar perfil (bebê/criança) para personalizar pronomes
+    eh_bebe = bool(
+        _RE_BEBE_C125.search(user_text) or _RE_FILHO_IDADE_C125.search(user_text)
+    )
+
+    nome_pac = (
+        known.get("nome_paciente")
+        or known.get("nome_completo_paciente")
+        or known.get("nome")
+    )
+    nome_primeiro = _nome_paciente(ctx)  # primeiro nome (para saudação)
+
+    # Pergunta específica por campo (atômica — apenas 1)
+    if "cpf" in campo.lower():
+        ref = nome_pac or ("do bebê" if eh_bebe else "do paciente")
+        pergunta = f"me passa o CPF de {ref}?"
+    elif "nome completo" in campo.lower():
+        ref = "do bebê" if eh_bebe else "do paciente"
+        pergunta = f"qual o nome completo {ref}?"
+    elif "data de nascimento" in campo.lower():
+        if nome_pac:
+            primeiro_pac = nome_pac.strip().split()[0]
+            pergunta = f"qual a data de nascimento de {primeiro_pac}?"
+        elif eh_bebe:
+            pergunta = "qual a data de nascimento do bebê?"
+        else:
+            pergunta = "qual a data de nascimento do paciente?"
+    elif "convênio" in campo.lower():
+        pergunta = "o atendimento vai ser por convênio ou sem convênio?"
+    elif "unidade" in campo.lower():
+        pergunta = "prefere Asa Norte ou Águas Claras?"
+    else:
+        pergunta = f"me passa {campo}?"
+
+    p = pergunta[0].upper() + pergunta[1:]
+
+    # Montar resposta final
+    if escuta:
+        return f"{escuta}! 😊 {p}"
+    elif nome_primeiro and nome_primeiro.lower() in pergunta.lower():
+        # Nome já aparece no corpo da pergunta — evita "Beatriz, Qual a data de Beatriz?"
+        return p
+    else:
+        saud = f"{nome_primeiro}, " if nome_primeiro else ""
+        return f"{saud}{p}"
 
 
 def tentar_bypass_deterministico(
@@ -1535,6 +1742,58 @@ def tentar_bypass_deterministico(
         6. endereço pós-agenda (segunda mensagem obrigatória)
     """
     try:
+        # === Bug C-126 FIX-2 (11/08/2026): C-84 na chain ANTES de qualquer bypass ===
+        # C-84b em _scrub_prohibited (pós-LLM) nunca roda quando C-120 bypassa o LLM.
+        # Caso real: lead 24442314 Rafael — "Quem está me atendendo é um Robô, ou atendente?"
+        # foi ignorado 3x porque C-120 curto-circuitava o LLM inteiro.
+        # Solução: detectar pedido de atendente/robô AQUI TAMBÉM, antes de qualquer bypass.
+        # Usa mesmos padrões e flag Redis de C-84b (blink:c84_pede_atendente:{lead_id}).
+        try:
+            _C126_PEDE_ATENDENTE = re.compile(
+                r"\batendente\b|falar\s+com\s+(um\s+)?atendente|"
+                r"quero\s+atendente|chamar\s+atendente|"
+                r"falar\s+com\s+(um\s+)?humano|falar\s+com\s+pessoa|"
+                r"me\s+passa\s+pra\s+(uma?\s+)?pessoa|"
+                r"quero\s+falar\s+com\s+algu[eé]m|"
+                r"me\s+passa\s+pra\s+(um\s+)?atendente|"
+                r"\bhumano\b.*\bpor\s+favor\b|\bpor\s+favor\b.*\bhumano\b|"
+                r"\brob[oô]\b|est[aá]\s+me\s+atendendo|quem\s+[eé]\s+voc[eê]",
+                re.IGNORECASE | re.UNICODE,
+            )
+            if user_text and _C126_PEDE_ATENDENTE.search(user_text):
+                _known_c126 = (ctx or {}).get("known") or {}
+                _nome_c126 = str(
+                    _known_c126.get("nome_contato") or _known_c126.get("nome_paciente") or ""
+                ).strip()
+                _saud_c126 = (f"{_nome_c126.split()[0]}, " if _nome_c126 else "")
+                _resp_c126 = (
+                    f"{_saud_c126}entendido! Vou passar para um dos nossos atendentes "
+                    "agora. Em instantes alguém da Blink responde por aqui. 🤝"
+                )
+                # Grava flag Redis — pipeline hook moverá lead pra 1-ATENDIMENTO HUMANO
+                try:
+                    _lid_c126 = (
+                        _known_c126.get("lead_id")
+                        or (ctx or {}).get("lead_id")
+                        or ((ctx or {}).get("lead") or {}).get("id")
+                    )
+                    if _lid_c126:
+                        from voice_agent.redis_client import get_redis as _get_redis_c126
+                        _r_c126 = _get_redis_c126()
+                        if _r_c126:
+                            _r_c126.setex(
+                                f"blink:c84_pede_atendente:{_lid_c126}", 86400, "1"
+                            )
+                except Exception:  # noqa: BLE001
+                    pass
+                log.error(
+                    "[C-126/C-84] PACIENTE PEDIU ATENDENTE (bypass chain) user=%r",
+                    user_text[:60],
+                )
+                return ("pede_atendente_c126", _resp_c126)
+        except Exception as _e126_c84:
+            log.warning("[C-126/C-84] bypass atendente falhou: %s", _e126_c84)
+
         # Bug C-117 (11/08/2026): Cancelamento < 24h → informa política de sinal.
         # Vem PRIMEIRO na chain — se paciente tem consulta em < 24h e quer cancelar,
         # Python calcula o delta, informa a política de sinal (50% não devolvido)
