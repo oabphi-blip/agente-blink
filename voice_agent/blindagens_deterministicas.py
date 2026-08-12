@@ -1946,6 +1946,10 @@ def tentar_bypass_deterministico(
                 r"quero\s+falar\s+com\s+algu[eé]m|"
                 r"me\s+passa\s+pra\s+(um\s+)?atendente|"
                 r"\bhumano\b.*\bpor\s+favor\b|\bpor\s+favor\b.*\bhumano\b|"
+                # C-131 12/08/2026 — lead 24448016 Lorena disse "atendimento humano."
+                # \batendente\b não casava com "atendimento" (palavra diferente)
+                r"\batendimento\s+humano\b|quero\s+atendimento\s+humano|"
+                r"transfere?\s+(?:para?\s+)?(?:um\s+)?atendimento\s+humano|"
                 r"\brob[oô]\b|est[aá]\s+me\s+atendendo|quem\s+[eé]\s+voc[eê]",
                 re.IGNORECASE | re.UNICODE,
             )

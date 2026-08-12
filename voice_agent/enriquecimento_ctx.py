@@ -512,3 +512,15 @@ def _enriquecer_interno(known: dict, ctx: dict) -> None:
         _enriquecer_retorno(ctx)
     except Exception as _exc_c112:
         log.warning("[C-112] step 17 falhou: %s", _exc_c112)
+
+    # ── C-131-19. Extração determinística nome/data/CPF do inbound ──────────────────────────
+    # Fix do loop infinito "Qual a data de nascimento?" (leads 24448016 Lorena/Nicolas,
+    # 24448040 Patrícia): quando C-125 perguntou data/nome/CPF e paciente respondeu,
+    # Python extrai e grava em ctx.known ANTES do checklist → C-125 não repete a pergunta.
+    # Raiz do loop: C-130 passava para LLM que não atualizava ctx.known → próximo turno
+    # checklist ainda via campo vazio → C-125 disparava de novo. C-131 corta o ciclo.
+    try:
+        from voice_agent.extracao_resposta_c131 import extrair_e_injetar_resposta_c131 as _injetar_c131
+        _injetar_c131(ctx, user_text)
+    except Exception as _exc_c131:
+        log.warning("[C-131] step 19 falhou: %s", _exc_c131)

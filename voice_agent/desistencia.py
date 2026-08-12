@@ -69,6 +69,13 @@ _RE_DESISTENCIA = re.compile(
     r"|(?:pode\s+)?encerr[ae](?:r)?\s+(?:o\s+atendimento|a\s+conversa|aqui)"
     r"|n[aã]o\s+tenho\s+interesse"
     r"|obrigad[ao],?\s+(?:mas\s+)?n[aã]o"
+    # C-131/C-108 adicionados 12/08/2026 — leads 24448016 e 24448040
+    r"|n[aã]o\s+quero\s+agendar\s+(?:agora|mais|por\s+enquanto)"
+    r"|n[aã]o\s+vou\s+agendar"
+    r"|vou\s+decidir\s+(?:e\s+)?(?:procuro|entro\s+em\s+contato|volto)\s*(?:novamente|depois|mais\s+tarde)?"
+    r"|procuro\s+(?:novamente|depois|mais\s+tarde)"
+    r"|decido\s+depois"
+    r"|vou\s+pensar\s+(?:e\s+)?(?:depois\s+)?(?:entro\s+em\s+contato|volto|procuro)"
     r")",
     re.IGNORECASE | re.UNICODE,
 )
