@@ -8536,6 +8536,141 @@ async function submit(dryRun) {
         ).start()
         log.info("[WATCHDOG-PROMESSA] worker iniciado (cron interno)")
 
+    # =========================================================================
+    # C-122 — Watchdog comprovante Pix (11/08/2026)
+    # Detecta leads com blink:c114_aguardando_comprovante ativo há >2h sem
+    # blink:c116_comprovante_detectado → envia lembrete WhatsApp.
+    # Liga via WATCHDOG_COMPROVANTE_ENABLED=1 (default OFF — rollout gradual).
+    # =========================================================================
+
+    # Endpoint manual
+    @app.get("/admin/watchdog-comprovante-tick")
+    @app.post("/admin/watchdog-comprovante-tick")
+    async def admin_watchdog_comprovante_tick(request: Request) -> JSONResponse:
+        if settings.webhook_secret:
+            got = (
+                request.headers.get("x-webhook-secret")
+                or request.query_params.get("secret")
+            )
+            if got != settings.webhook_secret:
+                raise HTTPException(401, "Unauthorized")
+
+        from voice_agent.watchdog_comprovante import tick as _wc_tick
+
+        dr_param = request.query_params.get("dry_run", "true")
+        dry_run = str(dr_param).lower() not in ("0", "false", "no", "nao")
+        max_param = request.query_params.get("max_leads", "20")
+        try:
+            max_leads = max(1, min(int(max_param), 50))
+        except (TypeError, ValueError):
+            max_leads = 20
+
+        redis_client = None
+        try:
+            redis_client = pipeline.redis
+        except Exception:
+            pass
+
+        try:
+            res = _wc_tick(
+                kommo_client=pipeline.kommo,
+                wa_cloud_client=wa_cloud,
+                redis_client=redis_client,
+                dry_run=dry_run,
+                max_leads=max_leads,
+            )
+            payload = res.as_dict()
+            payload["dry_run"] = dry_run
+            log.info("[WATCHDOG-COMPROVANTE tick dry_run=%s] %s", dry_run, payload)
+            return JSONResponse(payload)
+        except Exception as e:  # noqa: BLE001
+            log.exception("[WATCHDOG-COMPROVANTE tick] erro: %s", e)
+            return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
+
+    # Cron interno — roda a cada CRON_WATCHDOG_COMPROVANTE_SEG (default 3600 = 1h)
+    from voice_agent.watchdog_comprovante import esta_habilitado as _wc_habilitado
+
+    if _wc_habilitado():
+        def _wc_tick_once() -> None:
+            try:
+                from voice_agent.watchdog_comprovante import tick as _wc_t
+                _dry = os.getenv("WATCHDOG_COMPROVANTE_DRY_RUN", "0") == "1"
+                _max = int(os.getenv("WATCHDOG_COMPROVANTE_MAX_LEADS", "20"))
+                _redis = getattr(pipeline, "redis", None)
+                rep = _wc_t(
+                    kommo_client=pipeline.kommo,
+                    wa_cloud_client=wa_cloud,
+                    redis_client=_redis,
+                    dry_run=_dry,
+                    max_leads=_max,
+                )
+                if rep.candidatos:
+                    log.warning(
+                        "[WATCHDOG-COMPROVANTE auto] varridos=%d candidatos=%d "
+                        "enviados=%d dedup=%d erros=%d",
+                        rep.varridos, rep.candidatos, rep.enviados,
+                        rep.ja_dedup, rep.erros,
+                    )
+            except Exception as e:  # noqa: BLE001
+                log.warning("[WATCHDOG-COMPROVANTE auto] erro: %s", e)
+
+        def _wc_scheduler() -> None:
+            import time as _t
+            _t.sleep(60)  # espera app subir
+            intervalo = int(os.getenv("CRON_WATCHDOG_COMPROVANTE_SEG", "3600"))
+            while True:
+                try:
+                    threading.Thread(target=_wc_tick_once, daemon=True).start()
+                except Exception as e:  # noqa: BLE001
+                    log.warning("[WATCHDOG-COMPROVANTE] scheduler erro: %s", e)
+                _t.sleep(max(300, intervalo))
+
+        threading.Thread(
+            target=_wc_scheduler, daemon=True, name="watchdog_comprovante",
+        ).start()
+        log.info("[WATCHDOG-COMPROVANTE] worker iniciado (cron interno, intervalo %ss)",
+                 os.getenv("CRON_WATCHDOG_COMPROVANTE_SEG", "3600"))
+
+    # =========================================================================
+    # C-132 — Endpoint Google Form → Kommo (12/08/2026)
+    # Recebe POST do Apps Script quando paciente envia o formulário de pré-agendamento.
+    # Atualiza campos Kommo (convênio, unidade) + adiciona nota + flag Redis.
+    # =========================================================================
+
+    @app.post("/admin/form-preagendamento")
+    async def admin_form_preagendamento(request: Request) -> JSONResponse:
+        # Autenticação
+        got = (
+            request.headers.get("x-webhook-secret")
+            or request.query_params.get("secret")
+        )
+        if settings.webhook_secret and got != settings.webhook_secret:
+            raise HTTPException(401, "Unauthorized")
+
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = dict(await request.form())
+
+        redis_client = None
+        try:
+            redis_client = pipeline.redis
+        except Exception:
+            pass
+
+        try:
+            from voice_agent.form_preagendamento import processar_form_preagendamento
+            resultado = processar_form_preagendamento(
+                payload=payload,
+                kommo_client=pipeline.kommo,
+                redis_client=redis_client,
+            )
+            log.info("[C-132] form processado: %s", resultado)
+            return JSONResponse(resultado)
+        except Exception as e:
+            log.exception("[C-132] form_preagendamento erro: %s", e)
+            return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
+
     return app
 
 
