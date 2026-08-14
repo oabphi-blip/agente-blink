@@ -799,7 +799,7 @@ _PROHIBITED_REPLACEMENTS = [
 
 # Chaves Pix oficiais (artigo 38 §3) — qualquer outra é alucinação
 _CHAVES_PIX_OFICIAIS = {
-    "karladelaliberaoftalmo@gmail.com",   # Asa Norte
+    "28.655.944/0001-16",   # Asa Norte
         "sistema.pe@gmail.com",           # Sistema PE
     "52.303.729/0001-30",                  # Águas Claras (CNPJ)
 }
@@ -2810,7 +2810,7 @@ def _gerar_pre_reserva_10min(ctx: Optional[dict] = None) -> str:
     if "águas claras" in unidade.lower() or "aguas claras" in unidade.lower():
         chave_pix = "52.303.729/0001-30 (CNPJ Águas Claras)"
     else:
-        chave_pix = "karladelaliberaoftalmo@gmail.com (e-mail Asa Norte)"
+        chave_pix = "28.655.944/0001-16 (CNPJ Asa Norte)"
 
     saudacao = f"{nome_contato}, " if nome_contato else ""
 
@@ -3544,6 +3544,77 @@ def _scrub_prohibited(text: str, ctx: Optional[dict] = None) -> str:
             return _resp_c84
     except Exception as e:  # noqa: BLE001
         log.warning("[C-84b] falhou (fail-open): %s", e)
+
+    # === FILTRO C-72 SEMPRE-ON (Bug C-72 14/08/2026 Lucas 20325187) ===
+    # Regra INVIOLÁVEL: TODO HH:MM que a Lia menciona em oferta DEVE existir
+    # em ctx.agenda (Medware). Se algum é chute → substitui + escala humano.
+    # Fábio 14/08 P0: "Passar horario somente de forma deterministca. Como
+    # evitar erros de horarios inventados". Caso Lucas: Lia ofertou 10:00
+    # e 14:00 sem consultar Medware. Toggle: NUNCA_INVENTAR_HORARIO_ATIVADO
+    # (default ON). Fail-open em exceção.
+    try:
+        from voice_agent.nunca_inventar_horario import (
+            validar_horarios_contra_medware as _c72_validar,
+        )
+        _r_c72 = None
+        try:
+            from voice_agent.settings import get_redis as _get_redis_c72
+            _r_c72 = _get_redis_c72()
+        except Exception:
+            pass
+        _texto_final_c72, _foi_bloqueado_c72 = _c72_validar(text, ctx, _r_c72)
+        if _foi_bloqueado_c72:
+            log.error(
+                "[C-72] Horário inventado bloqueado lead=%s texto=%r",
+                (ctx or {}).get("lead_id"),
+                text[:120],
+            )
+            return _texto_final_c72
+    except Exception as _e_c72:
+        log.warning("[C-72] falhou (fail-open): %s", _e_c72)
+
+    # === FILTRO C-73 SEMPRE-ON (Bug C-73 14/08/2026 lead 24456676) ===
+    # Anti-repetição de pergunta de perfil. Paciente disse "Criança"
+    # e Lia perguntou de novo com nova taxonomia. Fix: se outbound
+    # tem pergunta "bebê/criança/adolescente/adulto" MAS ctx ou
+    # user_text já indicam categoria → substitui pela pergunta correta.
+    try:
+        from voice_agent.anti_repeticao_perfil import (
+            validar_nao_repetir_pergunta_perfil as _c73_validar,
+        )
+        _texto_c73, _foi_c73 = _c73_validar(text, ctx)
+        if _foi_c73:
+            log.error(
+                "[C-73] Repetição de pergunta de perfil bloqueada lead=%s",
+                (ctx or {}).get("lead_id"),
+            )
+            return _texto_c73
+    except Exception as _e_c73:
+        log.warning("[C-73] falhou (fail-open): %s", _e_c73)
+
+    # === FILTRO C-140 SEMPRE-ON (Bug C-140 14/08/2026) ===
+    # Reclamação implícita OU frustração acumulada → handoff humano imediato.
+    # Fábio: "depois que o paciente fizer qualquer reclamação ou literalmente
+    # pedir para transferir para humano."
+    # C-84b cobre pedido EXPLÍCITO de atendente.
+    # C-140 cobre: "péssimo atendimento", "absurdo", "Procon", "ninguém me
+    # responde", "não quero falar com robô", "impossível agendar", etc.
+    # Toggle: RECLAMACAO_ATIVADO (default ON). Fail-open.
+    try:
+        from voice_agent.reclamacao import deve_responder_reclamacao as _c140_fn
+        _user_c140 = str((ctx or {}).get("user_text") or "").strip()
+        if _user_c140:
+            from voice_agent.settings import get_redis as _get_redis_c140
+            _r_c140 = None
+            try:
+                _r_c140 = _get_redis_c140()
+            except Exception:
+                pass
+            _resp_c140 = _c140_fn(ctx, _user_c140, _r_c140)
+            if _resp_c140:
+                return _resp_c140
+    except Exception as _e_c140:
+        log.warning("[C-140] falhou (fail-open): %s", _e_c140)
 
     # === FILTRO C-92 SEMPRE-ON (Bug C-92 05/08/2026 Beatriz 16843614) ===
     # Paciente JÁ AGENDADO (5-AGENDADO/6-CONFIRMAR/7.CONFIRMADO) pediu

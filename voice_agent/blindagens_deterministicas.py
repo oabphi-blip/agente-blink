@@ -478,6 +478,13 @@ _PADROES_PERGUNTA_VALOR = re.compile(
     r"|\bgr[áa]tis\b"        # "grátis?"
     r"|\bbarato\b"            # "é barato?"
     r"|\bcaro\b"              # "é caro?"
+    # ── PT-BR coloquial "tá custando" — Bug C-139c (14/08/2026) ──────────
+    # Caso real: lead 24455626 Heytor — "Quanto que tá custando o exame"
+    # "tá" é coloquial de "está" — não casava em nenhum padrão anterior.
+    r"|t[aá]\s+custando"                              # "tá custando"
+    r"|est[aá]\s+custando"                            # "está custando"
+    r"|quanto\s+(?:que\s+)?(?:t[aá]|est[aá])\b"     # "quanto que tá", "quanto que está"
+    r"|\bcustando\b"                                   # "custando" standalone
     r"|\bform[as]?\s+de\s+pag"      # "forma(s) de pagamento"
     r"|\bmeio\s+de\s+pagamento\b"   # "meio de pagamento"
     r")",
@@ -1850,6 +1857,49 @@ def _inbound_responde_ultima_pergunta_c130(ctx: Optional[dict], user_text: str) 
 
     ultima = ((ctx or {}).get("known") or {}).get("ultima_msg_outbound") or ""
     if not ultima:
+        # C-139b (14/08/2026): ctx.known["ultima_msg_outbound"] vazio — campo 1260856
+        # é ESCRITO pelo pipeline no Kommo para visibilidade humana, mas NÃO É LIDO
+        # de volta durante o build do caller_context. Isso quebra C-130 E
+        # _repete_ultima_outbound simultaneamente, causando loop infinito de C-125.
+        # Fallback: C-139a escreve blink:c125_asked:{lead_id} quando C-125 dispara;
+        # lemos aqui como substituto do ultima_msg_outbound.
+        # Caso real: lead 24455626 Heytor — "Qual o nome completo do paciente?" 6x.
+        _lead_id_c130b = (
+            ((ctx or {}).get("known") or {}).get("lead_id")
+            or (ctx or {}).get("lead_id")
+            or ((ctx or {}).get("lead") or {}).get("id")
+        )
+        if _lead_id_c130b:
+            try:
+                from voice_agent.redis_client import get_redis as _get_redis_c130b
+                _r_c130b = _get_redis_c130b()
+                if _r_c130b:
+                    _campo_raw = _r_c130b.get(f"blink:c125_asked:{_lead_id_c130b}")
+                    if _campo_raw:
+                        _campo_str = (
+                            _campo_raw.decode()
+                            if isinstance(_campo_raw, bytes)
+                            else str(_campo_raw)
+                        )
+                        # Nome pedido → user_text parece nome (2+ palavras alfa, sem ?)
+                        if "nome" in _campo_str.lower():
+                            palavras = [p for p in ut.split() if p.isalpha()]
+                            return (
+                                len(palavras) >= 2
+                                and "?" not in ut
+                                and not _RE_DATA_RESP_C130.search(ut)
+                            )
+                        # Data de nascimento pedida → padrão de data
+                        if "nasc" in _campo_str.lower() or "data" in _campo_str.lower():
+                            return bool(_RE_DATA_RESP_C130.search(ut))
+                        # CPF pedido → 11 dígitos com/sem máscara
+                        if "cpf" in _campo_str.lower():
+                            return bool(_RE_CPF_RESP_C130.search(ut))
+                        # Convênio pedido → resposta substantiva
+                        if "conv" in _campo_str.lower():
+                            return len(ut) >= 3 and "?" not in ut
+            except Exception:
+                pass
         return False
 
     # Data de nascimento pedida → inbound parece data (tolera typos como "012")
@@ -1990,6 +2040,44 @@ def deve_perguntar_dados_pendentes(ctx: Optional[dict], user_text: str) -> Optio
     if _inbound_responde_ultima_pergunta_c130(ctx, user_text):
         log.debug("[C-130] inbound responde ultima pergunta C-125 — fall-through para LLM")
         return None
+
+    # C-139a (14/08/2026): Anti-loop Redis — contagem de asks por campo por lead.
+    # Causa raiz Bug C-139: ctx.known["ultima_msg_outbound"] está sempre vazio porque
+    # o campo 1260856 é gravado no Kommo apenas para visibilidade humana, mas NÃO é
+    # lido de volta durante o build do caller_context. Com ultima vazio, tanto
+    # _repete_ultima_outbound quanto C-130 retornam False instantaneamente →
+    # C-125 pode disparar infinitamente mesmo com paciente respondendo corretamente.
+    # Fix: contador Redis por (lead_id, campo), TTL 10min.
+    # Após 2 asks do mesmo campo → fall-through LLM (que extrai o valor).
+    # Também escreve blink:c125_asked:{lead_id} para o fallback C-139b de C-130.
+    # Caso real: lead 24455626 Heytor — "Qual o nome completo do paciente?" 6x.
+    _campo_c139a = _campo_prioritario_c125(resultado.campos_pendentes)
+    _lead_id_c139a = (
+        known.get("lead_id")
+        or ctx.get("lead_id")
+        or (ctx.get("lead") or {}).get("id")
+    )
+    if _campo_c139a and _lead_id_c139a:
+        try:
+            from voice_agent.redis_client import get_redis as _get_redis_c139a
+            _r_c139a = _get_redis_c139a()
+            if _r_c139a:
+                _key_count = f"blink:c139_count:{_lead_id_c139a}:{_campo_c139a}"
+                _count_c139 = int(_r_c139a.incr(_key_count) or 1)
+                _r_c139a.expire(_key_count, 600)  # TTL 10min — reseta se conversa esfria
+                if _count_c139 > 2:
+                    log.warning(
+                        "[C-139a] LOOP campo=%r lead=%s count=%d — "
+                        "suprimindo ask, fall-through LLM",
+                        _campo_c139a, _lead_id_c139a, _count_c139,
+                    )
+                    return None
+                # Registra campo pedido para fallback C-139b de _inbound_responde_c130
+                _r_c139a.setex(
+                    f"blink:c125_asked:{_lead_id_c139a}", 600, _campo_c139a
+                )
+        except Exception:
+            pass
 
     return _montar_pergunta_dados_c125(resultado, ctx, user_text)
 
@@ -2241,6 +2329,23 @@ def tentar_bypass_deterministico(
                 return ("pede_atendente_c126", _resp_c126)
         except Exception as _e126_c84:
             log.warning("[C-126/C-84] bypass atendente falhou: %s", _e126_c84)
+
+        # === Bug C-70 (14/08/2026): Sábado família determinístico ===
+        # Fábio 14/08 P0 — "criar norma deterministica python que agenda no
+        # sabado do mes corrente em Aguas Claras. E penultimo sabado do mes
+        # corrente na Asa Norte." Caso real: lead 23469368 Karina Lícia.
+        # Regra:
+        #   Águas Claras → último sábado do mês
+        #   Asa Norte    → penúltimo sábado do mês
+        # Fail-open: exceção OU sem unidade → segue chain normal.
+        try:
+            from voice_agent.sabado_familia import deve_ofertar_sabado as _c70_sabado
+            _r_c70 = _c70_sabado(ctx, user_text)
+            if _r_c70:
+                log.info("[C-70] bypass sábado família disparou user=%r", user_text[:60])
+                return ("sabado_familia_c70", _r_c70)
+        except Exception as _e_c70:
+            log.warning("[C-70] bypass sábado família falhou: %s", _e_c70)
 
         # === Bug C-127 Fix 2 (12/08/2026): Anti-repetição universal ===
         # Problema: bypasses ignoram o histórico recente. Se o paciente já recebeu
