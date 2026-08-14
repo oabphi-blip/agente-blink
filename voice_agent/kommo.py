@@ -897,6 +897,43 @@ class KommoClient:
             log.exception("[patch_cfs] crash lead=%s: %s", lead_id, e)
             return (False, {"error": str(e)[:200]})
 
+    def patch_textarea_field(self, lead_id: int, field_id: int, value: str) -> bool:
+        """PATCH simplificado para campos textarea (sem validação GET pós-PATCH).
+
+        Bug C-133 (14/08/2026): `patch_custom_fields_raw` valida via GET após PATCH.
+        Campos textarea podem não aparecer no GET quando são recém-criados (Kommo
+        demora a indexar campos textuais grandes). Isso faz a validação retornar C-12
+        mesmo quando o PATCH teve sucesso real (HTTP 200).
+        Para textarea, confiamos no HTTP 2xx — não fazemos GET de validação.
+        """
+        payload = {
+            "custom_fields_values": [
+                {"field_id": field_id, "values": [{"value": value}]}
+            ]
+        }
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                r = client.patch(
+                    f"{self._base}/leads/{lead_id}",
+                    json=payload,
+                    headers=self._headers,
+                )
+            ok = r.status_code // 100 == 2
+            if not ok:
+                log.warning(
+                    "[patch_textarea] HTTP %d lead=%s field=%s",
+                    r.status_code, lead_id, field_id,
+                )
+            else:
+                log.debug(
+                    "[patch_textarea] OK lead=%s field=%s len=%d",
+                    lead_id, field_id, len(value),
+                )
+            return ok
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[patch_textarea] crash lead=%s field=%s: %s", lead_id, field_id, exc)
+            return False
+
     def update_lead_fields(self, lead_id: int, fields: dict) -> bool:
         """Atualiza custom_fields_values do lead.
 

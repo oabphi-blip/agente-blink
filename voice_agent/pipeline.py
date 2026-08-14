@@ -1148,6 +1148,120 @@ class VoicePipeline:
         except Exception as _e_c84_pipe:  # noqa: BLE001
             log.warning("[C-84b PIPELINE] check falhou (fail-open): %s", _e_c84_pipe)
 
+        # 3a-C140) Bug C-140 (14/08/2026) — paciente fez reclamação implícita.
+        # Filtro C-140 em responder.py detectou frustração/reclamação e gravou flag Redis.
+        # Aqui: desativar IA + mover lead pra 1-ATENDIMENTO HUMANO + nota Kommo.
+        # Mesma arquitetura do C-84b (pedido explícito), flag Redis diferente para
+        # distinguir na nota o motivo do handoff (reclamação vs. pedido de atendente).
+        try:
+            _redis_c140 = getattr(self, "_redis", None)
+            _lid_c140_pipe = (
+                caller_context.get("lead_id") if isinstance(caller_context, dict) else None
+            )
+            if _redis_c140 and _lid_c140_pipe:
+                _flag_c140 = _redis_c140.get(f"blink:c140_reclamacao:{_lid_c140_pipe}")
+                if _flag_c140:
+                    log.error(
+                        "[C-140 PIPELINE] paciente fez reclamação lead=%s — "
+                        "movendo pra ATENDIMENTO HUMANO + desativando IA",
+                        _lid_c140_pipe,
+                    )
+                    _redis_c140.delete(f"blink:c140_reclamacao:{_lid_c140_pipe}")
+                    if self.kommo is not None:
+                        # (1) Desativar IA
+                        try:
+                            self.kommo.update_lead_fields(
+                                _lid_c140_pipe, {"ativado_ia": "DESATIVADO"}
+                            )
+                        except Exception as _e_c140_ia:  # noqa: BLE001
+                            log.warning("[C-140] desativar IA falhou: %s", _e_c140_ia)
+                        # (2) Mover pra 1-ATENDIMENTO HUMANO
+                        _status_c140 = (
+                            caller_context.get("status_id")
+                            if isinstance(caller_context, dict) else None
+                        )
+                        _ETAPAS_FINAIS_C140 = {91486864, 142, 143, 106563343}
+                        if _status_c140 and _status_c140 not in _ETAPAS_FINAIS_C140:
+                            try:
+                                self.kommo.update_lead_status(_lid_c140_pipe, 106563343)
+                                log.info(
+                                    "[C-140] lead %s movido → 1-ATENDIMENTO HUMANO",
+                                    _lid_c140_pipe,
+                                )
+                            except Exception as _e_c140_st:  # noqa: BLE001
+                                log.warning(
+                                    "[C-140] mover status falhou lead=%s: %s",
+                                    _lid_c140_pipe, _e_c140_st,
+                                )
+                        # (3) Nota Kommo
+                        try:
+                            import datetime as _dt_c140
+                            _nota_c140 = (
+                                f"⚠️ [LIA C-140 {_dt_c140.datetime.now().strftime('%H:%M %d/%m')}] "
+                                "Paciente fez reclamação ou expressou frustração. IA desativada + "
+                                f"lead movido pra ATENDIMENTO HUMANO. Msg: \"{user_text[:200]}\""
+                            )
+                            self.kommo.add_note(_lid_c140_pipe, _nota_c140)
+                        except Exception:  # noqa: BLE001
+                            pass
+        except Exception as _e_c140_pipe:  # noqa: BLE001
+            log.warning("[C-140 PIPELINE] check falhou (fail-open): %s", _e_c140_pipe)
+
+        # 3a-C142) Bug C-142 (14/08/2026) — repetição de mensagem → fallback humano.
+        # Fábio: "somente mensagem determinística. Se o agente não souber,
+        # transferir para atendimento humano e desativar IA."
+        # Quando a resposta gerada é ≥70% igual à última outbound:
+        # (1) substitui o answer pelo handoff, (2) move pra ATENDIMENTO HUMANO,
+        # (3) desativa IA.
+        # Também cobre: paciente pediu explicitamente handoff (complementa C-84b).
+        try:
+            _redis_c142 = getattr(self, "_redis", None)
+            _lid_c142 = (
+                caller_context.get("lead_id") if isinstance(caller_context, dict) else None
+            )
+            if _lid_c142 and self.kommo:
+                # (a) Verificar repetição na resposta gerada agora
+                from voice_agent.fallback_humano import verificar_e_tratar_repeticao as _c142_check
+                _handoff_c142 = _c142_check(caller_context, answer, _redis_c142)
+                if _handoff_c142:
+                    # Substitui a resposta repetida pelo handoff
+                    answer = _handoff_c142
+                    log.warning(
+                        "[C-142] resposta substituída por handoff lead=%s", _lid_c142
+                    )
+
+                # (b) Verificar flag Redis (pode ter sido gravado por _c142_check acima
+                # ou por outra detecção anterior no mesmo turno)
+                _flag_c142 = _redis_c142.get(f"blink:c142_fallback_humano:{_lid_c142}") if _redis_c142 else None
+                if _flag_c142:
+                    _redis_c142.delete(f"blink:c142_fallback_humano:{_lid_c142}")
+                    # (1) Desativar IA
+                    try:
+                        self.kommo.update_lead_fields(_lid_c142, {"ativado_ia": "Desativado"})
+                    except Exception as _e_c142_ia:  # noqa: BLE001
+                        log.warning("[C-142] desativar IA falhou: %s", _e_c142_ia)
+                    # (2) Mover pra 1-ATENDIMENTO HUMANO
+                    try:
+                        _FINAIS_C142 = {91486864, 142, 143, 106563343}
+                        _status_c142 = (caller_context or {}).get("status_id", 0)
+                        if _status_c142 and int(_status_c142) not in _FINAIS_C142:
+                            self.kommo.update_lead_status(_lid_c142, 106563343)
+                    except Exception as _e_c142_st:  # noqa: BLE001
+                        log.warning("[C-142] mover status falhou: %s", _e_c142_st)
+                    # (3) Nota Kommo
+                    try:
+                        import datetime as _dt_c142
+                        _nota_c142 = (
+                            f"⚠️ [LIA C-142 {_dt_c142.datetime.now().strftime('%H:%M %d/%m')}] "
+                            "Repetição detectada ou agente sem resposta determinística. "
+                            "IA desativada + movido para ATENDIMENTO HUMANO."
+                        )
+                        self.kommo.add_note(_lid_c142, _nota_c142)
+                    except Exception:  # noqa: BLE001
+                        pass
+        except Exception as _e_c142_pipe:  # noqa: BLE001
+            log.warning("[C-142 PIPELINE] check falhou (fail-open): %s", _e_c142_pipe)
+
         # 3a-C108) Bug C-108 (11/08/2026) — paciente desistiu explicitamente.
         # Bypass em blindagens_deterministicas.py já substituiu o texto e
         # enriquecimento_ctx step 14 gravou known["desistencia_explicita"]=True.
@@ -1833,10 +1947,18 @@ class VoicePipeline:
         # 5) Auto-preenchimento do Kommo CRM (best-effort, em background)
         # — não bloqueia a resposta do WhatsApp se Kommo demorar/falhar.
         if self.kommo is not None and reply_to_number:
+            # Bug C-141 (14/08/2026): passar known_hint para que campos derivados
+            # pelo enriquecimento_ctx (unidade, medico) sejam gravados no Kommo
+            # mesmo quando o LLM não os extrai explicitamente do texto.
+            _known_hint_c141 = (
+                (caller_context or {}).get("known")
+                if isinstance(caller_context, dict) else None
+            )
             threading.Thread(
                 target=self._sync_kommo_safely,
                 args=(reply_to_number, conversation_key, user_text, answer,
                       "96630710"),
+                kwargs={"known_hint": _known_hint_c141},
                 daemon=True,
             ).start()
 
@@ -1855,11 +1977,13 @@ class VoicePipeline:
                 daemon=True,
             ).start()
 
-        # C-133 (13/08/2026) — Gravar TODA CONVERSA em background.
+        # C-133 (13/08/2026 fix 14/08) — Gravar TODA CONVERSA em background.
         # Após enviar resposta, appenda o par [P][L] ao campo TODA CONVERSA
         # do Kommo (field_id 1261206). Próximo turno lê o campo → extrai
         # nome/data/CPF → não pergunta de novo.
         # Roda em thread separada (não bloqueia WhatsApp). Fail-open.
+        # Fix C-133 (14/08/2026): usa patch_textarea_field (sem validação GET)
+        # para evitar falso C-12 em campos textarea novos.
         if self.kommo is not None and caller_context:
             try:
                 from voice_agent.toda_conversa import appender_turno as _tc_appender
@@ -1868,11 +1992,19 @@ class VoicePipeline:
                 if _tc_lead_id:
                     _tc_texto_atual = caller_context.get("toda_conversa") or ""
                     _tc_novo = _tc_appender(_tc_texto_atual, user_text or "", answer or "")
+                    log.debug(
+                        "[C-133] enfileirando TODA CONVERSA lead=%s (%d chars)",
+                        _tc_lead_id, len(_tc_novo),
+                    )
                     threading.Thread(
                         target=_tc_gravar,
                         args=(self.kommo, _tc_lead_id, _tc_novo),
                         daemon=True,
                     ).start()
+                else:
+                    log.warning(
+                        "[C-133] lead_id ausente no caller_context — TODA CONVERSA NÃO gravada"
+                    )
             except Exception as _tc_exc:
                 log.warning("[C-133] write toda_conversa falhou: %s", _tc_exc)
 
@@ -1912,6 +2044,7 @@ class VoicePipeline:
         answer: str | None = None,
         channel: str = "",
         lead_id_hint: int | None = None,
+        known_hint: dict | None = None,  # Bug C-141: campos derivados de enriquecimento_ctx
     ) -> None:
         """Sincroniza o lead do Kommo: grava a nota da conversa e atualiza
         os campos extraídos.
@@ -2024,6 +2157,20 @@ class VoicePipeline:
                 ctx = {}
             # Campos extraídos da conversa.
             fields = self.responder.extract_lead_fields(conversation_key) or {}
+
+            # Bug C-141 (14/08/2026) — Mescla campos derivados de enriquecimento_ctx
+            # (unidade, medico) que o LLM pode não ter extraído explicitamente.
+            # Ex: paciente disse "Águas Claras" → enriquecimento_ctx gravou
+            # ctx.known["unidade"]="Águas Claras" mas extract_lead_fields não capturou.
+            # Só grava se o campo ainda NÃO está no LLM-extracted fields.
+            if known_hint:
+                for _campo_c141 in ("unidade", "medico"):
+                    if known_hint.get(_campo_c141) and not fields.get(_campo_c141):
+                        fields[_campo_c141] = known_hint[_campo_c141]
+                        log.info(
+                            "[C-141] campo=%r val=%r herdado de known_hint",
+                            _campo_c141, known_hint[_campo_c141],
+                        )
 
             # === PROTEÇÃO C-91 (05/08/2026 — Haiku inferiu SUS sem menção do paciente) ===
             # Haiku às vezes infere nao_aceito_convenio="SUS" para bebês/crianças

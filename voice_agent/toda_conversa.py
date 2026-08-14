@@ -231,21 +231,41 @@ def appender_turno(
 
 def gravar_toda_conversa(kommo_client, lead_id: int, novo_texto: str) -> bool:
     """
-    Grava o campo TODA CONVERSA via patch_custom_fields_raw.
-    Retorna True se sucesso.
+    Grava o campo TODA CONVERSA via patch_textarea_field (sem validação GET).
+
+    Bug C-133 (14/08/2026): patch_custom_fields_raw usava GET pós-PATCH para validar
+    que o campo foi gravado. Campos textarea Kommo às vezes não aparecem no GET
+    imediatamente após escrita (indexação assíncrona), fazendo a validação retornar
+    C-12 mesmo com PATCH bem-sucedido. Resultado: campo ficava vazio.
+
+    Fix: usar patch_textarea_field que confia no HTTP 2xx sem GET de validação.
     """
     if not _ativado():
         return False
+    if not lead_id or not novo_texto:
+        log.warning("[C-133] gravar_toda_conversa: lead_id=%s ou texto vazio", lead_id)
+        return False
     try:
-        ok, detalhes = kommo_client.patch_custom_fields_raw(
-            lead_id,
-            [{"field_id": FIELD_ID_TODA_CONVERSA, "values": [{"value": novo_texto}]}],
-        )
-        if not ok:
-            log.warning("[C-133] gravar_toda_conversa falhou: %s", detalhes)
+        # Usa método específico para textarea — sem validação GET pós-PATCH
+        if hasattr(kommo_client, "patch_textarea_field"):
+            ok = kommo_client.patch_textarea_field(
+                lead_id, FIELD_ID_TODA_CONVERSA, novo_texto
+            )
+        else:
+            # Fallback para versões antigas do KommoClient (compatibilidade)
+            ok, detalhes = kommo_client.patch_custom_fields_raw(
+                lead_id,
+                [{"field_id": FIELD_ID_TODA_CONVERSA, "values": [{"value": novo_texto}]}],
+            )
+            if not ok:
+                log.warning("[C-133] gravar_toda_conversa (fallback) falhou: %s", detalhes)
+        if ok:
+            log.info("[C-133] TODA CONVERSA gravada lead=%s (%d chars)", lead_id, len(novo_texto))
+        else:
+            log.warning("[C-133] gravar_toda_conversa falhou lead=%s", lead_id)
         return ok
     except Exception as exc:
-        log.warning("[C-133] gravar_toda_conversa exception: %s", exc)
+        log.warning("[C-133] gravar_toda_conversa exception lead=%s: %s", lead_id, exc)
         return False
 
 

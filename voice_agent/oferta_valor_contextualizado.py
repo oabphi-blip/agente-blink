@@ -197,7 +197,13 @@ def gerar_valor_contextualizado(
             medico_raw = _inferir_medico_user_text(user_text, idade)
 
         if not medico_raw:
-            # Sem médico identificável → tabela geral sem convênio
+            # Bug C-141 (14/08/2026): contexto pediátrico sem médico explícito
+            # → só Karla Delalíbera (Fabrício não atende crianças).
+            # Não mostrar tabela com ambos os médicos quando a consulta é claramente
+            # pediátrica (criança, bebê, filho, filho de X anos, adolescente).
+            if pediatrico or (idade is not None and idade < 18):
+                return _valor_karla_pediatrico(nome, idade)
+            # Sem médico nem contexto pediátrico → tabela geral (ambos médicos)
             return _tabela_sem_convenio(nome)
 
         karla = "karla" in medico_raw
