@@ -2224,6 +2224,17 @@ class KommoClient:
                                 )
                                 break
                     continue
+                # C-133 (13/08/2026) — campo TODA CONVERSA (textarea)
+                # Contém histórico completo de mensagens do lead para extração
+                # de dados (nome, data nasc, CPF) que o paciente já informou em
+                # turnos anteriores. Lido aqui e exposto em ctx['toda_conversa'].
+                if fid == 1261206:
+                    tc_vals = cf.get("values") or []
+                    if tc_vals:
+                        tc_text = tc_vals[0].get("value") or ""
+                        if tc_text:
+                            out["toda_conversa"] = tc_text
+                    continue
                 vals = cf.get("values") or []
                 if vals:
                     v = vals[0].get("value")

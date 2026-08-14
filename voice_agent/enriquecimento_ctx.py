@@ -524,3 +524,26 @@ def _enriquecer_interno(known: dict, ctx: dict) -> None:
         _injetar_c131(ctx, user_text)
     except Exception as _exc_c131:
         log.warning("[C-131] step 19 falhou: %s", _exc_c131)
+
+    # ── C-133-20. Extração de dados do histórico (notas + TODA CONVERSA) ─────────────────
+    # Resolve o loop que C-131 não cobre: paciente respondeu em turno ANTERIOR mas
+    # ctx.known foi reconstruído do zero neste turno e o campo Kommo não foi gravado.
+    # Varre notas existentes + campo TODA CONVERSA → extrai nome/data/CPF já fornecidos
+    # → injeta em ctx.known ANTES do checklist → checklist vê os dados → não pergunta de novo.
+    # Fail-open: qualquer exceção → continua silenciosamente.
+    try:
+        from voice_agent.toda_conversa import (
+            extrair_dados_de_notas as _extrair_notas,
+            extrair_dados_de_toda_conversa as _extrair_tc,
+            injetar_dados_em_ctx as _injetar_tc,
+        )
+        # Fonte 1: notas históricas (já carregadas no ctx)
+        _dados_notas = _extrair_notas(ctx.get("notas_historico") or [])
+        _injetar_tc(ctx, _dados_notas)
+        # Fonte 2: campo TODA CONVERSA (se disponível no ctx)
+        _texto_tc = ctx.get("toda_conversa") or ""
+        if _texto_tc:
+            _dados_tc = _extrair_tc(_texto_tc)
+            _injetar_tc(ctx, _dados_tc)
+    except Exception as _exc_c133:
+        log.warning("[C-133] step 20 falhou: %s", _exc_c133)

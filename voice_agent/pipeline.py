@@ -1855,6 +1855,27 @@ class VoicePipeline:
                 daemon=True,
             ).start()
 
+        # C-133 (13/08/2026) — Gravar TODA CONVERSA em background.
+        # Após enviar resposta, appenda o par [P][L] ao campo TODA CONVERSA
+        # do Kommo (field_id 1261206). Próximo turno lê o campo → extrai
+        # nome/data/CPF → não pergunta de novo.
+        # Roda em thread separada (não bloqueia WhatsApp). Fail-open.
+        if self.kommo is not None and caller_context:
+            try:
+                from voice_agent.toda_conversa import appender_turno as _tc_appender
+                from voice_agent.toda_conversa import gravar_toda_conversa as _tc_gravar
+                _tc_lead_id = caller_context.get("lead_id")
+                if _tc_lead_id:
+                    _tc_texto_atual = caller_context.get("toda_conversa") or ""
+                    _tc_novo = _tc_appender(_tc_texto_atual, user_text or "", answer or "")
+                    threading.Thread(
+                        target=_tc_gravar,
+                        args=(self.kommo, _tc_lead_id, _tc_novo),
+                        daemon=True,
+                    ).start()
+            except Exception as _tc_exc:
+                log.warning("[C-133] write toda_conversa falhou: %s", _tc_exc)
+
         return PipelineResult(
             transcript=user_text, answer=answer, sent=True,
             model_used=model_used, articles_used=articles_used,
