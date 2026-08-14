@@ -213,6 +213,40 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (14/08/2026) Bug C-146 — Pergunta fora do escopo Python → escalação imediata (financeiro/reembolso)
+
+**Origem:** lead 24328426 (Alice Tavares). Paciente pagou Pix sinal + depois conseguiu vaga pelo convênio. Perguntou: "gostaria de saber se o valor enviado poderia ser reembolsado, pois consegui uma vaga no meu convênio." Lia inventou: "a consulta com a Doutora Karla cobre a avaliação" — completamente fora do escopo.
+
+**Causa raiz (2 pontos simultâneos):**
+1. C-129 tinha `r"reembolso\b"` (substantivo apenas). "reembolsado" (particípio verbal) não casava — `reembolsa[dr]?\b` falha porque após `d` vem `o` (char de palavra), `\b` não encontra fronteira.
+2. Padrão "consegui vaga no convênio" não detectava "meu" entre "no" e "convênio".
+
+**Regra Fábio (P0 permanente):** "somente responder se tiver o código determinístico do Python. Se não tiver, transfere para atendimento humano, muda etapa pro atendimento humano, e o campo ativado IA, desativa IA."
+
+**Fix em 4 arquivos:**
+
+1. **`voice_agent/fora_escopo.py` (NOVO):**
+   - Tier 1 FINANCEIRO UNIVERSAL: reembolso/estorno/devolução em TODAS as formas verbais e nominais.
+     Fix regex: `reembolsa(?:r|do[sa]?|da[s]?)?` cobre reembolsar/reembolsado/reembolsada.
+     Padrão "consegui vaga": `(?:(?:no|pelo|com)\s+)?(?:meu\s+|seu\s+|o\s+)?conv[eê]nio`.
+   - Tier 2 ESCOPO FECHADO (ja_agendado=True): pergunta ≥4 palavras + não whitelistada → escalar.
+     Min 4 palavras exclui "Tudo bem?", "Oi", "Ok".
+   - Toggle: `FORA_ESCOPO_C146_ATIVADO` (default ON). Fail-open. Redis flag TTL 24h.
+
+2. **`voice_agent/blindagens_deterministicas.py`**: C-146 wired ANTES de C-129.
+
+3. **`voice_agent/pipeline.py`**: Hook lê flag Redis → desativa IA + move para 1-ATENDIMENTO HUMANO + nota Kommo.
+
+**Pytest:** `tests/test_bug_c146_fora_escopo.py` — 38/38 verde.
+**Push:** `PUSH_C146_FORA_ESCOPO.command`
+
+**Lição arquitetural CRÍTICA:**
+- **Regex com `[dr]?\b` em português falha em particípios.** "reembolsado" = reembolsa + **d** + **o**. Após `d`, próximo char é `o` (palavra), então `\b` não encontra fronteira. Padrão correto: usar `\w*` ou listar formas explicitamente: `(?:r|do[sa]?|da[s]?)`.
+- **C-129 era defesa de um único substantivo.** C-146 generaliza para TODA a família semântica (substantivo + verbo + particípio + compostos). Regra permanente: ao criar regex para palavra-raiz em PT-BR, sempre incluir: `(substantivo)\b`, `(verbo infinitivo)\b`, `(particípio_masc)\b`, `(particípio_fem)\b`.
+- **"meu", "seu", "o" entre preposição e substantivo é PT-BR normal.** "no convênio" vs "no meu convênio" — o artigo possessivo quebrou o padrão. Regra: usar `(?:\w+\s+){0,2}` ou listar artigos possessivos explicitamente quando o contexto tem posse.
+- **Pergunta sem código Python determinístico = escalar.** Fábio estabeleceu a regra arquitetural: se Python não tem a resposta, não deixar o LLM inventar. C-146 implementa essa regra como norma permanente.
+- **Rollback:** `FORA_ESCOPO_C146_ATIVADO=0` em Easypanel → Implantar.
+
 ### 0. (14/08/2026) Bug C-144 — TODA CONVERSA não gravada no canal WA Cloud (8133) — Lia cega e repetindo perguntas
 
 **Origem:** leads 24456556 e 24456706 — paciente disse "8 anos e 5 anos" → Lia confirmou → próximo turno perguntou de novo "consulta é para bebê, criança, adolescente ou adulto?" Campo TODA CONVERSA (1261206) permanecia vazio para leads do canal WA Cloud (8133).
@@ -290,42 +324,43 @@ Campo Kommo **1260856 (ULTIMA MSG OUTBOUND)** é ESCRITO pelo pipeline a cada tu
 - **Regex PT-BR coloquial tem formas contraídas.** "tá" = "está" em WhatsApp informal. Todo padrão que detecta um verbo conjugado deve incluir a contração coloquial: `est[aá]` cobre "está" e "esta" mas não "tá". Usar `(?:est[aá]|t[aá])` ou padrão standalone `\bt[aá]\b`.
 - **Contador Redis por (lead, campo) é defesa arquitetural contra qualquer loop de formulário.** Não depende do texto da última mensagem — depende apenas de quantas vezes o campo X foi perguntado para o lead Y. Funciona mesmo com `ultima_msg_outbound` vazio.
 
-### 0. (14/08/2026) Bug C-137 + C-138 — "desconto" causava stall + fluxo sem convênio 100% Python
+### 0. (14/08/2026) Bug C-145 — Convênio verificado ANTES dos dados do paciente (norma determinística)
 
-**C-137 — Origem:** lead 24328426 Alice Tavares perguntou "Queria saber se teria algum desconto nesta consulta". Agente respondeu 4x com stall "Anotado. Vou verificar os próximos horários disponíveis..." porque "desconto" não casava em `_RE_OBJECAO`. Paciente saiu sem resposta.
+**Origem:** lead 24456884 (Beatriz/Amil). Fábio: "perdeu a logica de saber primeiro o convenio, para saber se atendemos. No caso Amil nao atendemos e a conversa estendeu. Inserir como norma deterministica antes de comecar perguntar os dados do paciente. Porque a conversa pode ir para valor de consulta se nao tem convenio. Inserir como norma deterministica."
 
-**Fix C-137 em `voice_agent/objecao_preco.py`:**
-- 6 padrões adicionados em `_RE_OBJECAO`: `descontos?`, `promo[çc][aã]o`, `pre[çc]o\s+(?:mais\s+)?especial`, `valor\s+especial`, `tem?\s+algum\s+desconto`, `(?:consegue|d[aá])\s+(?:um\s+)?desconto`
-- `_RE_DESCONTO_ESPECIFICO` — detector interno pra routing diferente de "está caro"
-- `_montar_resposta_desconto(nome, parcela_2)` — tom amigável, sem âncora de valor, 2 opções diretas (parcelamento + fila encaixe). Desconto ≠ price shock — resposta é mais curta e positiva
-- **Fix crítico regex:** `promoc[aã]o` → `promo[çc][aã]o` (ç ≠ c em "promoção"). Sempre usar `[çc]` em regex PT-BR para palavras com cedilha.
-- **Pytest:** `tests/test_bug_c137_desconto.py` — 28/28 verde.
+Paciente Beatriz disse "Vocês aceitam o plano de saúde Amil?" na 1ª mensagem. C-136 (pergunta_perfil) disparou ANTES de `faq_convenio_aceito` e retornou "bebê, criança, adolescente ou adulto?" — a recusa do Amil nunca foi entregue. 5 turnos desperdiçados.
 
-**C-138 — Origem:** Fábio: "Como ter diálogo 100% Python para sem convênio, superando objeções por especialidade?"
+**Causa raiz:** na chain `tentar_bypass_deterministico`, C-136 estava posicionado ANTES de `faq_convenio_aceito`. Qualquer mensagem onde perfil era desconhecido (incluindo "Vocês aceitam Amil?") fazia C-136 disparar primeiro.
 
-**Fix C-138 — `voice_agent/fluxo_sem_convenio.py` (NOVO):**
-- `_derivar_especialidade(ctx)` → tag: 'apv', 'estrabismo', 'oftalmopediatria', 'catarata', 'refrativa', 'geral'
-- Benchmarks por especialidade com valores reais (sem "particular"):
-  * Oftalmopediatria: janela crítica 0-7 anos, diagnóstico precoce → R$611/2x R$335
-  * Estrabismo: diagnóstico funcional + visão binocular → R$611/2x R$335
-  * APV/Processamento Visual: protocolo 2-3h único em Brasília → R$800/2x R$435
-  * Catarata: biometria inclusa → R$445/2x R$235
-  * Refrativa/Fabrício 50+: prevenção glaucoma/DM → R$611/2x R$335
-- Escalação 3 níveis Redis TTL 48h: `blink:c138_nivel_sem_convenio:{lead_id}`
-  * Nível 0: benchmark especialidade + parcelamento
-  * Nível 1: fila de encaixe como alternativa
-  * Nível 2: escalada equipe humana
-  * Nível 3+: None → LLM assume
-- Toggle: `FLUXO_SEM_CONVENIO_ATIVADO` (default ON). Fail-open.
-- Wired em `blindagens_deterministicas.py` após `deve_responder_valor`
-- **Pytest:** `tests/test_c138_fluxo_sem_convenio.py` — 47/47 verde.
+**Fix em 3 camadas:**
 
-**Push:** `PUSH_C137_C138_FLUXO_SEM_CONVENIO.command`
+1. **`voice_agent/convenio_primeiro.py` (NOVO):**
+   - `deve_perguntar_convenio_primeiro_c145(ctx, user_text)` → quando convênio desconhecido E texto não menciona nome de plano E não é FAQ de convênio → retorna "a consulta seria pelo seu plano de saúde ou sem convênio? 😊"
+   - Não dispara quando: nome de plano no texto (Amil, Bacen etc.) → `faq_convenio_aceito` trata; FAQ genérico ("vocês aceitam?") → `faq_convenio_aceito` trata; convênio já resolvido; `ja_agendado=True`; anti-loop (última outbound já perguntou).
+   - Toggle: `BLINDAGEM_CONVENIO_PRIMEIRO_C145_ATIVADO` (default ON). Fail-open. `ctx is None` → None.
+
+2. **`voice_agent/pergunta_perfil.py` — guard C-145:**
+   - C-136 retorna None quando `not known["convenio"] AND convenio_aceito is None AND not sem_convenio`.
+   - C-136 só dispara quando convênio já resolvido (aceito OU sem convênio).
+
+3. **`voice_agent/blindagens_deterministicas.py` — nova ordem:**
+   - ANTES: FAQs → C-136 → escolha_convenio → faq_convenio_aceito → ...
+   - DEPOIS: FAQs → escolha_convenio → faq_convenio_aceito → **C-145** → **C-136** → ...
+
+**Fluxo correto após fix:**
+- "Vocês aceitam Amil?" → `faq_convenio_aceito` → recusa imediata ✅
+- "Quero marcar consulta" → C-145 → "plano ou sem convênio?" ✅
+- Paciente: "sem convênio" → C-145 não dispara → C-136 → "bebê, criança...?" ✅
+- Paciente: "Bacen" → `faq_convenio_aceito` → aceito → C-136 → "bebê, criança...?" ✅
+
+**Pytest:** `tests/test_bug_c145_convenio_primeiro.py` — 40/40 verde.
+**Push:** `PUSH_C145_CONVENIO_PRIMEIRO.command`
 
 **Lição arquitetural CRÍTICA:**
-- **Regex PT-BR com cedilha exige `[çc]` em todo par.** `promoc[aã]o` captura "promocao" mas não "promoção" — a cedilha é caractere diferente do c. Regra permanente: ao escrever regex para palavras PT-BR com ç (preço, promoção, soluções, ação), usar `[çc]` em vez de só `c`.
-- **"Desconto" é negociação, não price shock.** Resposta diferente: desconto → "não temos mas temos parcelamento + fila" (2 opções diretas). Price shock → âncora de valor da especialidade primeiro.
-- **Fluxo sem convênio com escalação Redis elimina loop "paciente em hesitação".** Nível 0 entrega benchmark, nível 1 oferece fila, nível 2 escala humano — 3 turnos máximos antes de entregar a humano. Sem loop infinito.
+- **Ordem da chain deterministíca define qual bypass "ganha".** O primeiro bypass que retorna não-None vence. Posicionar C-136 antes de `faq_convenio_aceito` era um bug de ordenação puro — C-136 intercepava qualquer 1ª mensagem antes que `faq_convenio_aceito` tivesse chance de rodar.
+- **Convênio é GATEWAY, não dado de coleta.** Se convênio não for aceito, todo dado coletado antes (perfil, nome, data nasc) foi desperdiçado. Ordem correta: aceita? → SIM: coleta dados → NÃO: informa recusa. C-145 é a norma determinística que garante essa sequência.
+- **Guard em C-136 + reordenação = defesa dupla.** Mesmo que a ordem mude por acidente, o guard em C-136 (`if not convenio resolved → return None`) evita regressão. Dois mecanismos independentes protegem o mesmo invariante.
+- **Rollback:** `BLINDAGEM_CONVENIO_PRIMEIRO_C145_ATIVADO=0` + `PERGUNTA_PERFIL_ATIVADA=0` em Easypanel → Implantar.
 
 ### 0. (12/08/2026) Bug C-128 — Recusa convênio: tom genérico sem nome do paciente, "condições diferenciadas", ordem invertida errada
 

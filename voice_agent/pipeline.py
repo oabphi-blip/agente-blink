@@ -225,6 +225,21 @@ class VoicePipeline:
             except Exception as _e_c102:  # noqa: BLE001
                 log.warning("[C-102] enriquecer_known falhou: %s", _e_c102)
 
+            # Bug C-75 (14/08/2026) — Auto-fill campos Kommo em tempo real.
+            # Assim que classificador_convenio + regex detectam convenio,
+            # motivo, unidade no user_text, grava DIRETO nos campos Kommo.
+            # Não espera Lia terminar toda a coleta.
+            # Caso real: lead 24456884 Beatriz disse "Amil" no 1º turno —
+            # campo Ñ ACEITO CONVENIO ficou vazio até C-75.
+            try:
+                from voice_agent.auto_fill_kommo import auto_fill_campos_detectados as _c75
+                _lid_c75 = caller_context.get("lead_id")
+                _known_c75 = caller_context.get("known") or {}
+                if _lid_c75 and self.kommo is not None and user_text:
+                    _c75(self.kommo, _lid_c75, user_text, _known_c75)
+            except Exception as _e_c75:  # noqa: BLE001
+                log.warning("[C-75] auto_fill falhou: %s", _e_c75)
+
         # 2c) Convivência humano × agente: fica em silêncio se o lead está
         # em cirurgias ou se um humano assumiu o chat há pouco (handoff).
         if self.kommo is not None and caller_context:
@@ -1380,6 +1395,69 @@ class VoicePipeline:
         except Exception as _e_c109_pipe:  # noqa: BLE001
             log.warning("[C-109 PIPELINE] check falhou (fail-open): %s", _e_c109_pipe)
 
+        # 3a-C146 (14/08/2026) — Fora do escopo Python → escalar para 1-ATENDIMENTO HUMANO.
+        # fora_escopo.py gravou flag blink:c146_fora_escopo:{lead_id} (TTL 24h) quando
+        # paciente perguntou sobre reembolso/estorno/devolução (Tier 1) OU
+        # ja_agendado=True + pergunta sem handler Python (Tier 2).
+        # Caso real: lead 24328426 Alice Tavares — "reembolsado" escapou C-129.
+        # Aqui: desativar IA + mover pra 1-ATENDIMENTO HUMANO + nota Kommo.
+        try:
+            _redis_c146_pipe = getattr(self, "_redis", None)
+            _lid_c146 = (
+                caller_context.get("lead_id") if isinstance(caller_context, dict) else None
+            )
+            if _redis_c146_pipe and _lid_c146:
+                _flag_c146 = _redis_c146_pipe.get(f"blink:c146_fora_escopo:{_lid_c146}")
+                if _flag_c146:
+                    log.info(
+                        "[C-146 PIPELINE] fora_escopo lead=%s — "
+                        "desativando IA + movendo pra 1-ATENDIMENTO HUMANO",
+                        _lid_c146,
+                    )
+                    _redis_c146_pipe.delete(f"blink:c146_fora_escopo:{_lid_c146}")
+                    if self.kommo is not None:
+                        _status_c146 = (
+                            caller_context.get("status_id")
+                            if isinstance(caller_context, dict) else None
+                        )
+                        _ETAPAS_FINAIS_C146 = {142, 143, 91486864}
+                        # (1) Desativar IA
+                        try:
+                            self.kommo.update_lead_fields(
+                                _lid_c146, {"ativado_ia": "DESATIVADO"}
+                            )
+                        except Exception as _e_c146_ia:  # noqa: BLE001
+                            log.warning("[C-146] desativar IA falhou: %s", _e_c146_ia)
+                        # (2) Mover pra 1-ATENDIMENTO HUMANO (106563343)
+                        if _status_c146 and _status_c146 not in _ETAPAS_FINAIS_C146:
+                            try:
+                                self.kommo.update_lead_status(_lid_c146, 106563343)
+                                log.info(
+                                    "[C-146] lead %s movido → 1-ATENDIMENTO HUMANO",
+                                    _lid_c146,
+                                )
+                            except Exception as _e_c146_st:  # noqa: BLE001
+                                log.warning(
+                                    "[C-146] mover status falhou lead=%s: %s",
+                                    _lid_c146, _e_c146_st,
+                                )
+                        # (3) Nota Kommo
+                        try:
+                            import datetime as _dt_c146
+                            _nota_c146 = (
+                                f"🚫 [LIA C-146 {_dt_c146.datetime.now().strftime('%H:%M %d/%m')}] "
+                                "Pergunta fora do escopo Python detectada — paciente pode estar "
+                                "pedindo reembolso/estorno/devolução ou tem dúvida administrativa "
+                                "que a IA não tem resposta determinística. "
+                                "IA desativada. Equipe humana responde. "
+                                f"Msg: \"{user_text[:200]}\""
+                            )
+                            self.kommo.add_note(_lid_c146, _nota_c146)
+                        except Exception:  # noqa: BLE001
+                            pass
+        except Exception as _e_c146_pipe:  # noqa: BLE001
+            log.warning("[C-146 PIPELINE] check falhou (fail-open): %s", _e_c146_pipe)
+
         # 3a-C129 (12/08/2026) — Pós-consulta → escalar para 1-ATENDIMENTO HUMANO.
         # pos_consulta.py gravou flag blink:c129_pos_consulta:{lead_id} (TTL 24h)
         # quando paciente pediu recibo/reembolso/laudo/etc OU a_fazer_pos_consulta=True.
@@ -2095,20 +2173,24 @@ class VoicePipeline:
                     self._redis.setex(cache_key, 86400, str(lead_id))
                 except Exception as e:  # noqa: BLE001
                     log.debug("[KOMMO SYNC] cache write falhou: %s", e)
-            # Nota da conversa — grava AMBOS os lados (paciente + Lia).
+            # Nota da conversa — grava só a Lia (paciente já aparece no
+            # histórico WhatsApp nativo + TODA CONVERSA acumula tudo).
             #
             # Histórico de mudanças:
-            # 01/06/2026 17:39 (Fábio): removida gravação INBOUND, "chat
-            #   nativo já mostra a msg". Feed ficou "limpo" mas contexto
-            #   quebrou pra visibilidade humana E pra debug de sessões
-            #   quebradas (ver bug 12/07 lead 24290902: caiu em fallback
-            #   "instabilidade" e não dava pra saber o que o paciente
-            #   respondeu). Task #154, #264, #378.
-            # 12/07/2026 (Fábio): reverter. Voltar a gravar INBOUND.
-            #   "Este é um retrocesso. Estava funcionando."
+            # 01/06/2026 17:39 (Fábio): removida gravação INBOUND.
+            # 12/07/2026 (Fábio): reverter — na época não existia
+            #   TODA CONVERSA (campo 1261206) e o debug ficou cego.
+            # 14/08/2026 (Fábio, Bug C-74, lead 24456884): remover
+            #   DE NOVO. Agora TODA CONVERSA já acumula formato
+            #   [P HH:MM DD/MM] + [L HH:MM DD/MM] via C-144 em
+            #   _sync_kommo_safely. Grava a inbound aqui = feed
+            #   duplicado (histórico + nota + TODA CONVERSA = 3x).
             #
-            # Inbound do paciente (grava ANTES da Lia pra ordem cronológica correta)
-            if user_text:
+            # Bug C-74: gravação inbound REMOVIDA. Se algum dia o
+            # debug ficar cego de novo, ligar env
+            # NOTA_INBOUND_ATIVADA=1 (toggle abaixo).
+            import os as _os_c74
+            if user_text and (_os_c74.environ.get("NOTA_INBOUND_ATIVADA") or "0").lower() in ("1", "true", "yes", "on"):
                 nota_in = f"💬 Paciente (WhatsApp):\n{user_text.strip()}"
                 try:
                     self.kommo.add_note(lead_id, nota_in)
