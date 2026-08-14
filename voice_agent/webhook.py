@@ -533,6 +533,23 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             except Exception as e:  # noqa: BLE001
                 log.warning("Kommo auto-fill (/kommo) falhou: %s", e)
 
+        # C-144 (14/08/2026) — Gravar TODA CONVERSA no caminho Salesbot/Kommo.
+        # _process_kommo NÃO chama _sync_kommo_safely, então precisa de write
+        # próprio. caller_context já foi lido no topo da função.
+        if pipeline.kommo is not None and lead_id and (message or answer):
+            try:
+                from voice_agent.toda_conversa import (
+                    appender_turno as _tc_appender,
+                    gravar_toda_conversa as _tc_gravar,
+                )
+                _tc_atual = ""
+                if isinstance(caller_context, dict):
+                    _tc_atual = caller_context.get("toda_conversa") or ""
+                _tc_novo = _tc_appender(_tc_atual, message or "", answer or "")
+                _tc_gravar(pipeline.kommo, int(lead_id), _tc_novo)
+            except Exception as _tc_exc:  # noqa: BLE001
+                log.warning("[C-144/kommo] write toda_conversa falhou lead=%s: %s", lead_id, _tc_exc)
+
     @app.post("/kommo")
     async def kommo_webhook(request: Request) -> JSONResponse:
         # Lê o corpo CRU e loga sempre — precisamos ver exatamente o que o

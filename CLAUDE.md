@@ -213,6 +213,120 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (14/08/2026) Bug C-144 — TODA CONVERSA não gravada no canal WA Cloud (8133) — Lia cega e repetindo perguntas
+
+**Origem:** leads 24456556 e 24456706 — paciente disse "8 anos e 5 anos" → Lia confirmou → próximo turno perguntou de novo "consulta é para bebê, criança, adolescente ou adulto?" Campo TODA CONVERSA (1261206) permanecia vazio para leads do canal WA Cloud (8133).
+
+**Causa raiz:** O bloco de gravação de TODA CONVERSA (C-133) estava em `pipeline.run()`. Mas mensagens do canal WA Cloud (8133) passam por `_process_whatsapp_cloud → responder.reply()` diretamente, **sem chamar `pipeline.run()`**. Resultado: campo 1261206 nunca era escrito para leads 8133 → Lia não tinha memória do turno anterior → repetia perguntas já respondidas.
+
+**Os 3 caminhos de webhook:**
+- Evolution (0710): `pipeline.run()` → C-133 escrevia TODA CONVERSA ✅
+- WA Cloud (8133): `_process_whatsapp_cloud` → `responder.reply()` → ❌ NUNCA passava por `pipeline.run()`
+- Salesbot/Kommo: `_process_kommo` → ❌ não chamava nem `pipeline.run()` nem `_sync_kommo_safely`
+
+**Fix em 3 partes:**
+
+1. **`pipeline.py`**: Removeu bloco C-133 ativo de `pipeline.run()` (evita double-write para Evolution). Substituiu por comentário explicativo. Adicionou bloco C-144 dentro de `_sync_kommo_safely` — cobrindo tanto Evolution quanto WA Cloud, pois ambos chamam `_sync_kommo_safely` em background thread.
+
+2. **`_sync_kommo_safely`**: Usa `ctx["toda_conversa"]` lido do Kommo nesta própria função (estado mais fresco), não o snapshot estale do início do turno.
+
+3. **`webhook.py` (`_process_kommo`)**: Adicionou write direto de TODA CONVERSA após o bloco de auto-fill existente, cobrindo o caminho Salesbot que não chama `_sync_kommo_safely`.
+
+**Pytest:** `tests/test_bug_c144_toda_conversa_wa_cloud.py` — 16/16 verde.
+**Push:** `PUSH_C144_TODA_CONVERSA_WA_CLOUD.command`
+
+**Lição arquitetural CRÍTICA:**
+- **Múltiplos caminhos de webhook = múltiplos locais que precisam de cada write crítico.** Adicionar escrita em apenas UM caminho deixa os outros cegos. Regra permanente: ao centralizar qualquer lógica de escrita/read Kommo, verificar via `grep` se todos os 3 caminhos (Evolution, WA Cloud, Salesbot) chamam o código novo.
+- **`_sync_kommo_safely` é o único ponto compartilhado entre Evolution e WA Cloud.** É o lugar canônico para qualquer operação que deve rodar em todos os turnos, independente do canal.
+- **Campo write-only sem read-back = Lia cega.** TODA CONVERSA que não é lida de volta em `get_caller_context_by_lead` é como escrever num papel que ninguém vai ler. A leitura (C-143) sem a escrita completa (C-144) não resolve nada.
+
+### 0. (14/08/2026) Bug C-143 — Campo ULTIMA MSG OUTBOUND excluído: TODA CONVERSA como fonte única
+
+**Origem:** Fábio excluiu o campo 1260856 (ULTIMA MSG OUTBOUND) do Kommo — "não estava adiantando de nada". Substituído pelo campo 1261206 (TODA CONVERSA), que acumula todo o histórico no formato `[P HH:MM DD/MM] paciente\n[L HH:MM DD/MM] lia`.
+
+**3 mudanças arquiteturais aplicadas:**
+
+1. **`campos_acompanhamento.py`**: `FIELD_ULTIMA_MSG_OUTBOUND = 0` (sentinela). Guard em `update_lead_fields` ignora field_id=0 silenciosamente. Imports antigos não quebram.
+
+2. **`kommo.py::get_caller_context_by_lead`**: ao ler TODA CONVERSA (fid==1261206), extrai a última linha `[L ...]` → popula `ctx.known["ultima_msg_outbound"]`. Resolve C-139 definitivamente **sem Redis** — todo módulo que ler `ctx.known["ultima_msg_outbound"]` vê dados reais da leitura do Kommo.
+
+3. **`watchdog_promessa.py`**: nova constante `FIELD_TODA_CONVERSA = 1261206` + helper `_extrair_ultima_lia_de_toda_conversa(lead)` + `avaliar_lead` usa o helper.
+
+**Efeito cascata em C-139:** com `ultima_msg_outbound` agora populado por leitura real do Kommo, `_repete_ultima_outbound` (C-127) e `_inbound_responde_ultima_pergunta_c130` (C-130) passam a funcionar sem depender de Redis como workaround. C-139a/b continuam ativos como defesa extra.
+
+**Pytest:** `tests/test_bug_c143_toda_conversa_fonte_unica.py` — 17/17 verde. Watchdog: 41/41. C-141/C-142/C-133: 26/26.
+**Push:** `PUSH_C143_TODA_CONVERSA_FONTE_UNICA.command`
+
+**Lição arquitetural CRÍTICA:**
+- **Campo Kommo excluído sem aviso = bug silencioso imediato.** Toda dependência em field_id hardcoded é ponto frágil. Fix: sentinela 0 + migrar lógica pra campo ativo imediatamente.
+- **TODA CONVERSA como fonte de verdade é mais robusta que campo isolado.** Um único campo acumula o contexto completo; extrair a última linha `[L ...]` é determinístico e sem efeitos colaterais.
+- **Watchdog que lia campo deletado retornava `tratar=False` para TODOS os leads** — promessas não cumpridas ficaram invisíveis até o fix. Padrão permanente: quando um campo é excluído, auditar imediatamente todos os consumidores via `grep -r "field_id.*1260856"`.
+
+### 0. (14/08/2026) Bug C-139 — Loop "Qual o nome completo do paciente?" 6x + valor "tá custando" ignorado
+
+**Origem:** lead 24455626 Heytor Rodrigues de Godoi (Iporã/GO — geograficamente incompatível, ~400km de Brasília). "Quanto que tá custando o exame de vista em criança" não casava em `_PADROES_PERGUNTA_VALOR` → fall-through para C-125 → C-125 perguntou "Qual o nome completo do paciente?" 6x consecutivas sem parar.
+
+**Causa raiz arquitetural PERMANENTE (não resolvida completamente):**
+Campo Kommo **1260856 (ULTIMA MSG OUTBOUND)** é ESCRITO pelo pipeline a cada turno (visibilidade para equipe humana), mas **NÃO É LIDO DE VOLTA** durante o build do `caller_context`. `ctx.known["ultima_msg_outbound"]` fica sempre vazio. Resultado: todos os mecanismos que dependem do campo ficam cegos:
+- `_repete_ultima_outbound` → sempre `False` → C-125 nunca suprime duplicata
+- `_inbound_responde_ultima_pergunta_c130` → `if not ultima: return False` → C-130 nunca suprime C-125
+
+**Fix C-139 em 3 camadas (`blindagens_deterministicas.py`):**
+
+1. **C-139a — Contador Redis anti-loop:** `blink:c139_count:{lead_id}:{campo}` (TTL 10min). Após >2 asks do mesmo campo → `return None` → fall-through ao LLM. Também escreve `blink:c125_asked:{lead_id}` = nome do campo.
+
+2. **C-139b — Fallback Redis em C-130:** quando `ultima_msg_outbound` está vazio, C-130 lê `blink:c125_asked:{lead_id}` (escrito por C-139a) para determinar qual campo foi perguntado. Cobre: nome (≥2 palavras alfa, sem `?`) / data_nasc / cpf / convenio. Fail-open: Redis indisponível → `return False`.
+
+3. **C-139c — "tá custando" em `_PADROES_PERGUNTA_VALOR`:** 4 padrões novos — `tá custando`, `está custando`, `quanto que tá/está`, `custando` standalone.
+
+**Fix definitivo pendente:** ler `field_id=1260856` em `kommo.py::get_caller_context_by_lead` e popular `ctx.known["ultima_msg_outbound"]`. C-139a/b são workaround Redis fail-open enquanto isso não é implementado.
+
+**Pytest:** `tests/test_bug_c139_loop_nome_valor.py` — 36/36 verde. Push: `PUSH_C139_LOOP_NOME_VALOR.command`.
+
+**Rollback:** `BLINDAGEM_DADOS_PENDENTES_ATIVADO=0` → desliga C-139a + C-125 inteiro.
+
+**Lição arquitetural CRÍTICA:**
+- **Campo Kommo WRITE-ONLY desde a perspectiva do pipeline.** Qualquer campo que o pipeline escreve mas não lê de volta é uma armadilha silenciosa. Regra permanente: **todo campo Kommo escrito pelo pipeline DEVE ser lido de volta em `get_caller_context_by_lead`**. Não há garantia de que `ctx.known["X"]` corresponde ao campo K no Kommo se nenhum código faz esse mapeamento na leitura.
+- **Regex PT-BR coloquial tem formas contraídas.** "tá" = "está" em WhatsApp informal. Todo padrão que detecta um verbo conjugado deve incluir a contração coloquial: `est[aá]` cobre "está" e "esta" mas não "tá". Usar `(?:est[aá]|t[aá])` ou padrão standalone `\bt[aá]\b`.
+- **Contador Redis por (lead, campo) é defesa arquitetural contra qualquer loop de formulário.** Não depende do texto da última mensagem — depende apenas de quantas vezes o campo X foi perguntado para o lead Y. Funciona mesmo com `ultima_msg_outbound` vazio.
+
+### 0. (14/08/2026) Bug C-137 + C-138 — "desconto" causava stall + fluxo sem convênio 100% Python
+
+**C-137 — Origem:** lead 24328426 Alice Tavares perguntou "Queria saber se teria algum desconto nesta consulta". Agente respondeu 4x com stall "Anotado. Vou verificar os próximos horários disponíveis..." porque "desconto" não casava em `_RE_OBJECAO`. Paciente saiu sem resposta.
+
+**Fix C-137 em `voice_agent/objecao_preco.py`:**
+- 6 padrões adicionados em `_RE_OBJECAO`: `descontos?`, `promo[çc][aã]o`, `pre[çc]o\s+(?:mais\s+)?especial`, `valor\s+especial`, `tem?\s+algum\s+desconto`, `(?:consegue|d[aá])\s+(?:um\s+)?desconto`
+- `_RE_DESCONTO_ESPECIFICO` — detector interno pra routing diferente de "está caro"
+- `_montar_resposta_desconto(nome, parcela_2)` — tom amigável, sem âncora de valor, 2 opções diretas (parcelamento + fila encaixe). Desconto ≠ price shock — resposta é mais curta e positiva
+- **Fix crítico regex:** `promoc[aã]o` → `promo[çc][aã]o` (ç ≠ c em "promoção"). Sempre usar `[çc]` em regex PT-BR para palavras com cedilha.
+- **Pytest:** `tests/test_bug_c137_desconto.py` — 28/28 verde.
+
+**C-138 — Origem:** Fábio: "Como ter diálogo 100% Python para sem convênio, superando objeções por especialidade?"
+
+**Fix C-138 — `voice_agent/fluxo_sem_convenio.py` (NOVO):**
+- `_derivar_especialidade(ctx)` → tag: 'apv', 'estrabismo', 'oftalmopediatria', 'catarata', 'refrativa', 'geral'
+- Benchmarks por especialidade com valores reais (sem "particular"):
+  * Oftalmopediatria: janela crítica 0-7 anos, diagnóstico precoce → R$611/2x R$335
+  * Estrabismo: diagnóstico funcional + visão binocular → R$611/2x R$335
+  * APV/Processamento Visual: protocolo 2-3h único em Brasília → R$800/2x R$435
+  * Catarata: biometria inclusa → R$445/2x R$235
+  * Refrativa/Fabrício 50+: prevenção glaucoma/DM → R$611/2x R$335
+- Escalação 3 níveis Redis TTL 48h: `blink:c138_nivel_sem_convenio:{lead_id}`
+  * Nível 0: benchmark especialidade + parcelamento
+  * Nível 1: fila de encaixe como alternativa
+  * Nível 2: escalada equipe humana
+  * Nível 3+: None → LLM assume
+- Toggle: `FLUXO_SEM_CONVENIO_ATIVADO` (default ON). Fail-open.
+- Wired em `blindagens_deterministicas.py` após `deve_responder_valor`
+- **Pytest:** `tests/test_c138_fluxo_sem_convenio.py` — 47/47 verde.
+
+**Push:** `PUSH_C137_C138_FLUXO_SEM_CONVENIO.command`
+
+**Lição arquitetural CRÍTICA:**
+- **Regex PT-BR com cedilha exige `[çc]` em todo par.** `promoc[aã]o` captura "promocao" mas não "promoção" — a cedilha é caractere diferente do c. Regra permanente: ao escrever regex para palavras PT-BR com ç (preço, promoção, soluções, ação), usar `[çc]` em vez de só `c`.
+- **"Desconto" é negociação, não price shock.** Resposta diferente: desconto → "não temos mas temos parcelamento + fila" (2 opções diretas). Price shock → âncora de valor da especialidade primeiro.
+- **Fluxo sem convênio com escalação Redis elimina loop "paciente em hesitação".** Nível 0 entrega benchmark, nível 1 oferece fila, nível 2 escala humano — 3 turnos máximos antes de entregar a humano. Sem loop infinito.
+
 ### 0. (12/08/2026) Bug C-128 — Recusa convênio: tom genérico sem nome do paciente, "condições diferenciadas", ordem invertida errada
 
 **Origem:** lead 24446300 (Juliene = contato/mãe, Daniel = paciente, Amil = convênio não aceito). `_montar_recusa_convenio` gerava mensagem genérica sem personalização — não abria com nome do contato, não citava o paciente pelo nome, usava "condições diferenciadas" em vez de "incentivos especiais", e colocava opção de conversão (seguir sem convênio) em segundo lugar.
@@ -322,35 +436,6 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 - **Personalização por perfil é esperada pelo usuário.** "Qual o nome completo do paciente?" é frio. "Qual o nome completo do bebê?" é natural. O contexto (bebê/criança/adulto) já está no `user_text` — extrair e usar é zero custo extra.
 - **Nunca perguntar médico via Python.** C-101 deriva médico por idade/motivo. Se C-125 perguntasse "Dra. Karla ou Dr. Fabrício?", conflitaria com C-101. Regra: se só médico está pendente → None → LLM (ou C-101 derivou e não propagou ainda).
 
-### 0. (11/08/2026) Bug C-124 — Stall "Vou verificar os próximos horários" em loop (lead 20734711 Samuel)
-
-**Origem:** lead 20734711 Samuel Rosario Vargas. Paciente deu preferência de turno → C-51.3 interceptou resposta LLM (que incluía slots + valor juntos) → fallback `_gerar_proxima_pergunta_sem_convenio()` emitia "Anotado. Vou verificar os próximos horários disponíveis e apresento opções" mesmo com `ctx.agenda` tendo slots reais → stall repetia em todo turno (loop infinito).
-
-**Causa raiz dupla:**
-
-1. **`_gerar_proxima_pergunta_sem_convenio` não consultava `ctx.agenda`** — retornava stall mesmo quando Medware já tinha respondido com slots reais. O fallback de C-51 nunca deveria gerar promessa de busca quando já tem agenda no ctx.
-
-2. **`deve_ofertar_agora()` exigia FSM=AGENDA estritamente** — Samuel é paciente retorno, FSM preso em `POS_GRAVACAO` de consulta anterior (Julho 2025). `deve_ofertar_agora()` retornava False → LLM processava → C-51.3 interceptava → fallback gerava stall → loop.
-
-**Fix em 2 arquivos (3 mudanças — commit C-124):**
-
-1. **`voice_agent/responder.py` — Fix 1:** `_gerar_proxima_pergunta_sem_convenio(ctx)`: quando `ctx["agenda"]` tem slots → chama `_gerar_oferta_2_slots(ctx)` em vez de emitir stall. Comentário explícito do caso real Samuel.
-
-2. **`voice_agent/responder.py` — Fix 2:** `_FAKE_AGENDA_LOOKUP` ganha 2 novos padrões:
-   - `vou verificar os pr[oó]ximos hor[aá]rios dispon[ií]veis`
-   - `j[aá] te apresento as op[çc][õo]es`
-   C-30 intercepta o stall quando ctx tem agenda (rede de segurança pra Fix 1).
-
-3. **`voice_agent/oferta_deterministica.py` — Fix 3:** `deve_ofertar_agora()` ganha bypass FSM para pacientes retorno. Critérios seguros: NOT `ja_agendado` + medico + unidade + `dados_minimos.pronto_para_oferecer_slot` + `ctx.agenda` + `(day_pref OR turno OR intent_agendar OR slots_selecionados)`. Sem FSM=AGENDA estrito quando todos esses gates passam.
-
-**Pytest:** `tests/test_bug_c124_stall_vou_verificar.py` — 24/24 verde. Bônus: 7 falhas pré-existentes em `test_anti_hesitacao_agenda_c30.py` corrigidas (asserção `"2 horários"` desatualizada pra `"esses horários disponíveis"`). Total: 39/39.
-
-**Rollback:** `AGENDA_DETERMINISTICA=0` em Easypanel → Implantar (desliga `deve_ofertar_agora` inteiro).
-
-**Lição arquitetural CRÍTICA:**
-- **Fallback de filtro determinístico NÃO pode emitir stall quando o próprio ctx contradiz o stall.** `_gerar_proxima_pergunta_sem_convenio` está no fallback de C-51 (que intercepta quando LLM despejou valor). Quando ctx.agenda está preenchido, o stall é mentira — Medware JÁ respondeu. Fix correto: verificar `ctx.agenda` ANTES de gerar qualquer promessa de busca futura.
-- **FSM "preso" é estado real de retorno — não é bug.** Lead de segunda consulta mantém FSM do atendimento anterior (POS_GRAVACAO, AGENDADO, etc.). `deve_ofertar_agora()` precisava de bypass seguro usando dados objetivos (agenda + intenção + checklist) em vez de depender exclusivamente do estado FSM.
-- **Dois fixes + rede de segurança é o padrão correto.** Fix 1 (fonte) + Fix 3 (gate) resolvem o loop. Fix 2 (C-30 intercept) é rede de segurança caso algum caminho novo gere o stall no futuro. Três layers = garantia.
 
 ### 0. (11/08/2026) Bug C-123 — Convênio não aceito: tom seco + "particular" + valor prematuro + Kommo não atualizado
 
@@ -376,56 +461,6 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 - **"Processo de credenciamento" vs "não credenciado" é diferença de relacionamento.** "Não credenciado" fecha a porta; "em processo" mantém o lead ativo e ainda pode converter.
 - **Bypass de resposta a oferta SEMPRE antes do bypass de FAQ.** Paciente respondendo "2" a uma oferta apresentada ≠ fazendo pergunta nova. Gate `_ultima_msg_era_recusa_convenio` é o discriminador correto.
 - **Rollback:** `BLINDAGEM_ESCOLHA_CONVENIO_ATIVADO=0` em Easypanel → Implantar.
-
-### 0. (11/08/2026) Bug C-122 — Paciente esquecia de enviar comprovante Pix pós-C-114: slot ficava em limbo sem lembrete
-
-**Origem:** auditoria arquitetural (sessão 11/08/2026). Paciente escolhia "reserva garantida" (C-114) → pipeline gravava `blink:c114_aguardando_comprovante:{lead_id}` (TTL 7d). Mas se paciente esquecia de enviar o comprovante, o slot ficava reservado indefinidamente sem confirmação financeira e sem nenhuma comunicação. Médica tinha slot bloqueado por reserva sem sinal confirmado.
-
-**Decisão arquitetural (P0):** comprovante pendente >2h é fato objetivo calculável via TTL Redis — Python detecta e envia lembrete automático, sem LLM.
-
-**2 arquivos criados/modificados (11/08/2026):**
-
-1. **`voice_agent/watchdog_comprovante.py` (NOVO):**
-   - `_varrer_leads_pendentes(redis_client)` — scan `blink:c114_aguardando_comprovante:*`, pula se `blink:c116_comprovante_detectado` ativo, calcula `elapsed = TTL_7d - ttl_residual`
-   - `_montar_msg_lembrete(nome)` — texto com primeiro nome ou fallback genérico
-   - `tick(kommo, wa_cloud, redis, dry_run, max_leads, limiar_seg=7200)` — para cada candidato: dedup `blink:c122_lembrete_enviado` (TTL 7d) → busca telefone/nome → `wa_cloud.send_text()` → `setex` dedup → nota Kommo com wamid
-   - Toggle: `WATCHDOG_COMPROVANTE_ENABLED` (default OFF). Fail-open.
-
-2. **`voice_agent/webhook.py`:** endpoint `GET/POST /admin/watchdog-comprovante-tick` + cron interno daemon thread a cada `CRON_WATCHDOG_COMPROVANTE_SEG` (default 3600) quando toggle ON.
-
-**Pytest:** `tests/test_bug_c122_watchdog_comprovante.py` — 25/25 verde.
-
-**Lição arquitetural CRÍTICA:**
-- **TTL residual como proxy de tempo decorrido.** `elapsed = TTL_total - ttl_residual` é elegante: reutiliza o flag existente do C-114 sem escrever timestamp separado. Funciona enquanto TTL inicial é constante e conhecido.
-- **Dedup em `tick()`, não em `_varrer()`.** C-116 (comprovante detectado) pertence ao filtro de varredura — lead não é candidato. C-122 (lembrete já enviado) pertence ao loop do tick — lead é candidato mas já foi tratado. Mesclar os dois em `_varrer` quebra o contador `ja_dedup`.
-- **`wa_cloud` acessível via closure em `create_app()`** — não precisa ser atributo do objeto `pipeline`. Pattern replicável para qualquer novo watchdog que precise enviar WhatsApp.
-- **Rollback:** `WATCHDOG_COMPROVANTE_ENABLED=0` em Easypanel → Implantar.
-
-### 0. (11/08/2026) Bug C-117 — Cancelamento < 24h: LLM não informava política de sinal não devolvido
-
-**Origem:** auditoria arquitetural (sessão 11/08/2026). Paciente com sinal Pix pago cancelava < 24h antes da consulta — Lia tratava como cancelamento normal, sem informar que o sinal 50% não seria devolvido. Resultado: paciente ficava surpreso na hora, gerava atrito e reclamação.
-
-**Decisão arquitetural (P0):** Cancelamento < 24h com sinal é fato objetivo com horário calculável — Python detecta e entrega mensagem canônica ANTES do LLM.
-
-**2 arquivos criados/modificados (11/08/2026):**
-
-1. **`voice_agent/cancelamento_24h.py` (NOVO):**
-   - `deve_informar_politica_cancelamento_24h(ctx, user_text)` — 13+ padrões PT-BR: "quero cancelar", "preciso desmarcar", "não vou poder ir", etc. Falsos positivos guardados: "não quero cancelar", "confirmo".
-   - Calcula delta `datetime.now(BRT) → dia_consulta_iso`. Gate: delta < 24h.
-   - Com sinal (`sinal_pago=True`): mensagem informando política 50% + abre para remarcação.
-   - Sem sinal: mensagem suave de reagendamento (sem mencionar sinal).
-   - Consulta já passada: mensagem pós-consulta diferente.
-   - Delta ≥ 24h → None (cancelamento normal, LLM trata).
-   - Toggle: `CANCELAMENTO_24H_ATIVADO` (default ON); fail-open: exceção/ISO inválido → None.
-
-2. **`voice_agent/blindagens_deterministicas.py`:** bypass C-117 PRIMEIRO na chain, ANTES de C-108 (desistência) — cancelamento específico tem prioridade.
-
-**Pytest:** `tests/test_bug_c117_cancelamento_24h.py` — 45/45 verde.
-
-**Lição arquitetural CRÍTICA:**
-- **Delta de horas é cálculo Python — não opinião do LLM.** `datetime.now(BRT) - dia_consulta_iso` é determinístico. LLM não sabe o horário exato da consulta; Python sabe.
-- **Política sem sinal ≠ política com sinal.** Mensagem para quem pagou sinal precisa informar a regra (transparência + expectativa correta). Mensagem para quem não pagou não menciona sinal — não ameaça sem razão.
-- **Rollback:** `CANCELAMENTO_24H_ATIVADO=0` em Easypanel → Implantar.
 
 ### 0. (11/08/2026) Bug C-116 — Comprovante Pix enviado: Lia ficava em silêncio (imagem não detectada)
 
@@ -513,7 +548,7 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 1. **`voice_agent/sinal_noshow.py` (NOVO):**
    - `deve_exigir_sinal_noshow(ctx, user_text, redis_client)` — dispara quando `sinal_obrigatorio=True` E há agenda OU aceite no texto
-   - Chaves Pix por unidade: Asa Norte → `karladelaliberaoftalmo@gmail.com`; Águas Claras → `52.303.729/0001-30`
+   - Chaves Pix por unidade: Asa Norte → `28.655.944/0001-16`; Águas Claras → `52.303.729/0001-30`
    - Valor sinal por médico/motivo: Karla APV → R$ 400; Karla rotina → R$ 305,50; Fabrício catarata → R$ 222,50
    - noshow=2 → `_mensagem_sinal_obrigatorio` (Pix + reserva 50%)
    - noshow≥3 → `_mensagem_escalar_noshow` + grava `blink:c109_move_humano:{lead_id}` (TTL 24h)
@@ -1787,7 +1822,7 @@ Campos sinal (em criação, task #49):
 
 ## 6. Chaves Pix oficiais (allowlist — qualquer outra é alucinação)
 
-- **Asa Norte**: `karladelaliberaoftalmo@gmail.com` (e-mail)
+- **Asa Norte**: `28.655.944/0001-16` (CNPJ)
 - **Águas Claras**: `52.303.729/0001-30` (CNPJ)
 
 Filtro pós-geração em `responder.py` bloqueia qualquer chave fora dessa lista.

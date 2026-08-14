@@ -1977,36 +1977,10 @@ class VoicePipeline:
                 daemon=True,
             ).start()
 
-        # C-133 (13/08/2026 fix 14/08) — Gravar TODA CONVERSA em background.
-        # Após enviar resposta, appenda o par [P][L] ao campo TODA CONVERSA
-        # do Kommo (field_id 1261206). Próximo turno lê o campo → extrai
-        # nome/data/CPF → não pergunta de novo.
-        # Roda em thread separada (não bloqueia WhatsApp). Fail-open.
-        # Fix C-133 (14/08/2026): usa patch_textarea_field (sem validação GET)
-        # para evitar falso C-12 em campos textarea novos.
-        if self.kommo is not None and caller_context:
-            try:
-                from voice_agent.toda_conversa import appender_turno as _tc_appender
-                from voice_agent.toda_conversa import gravar_toda_conversa as _tc_gravar
-                _tc_lead_id = caller_context.get("lead_id")
-                if _tc_lead_id:
-                    _tc_texto_atual = caller_context.get("toda_conversa") or ""
-                    _tc_novo = _tc_appender(_tc_texto_atual, user_text or "", answer or "")
-                    log.debug(
-                        "[C-133] enfileirando TODA CONVERSA lead=%s (%d chars)",
-                        _tc_lead_id, len(_tc_novo),
-                    )
-                    threading.Thread(
-                        target=_tc_gravar,
-                        args=(self.kommo, _tc_lead_id, _tc_novo),
-                        daemon=True,
-                    ).start()
-                else:
-                    log.warning(
-                        "[C-133] lead_id ausente no caller_context — TODA CONVERSA NÃO gravada"
-                    )
-            except Exception as _tc_exc:
-                log.warning("[C-133] write toda_conversa falhou: %s", _tc_exc)
+        # C-133/C-144 — TODA CONVERSA é gravada dentro de _sync_kommo_safely
+        # (chamado na thread acima). Movido de cá para lá em 14/08/2026 (C-144)
+        # para cobrir também o canal WA Cloud (8133), que vai direto por
+        # _process_whatsapp_cloud → _sync_kommo_safely sem passar por pipeline.run().
 
         return PipelineResult(
             transcript=user_text, answer=answer, sent=True,
@@ -2155,6 +2129,30 @@ class VoicePipeline:
             except Exception as e:  # noqa: BLE001
                 log.warning("Kommo ctx falhou (%s): %s", phone, e)
                 ctx = {}
+
+            # C-144 (14/08/2026) — Gravar TODA CONVERSA aqui, usando ctx recém-lido
+            # do Kommo (estado mais atual, não o snapshot do início do turno).
+            # Centralizado em _sync_kommo_safely para cobrir TODOS os caminhos:
+            #   • Evolution → pipeline.run() → _sync_kommo_safely (esta função)
+            #   • WA Cloud  → _process_whatsapp_cloud → _sync_kommo_safely
+            # Lógica: ctx['toda_conversa'] = texto acumulado até o turno anterior;
+            # appender_turno adiciona [P HH:MM DD/MM] + [L HH:MM DD/MM] deste turno.
+            if user_text or answer:
+                try:
+                    from voice_agent.toda_conversa import (
+                        appender_turno as _tc_appender,
+                        gravar_toda_conversa as _tc_gravar,
+                    )
+                    _tc_atual = (ctx.get("toda_conversa") or "") if isinstance(ctx, dict) else ""
+                    _tc_novo = _tc_appender(_tc_atual, user_text or "", answer or "")
+                    _tc_ok = _tc_gravar(self.kommo, lead_id, _tc_novo)
+                    log.debug(
+                        "[C-144] TODA CONVERSA lead=%s ok=%s (%d chars)",
+                        lead_id, _tc_ok, len(_tc_novo),
+                    )
+                except Exception as _tc_exc:  # noqa: BLE001
+                    log.warning("[C-144] write toda_conversa falhou lead=%s: %s", lead_id, _tc_exc)
+
             # Campos extraídos da conversa.
             fields = self.responder.extract_lead_fields(conversation_key) or {}
 
