@@ -2214,6 +2214,22 @@ def tentar_bypass_deterministico(
         if t and not _repete_ultima_outbound(t):
             return ("faq_especialidade", t)
 
+        # C-136 (14/08/2026): Pergunta de perfil do paciente — "bebê, criança,
+        # adolescente ou adulto?" em vez de "para você ou para outra pessoa?".
+        # Fabio (14/08/2026): a faixa etária é o dado crítico — deriva médico,
+        # protocolo de retorno e agrupador de exames automaticamente.
+        # Dispara quando ctx.known não tem perfil nem médico definido E o
+        # inbound não trouxe pista de faixa etária. Vem DEPOIS de FAQ especialidade
+        # (paciente que perguntou sobre serviço não precisa de pergunta de perfil)
+        # e ANTES de convênio (perfil desbloqueia a triagem completa).
+        try:
+            from voice_agent.pergunta_perfil import deve_perguntar_perfil as _c136
+            t = _c136(ctx, user_text)
+            if t and not _repete_ultima_outbound(t):
+                return ("pergunta_perfil_c136", t)
+        except Exception as _e136:
+            log.warning("[C-136] bypass pergunta_perfil falhou: %s", _e136)
+
         # Bug C-123 (11/08/2026): Escolha pós-recusa de convênio.
         # Se o último outbound da Lia apresentou "1️⃣ Somente com Convênio /
         # 2️⃣ Seguir Sem Convênio", detecta a escolha do paciente e injeta
