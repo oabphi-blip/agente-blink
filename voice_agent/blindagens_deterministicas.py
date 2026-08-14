@@ -1579,6 +1579,12 @@ _RE_ULTIMA_PERGUNTOU_CONV_C130 = re.compile(
 )
 
 
+_RE_IMAGEM_SINTETICA_C134 = re.compile(
+    r"\[O paciente enviou uma imagem",
+    re.IGNORECASE,
+)
+
+
 def _inbound_responde_ultima_pergunta_c130(ctx: Optional[dict], user_text: str) -> bool:
     """True quando o inbound parece ser resposta à última pergunta de dado do C-125.
 
@@ -1589,12 +1595,25 @@ def _inbound_responde_ultima_pergunta_c130(ctx: Optional[dict], user_text: str) 
     - CPF pedido + inbound tem 11 dígitos
     - nome completo pedido + inbound parece nome curto (sem interrogação, sem data)
     - convênio pedido + inbound tem sim/não/nome de convênio
+    - Bug C-134 (13/08/2026): paciente enviou IMAGEM → não repetir pergunta de texto
+      LLM reconhece a imagem e decide o próximo passo sem re-perguntar o mesmo dado.
     """
-    ultima = ((ctx or {}).get("known") or {}).get("ultima_msg_outbound") or ""
-    if not ultima:
-        return False
     ut = user_text.strip()
     if not ut:
+        return False
+
+    # C-134 (13/08/2026): imagem sintética — nunca perguntar dado de texto de novo.
+    # Verificado ANTES do guard `ultima` porque imagem deve suprimir C-125 mesmo
+    # que ultima_msg_outbound ainda não tenha sido gravada no Redis/Kommo
+    # (race condition: webhook chega antes do PATCH Kommo terminar).
+    # Caso real: lead 21933605 Giovana — paciente enviou carteirinha 3x, Lia
+    # repetiu "Qual a data de nascimento de Giovana?" a cada imagem.
+    if _RE_IMAGEM_SINTETICA_C134.search(ut):
+        log.debug("[C-134] inbound=imagem sintética → suprime C-125, LLM trata")
+        return True
+
+    ultima = ((ctx or {}).get("known") or {}).get("ultima_msg_outbound") or ""
+    if not ultima:
         return False
 
     # Data de nascimento pedida → inbound parece data (tolera typos como "012")
