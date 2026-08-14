@@ -19,6 +19,7 @@ from voice_agent.watchdog_promessa import (
     tratar_lead,
     tick,
     FIELD_ULTIMA_MSG_OUTBOUND,
+    FIELD_TODA_CONVERSA,
     FIELD_ULTIMA_MENS_LIA,
     STATUS_ATENDIMENTO_HUMANO,
     STATUS_CONVERSAVEIS_LIA,
@@ -183,14 +184,33 @@ def _make_lead(
     ultima_msg: str = "Deixa eu consultar a agenda. Um minutinho.",
     minutos_atras: int = 10,
 ) -> dict:
+    """Monta payload de lead Kommo para testes.
+
+    C-143 (14/08/2026): injecta ultima_msg como última linha [L ...] do
+    campo TODA CONVERSA (1261206). O campo ULTIMA MSG OUTBOUND (1260856)
+    foi excluído do Kommo — watchdog agora lê de TODA CONVERSA.
+    """
     ts = int(time.time()) - minutos_atras * 60
+    from datetime import datetime, timezone, timedelta
+    _tz_br = timezone(timedelta(hours=-3))
+    _dt = datetime.fromtimestamp(ts, tz=_tz_br)
+    _ts_fmt = _dt.strftime("%H:%M %d/%m")
+    # Formato TODA CONVERSA: [P ...] inbound + [L ...] outbound
+    toda_conversa = (
+        f"[P {_ts_fmt}] Quero agendar com a Dra. Karla.\n"
+        f"[L {_ts_fmt}] {ultima_msg}\n"
+    ) if ultima_msg else ""
+    custom_fields = [
+        {"field_id": FIELD_ULTIMA_MENS_LIA, "values": [{"value": ts}]},
+    ]
+    if toda_conversa:
+        custom_fields.append(
+            {"field_id": FIELD_TODA_CONVERSA, "values": [{"value": toda_conversa}]}
+        )
     return {
         "id": lead_id,
         "status_id": status_id,
-        "custom_fields": [
-            {"field_id": FIELD_ULTIMA_MSG_OUTBOUND, "values": [{"value": ultima_msg}]},
-            {"field_id": FIELD_ULTIMA_MENS_LIA, "values": [{"value": ts}]},
-        ],
+        "custom_fields": custom_fields,
     }
 
 

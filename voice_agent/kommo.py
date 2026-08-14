@@ -1060,14 +1060,15 @@ class KommoClient:
         # o estado de cada lead sem abrir cada card.
         from voice_agent.campos_acompanhamento import (
             FIELD_STATUS_CONVERSA as _FIELD_STATUS_CONVERSA,
-            FIELD_ULTIMA_MSG_OUTBOUND as _FIELD_ULTIMA_MSG_OUTBOUND,
             FIELD_PROXIMA_ACAO as _FIELD_PROXIMA_ACAO,
             FIELD_TS_ULTIMA_MSG_LIA as _FIELD_TS_LIA,
             FIELD_TS_ULTIMA_MSG_HUMANO as _FIELD_TS_HUMANO,
         )
         add_select(_FIELD_STATUS_CONVERSA, fields.get("status_conversa"))
         add_select(_FIELD_PROXIMA_ACAO, fields.get("proxima_acao"))
-        add_text(_FIELD_ULTIMA_MSG_OUTBOUND, fields.get("ultima_msg_outbound"))
+        # C-143 (14/08/2026): campo ULTIMA MSG OUTBOUND (1260856) foi EXCLUÍDO
+        # do Kommo. NÃO escrever mais. ultima_msg_outbound agora é derivado
+        # da última linha [L ...] do campo TODA CONVERSA (1261206) na leitura.
         # 2 timestamps separados — LIA vs HUMANO. Pipeline carimba LIA.
         # Webhook Kommo Automation carimba HUMANO.
         if _FIELD_TS_LIA:
@@ -2265,12 +2266,35 @@ class KommoClient:
                 # Contém histórico completo de mensagens do lead para extração
                 # de dados (nome, data nasc, CPF) que o paciente já informou em
                 # turnos anteriores. Lido aqui e exposto em ctx['toda_conversa'].
+                #
+                # C-143 (14/08/2026) — campo ULTIMA MSG OUTBOUND (1260856) foi
+                # EXCLUÍDO do Kommo. Agora derivamos ultima_msg_outbound da
+                # última linha [L ...] do TODA CONVERSA — fonte única de verdade.
+                # Isso resolve C-139 definitivamente sem depender de Redis.
                 if fid == 1261206:
                     tc_vals = cf.get("values") or []
                     if tc_vals:
                         tc_text = tc_vals[0].get("value") or ""
                         if tc_text:
                             out["toda_conversa"] = tc_text
+                            # Extrai última mensagem outbound (última linha [L ...])
+                            _ultima_lia = ""
+                            for _linha in reversed(tc_text.splitlines()):
+                                _linha = _linha.strip()
+                                if _linha.startswith("[L "):
+                                    # Formato: "[L HH:MM DD/MM] texto"
+                                    _m = __import__("re").match(
+                                        r"^\[L\s+[\d:/\s]+\]\s*(.+)$", _linha
+                                    )
+                                    if _m:
+                                        _ultima_lia = _m.group(1).strip()
+                                    break
+                            if _ultima_lia:
+                                out["known"]["ultima_msg_outbound"] = _ultima_lia
+                                log.debug(
+                                    "[C-143] ultima_msg_outbound derivada de TODA CONVERSA lead=%s: '%s...'",
+                                    lead_id, _ultima_lia[:60],
+                                )
                     continue
                 vals = cf.get("values") or []
                 if vals:

@@ -55,7 +55,12 @@ STATUS_ATENDIMENTO_HUMANO = 106563343
 # Campos Kommo
 FIELD_ATIVADO_IA = 1260817
 ENUM_ATIVADO_IA_DESATIVADO = 927035  # value: "Desativado"
-FIELD_ULTIMA_MSG_OUTBOUND = 1260856
+# C-143 (14/08/2026): campo EXCLUÍDO do Kommo. Watchdog lê ultima_msg_outbound
+# a partir do campo TODA CONVERSA (1261206) — extrai última linha [L ...].
+# FIELD_ULTIMA_MSG_OUTBOUND mantido como 0 para não quebrar imports antigos
+# (test imports), mas avaliar_lead NÃO usa mais este campo.
+FIELD_ULTIMA_MSG_OUTBOUND = 0  # era 1260856 — EXCLUÍDO (C-143)
+FIELD_TODA_CONVERSA = 1261206         # substitui 1260856 como fonte de ultima_msg
 FIELD_ULTIMA_MENS_LIA = 1260860       # date_time (UNIX seconds)
 FIELD_STATUS_CONVERSA = 1260854
 
@@ -182,6 +187,32 @@ def _extrair_custom(lead: dict, field_id: int) -> Optional[Any]:
     return None
 
 
+def _extrair_ultima_lia_de_toda_conversa(lead: dict) -> str:
+    """Extrai última mensagem da Lia do campo TODA CONVERSA (C-143).
+
+    O campo TODA CONVERSA (field_id 1261206) acumula o histórico no formato:
+        [P HH:MM DD/MM] mensagem do paciente
+        [L HH:MM DD/MM] mensagem da Lia
+
+    Percorre as linhas de trás pra frente e retorna o texto da última
+    linha que começa com "[L ". Fail-open: retorna "" em qualquer erro.
+    """
+    try:
+        tc = _extrair_custom(lead, FIELD_TODA_CONVERSA) or ""
+        if not tc:
+            return ""
+        for linha in reversed(tc.splitlines()):
+            linha = linha.strip()
+            if not linha.startswith("[L "):
+                continue
+            m = re.match(r"^\[L\s+[\d:/\s]+\]\s*(.+)$", linha)
+            if m:
+                return m.group(1).strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 def avaliar_lead(
     lead: dict,
     agora_ts: Optional[int] = None,
@@ -193,7 +224,8 @@ def avaliar_lead(
         agora_ts = int(time.time())
     lead_id = lead.get("id")
     status_id = lead.get("status_id")
-    ultima_msg = _extrair_custom(lead, FIELD_ULTIMA_MSG_OUTBOUND) or ""
+    # C-143: lê ultima_msg do TODA CONVERSA (1261206) — campo 1260856 excluído
+    ultima_msg = _extrair_ultima_lia_de_toda_conversa(lead) or ""
     ts_lia = _extrair_custom(lead, FIELD_ULTIMA_MENS_LIA) or 0
     try:
         ts_lia = int(ts_lia)

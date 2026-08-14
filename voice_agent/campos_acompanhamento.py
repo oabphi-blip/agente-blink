@@ -41,7 +41,11 @@ FIELD_STATUS_CONVERSA = (1260854, {
     "desistiu_explicito": 927076,
 })
 
-FIELD_ULTIMA_MSG_OUTBOUND = 1260856  # textarea
+# C-143 (14/08/2026): campo EXCLUÍDO do Kommo por Fábio.
+# Mantido como constante pra não quebrar imports antigos, mas field_id=0
+# faz update_lead_fields ignorar silenciosamente (guard "if field_id > 0").
+# ultima_msg_outbound agora é derivada da última linha [L ...] do TODA CONVERSA.
+FIELD_ULTIMA_MSG_OUTBOUND = 0  # EXCLUÍDO — era 1260856
 
 # ÚLTIMA MENS LIA + ULTIMA MENS HUMANO — datetime, criados por Fábio
 # 05/06/2026. Separados pra equipe enxergar QUEM enviou por último:
