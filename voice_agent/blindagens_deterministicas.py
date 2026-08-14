@@ -2400,6 +2400,29 @@ def tentar_bypass_deterministico(
             except Exception:
                 return False
 
+        # Bug C-146 (14/08/2026): Pergunta fora do escopo Python → escalação imediata.
+        # REGRA FÁBIO: "somente responder, se tiver o código determinístico do Python.
+        # Se não tiver, transfere para atendimento humano e desativa IA."
+        #
+        # Tier 1 (universal): reembolso/estorno/devolução de valor já pago.
+        #   Lead 24328426 Alice Tavares: "reembolsado" não casava com C-129's "reembolso\b"
+        #   (só o substantivo). Aqui cobrimos também os particípios/verbos (reembolsado,
+        #   reembolsar, estornar) + caso exato Alice ("consegui vaga no convênio").
+        # Tier 2 (pós-agenda): ja_agendado=True + pergunta sem handler Python → escalar.
+        # Vem ANTES de C-129 — é mais abrangente e cobre casos que C-129 não captura.
+        try:
+            from voice_agent.fora_escopo import deve_escalar_fora_escopo_c146
+            try:
+                from voice_agent.redis_client import get_redis as _get_redis_c146
+                _redis_c146 = _get_redis_c146()
+            except Exception:
+                _redis_c146 = None
+            t = deve_escalar_fora_escopo_c146(ctx, user_text, _redis_c146)
+            if t:
+                return ("fora_escopo_c146", t)
+        except Exception as _e146:
+            log.warning("[C-146] bypass fora_escopo falhou: %s", _e146)
+
         # Bug C-129 (12/08/2026): Pós-consulta → escalar para humano.
         # Qualquer paciente que pergunta sobre recibo, reembolso, laudo, resultado,
         # atestado ou qualquer questão administrativa pós-consulta deve ir para
@@ -2584,22 +2607,6 @@ def tentar_bypass_deterministico(
         if t and not _repete_ultima_outbound(t):
             return ("faq_midia_s16", t)
 
-        # C-136 (14/08/2026): Pergunta de perfil do paciente — "bebê, criança,
-        # adolescente ou adulto?" em vez de "para você ou para outra pessoa?".
-        # Fabio (14/08/2026): a faixa etária é o dado crítico — deriva médico,
-        # protocolo de retorno e agrupador de exames automaticamente.
-        # Dispara quando ctx.known não tem perfil nem médico definido E o
-        # inbound não trouxe pista de faixa etária. Vem DEPOIS de FAQ especialidade
-        # (paciente que perguntou sobre serviço não precisa de pergunta de perfil)
-        # e ANTES de convênio (perfil desbloqueia a triagem completa).
-        try:
-            from voice_agent.pergunta_perfil import deve_perguntar_perfil as _c136
-            t = _c136(ctx, user_text)
-            if t and not _repete_ultima_outbound(t):
-                return ("pergunta_perfil_c136", t)
-        except Exception as _e136:
-            log.warning("[C-136] bypass pergunta_perfil falhou: %s", _e136)
-
         # Bug C-123 (11/08/2026): Escolha pós-recusa de convênio.
         # Se o último outbound da Lia apresentou "1️⃣ Somente com Convênio /
         # 2️⃣ Seguir Sem Convênio", detecta a escolha do paciente e injeta
@@ -2613,11 +2620,45 @@ def tentar_bypass_deterministico(
 
         # Bug C-104 (11/08/2026): FAQ convênio aceito usando ctx.known.convenio_aceito
         # (derivado por C-103). "Vocês aceitam meu plano?" → resposta imediata
-        # sem LLM e sem Medware. Vem ANTES do classificador_convenio para usar
-        # o ctx.known já enriquecido quando disponível.
+        # sem LLM e sem Medware.
+        # C-145 (14/08/2026): Movido para ANTES de C-136 (pergunta_perfil) — a
+        # recusa ou confirmação de convênio deve ser entregue ANTES de coletar
+        # qualquer dado do paciente (lead 24456884 Beatriz/Amil, 5 turnos perdidos).
         t = deve_responder_faq_convenio_aceito(ctx, user_text)
         if t and not _repete_ultima_outbound(t):
             return ("faq_convenio_aceito", t)
+
+        # C-145 (14/08/2026): Norma determinística — convênio verificado ANTES
+        # dos dados do paciente. Fábio (14/08/2026), lead 24456884 (Beatriz/Amil):
+        # "inserir como norma deterministica antes de comecar perguntar os dados
+        # do paciente. Porque a conversa pode ir para valor de consulta se nao
+        # tem convenio."
+        # Dispara quando convênio desconhecido E paciente não mencionou nome de
+        # plano (faq_convenio_aceito já teria tratado). Pergunta: "pelo seu plano
+        # de saúde ou sem convênio?". Vem ANTES de C-136 (pergunta_perfil).
+        try:
+            from voice_agent.convenio_primeiro import (
+                deve_perguntar_convenio_primeiro_c145 as _c145,
+            )
+            t = _c145(ctx, user_text)
+            if t and not _repete_ultima_outbound(t):
+                return ("convenio_primeiro_c145", t)
+        except Exception as _e145:
+            log.warning("[C-145] bypass convenio_primeiro falhou: %s", _e145)
+
+        # C-136 (14/08/2026): Pergunta de perfil do paciente — "bebê, criança,
+        # adolescente ou adulto?" em vez de "para você ou para outra pessoa?".
+        # Fábio (14/08/2026): a faixa etária é o dado crítico — deriva médico,
+        # protocolo de retorno e agrupador de exames automaticamente.
+        # C-145 (14/08/2026): MOVIDO para depois de faq_convenio_aceito e C-145.
+        # Guard em deve_perguntar_perfil retorna None quando convênio desconhecido.
+        try:
+            from voice_agent.pergunta_perfil import deve_perguntar_perfil as _c136
+            t = _c136(ctx, user_text)
+            if t and not _repete_ultima_outbound(t):
+                return ("pergunta_perfil_c136", t)
+        except Exception as _e136:
+            log.warning("[C-136] bypass pergunta_perfil falhou: %s", _e136)
 
         # Bug C-60 (20/07/2026): classificador convênio ANTES do valor,
         # pra pegar CBMDF, GDF, Amil etc antes de LLM inventar "deixa eu verificar"

@@ -134,8 +134,14 @@ def deve_perguntar_perfil(
         if not ut or len(ut) < 3:
             return None
 
-        # Verificar se já perguntamos antes (última msg outbound contém "bebê, criança")
+        # C-145 (14/08/2026): convênio verificado ANTES do perfil.
+        # Se convênio ainda desconhecido, C-145 pergunta primeiro.
+        # C-136 só dispara quando convênio já resolvido (aceito OU sem convênio).
         known = (ctx or {}).get("known") or {}
+        if not known.get("convenio") and known.get("convenio_aceito") is None and not known.get("sem_convenio"):
+            return None  # C-145 pergunta convênio antes do perfil
+
+        # Verificar se já perguntamos antes (última msg outbound contém "bebê, criança")
         ultima = known.get("ultima_msg_outbound") or ""
         if "bebê, criança" in ultima.lower() or "bebe, crianca" in ultima.lower():
             return None  # já perguntamos, não repetir
