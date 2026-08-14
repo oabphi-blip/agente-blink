@@ -230,9 +230,10 @@ def verificar_dados_minimos(known: Optional[dict]) -> ChecklistResultado:
     conv = k.get("convenio")
     conv_ok = convenio_definido_ok(conv)
 
-    # CPF só é exigido quando paciente é Particular.
-    # Convênio definido E NÃO-particular => CPF dispensável (Fábio 02/06/2026).
-    cpf_exigido = bool(conv_ok and _eh_particular(conv))
+    # Fábio 13/08/2026: CPF NUNCA é exigido pela Lia — humano coleta se necessário.
+    # Decisão: não burocratizar o fluxo; gravar Medware sem CPF e equipe completa.
+    # Antes: cpf_exigido = bool(conv_ok and _eh_particular(conv))
+    cpf_exigido = False  # Bug C-135: CPF sempre opcional
 
     med = k.get("medico")
     med_ok = medico_ok(med)

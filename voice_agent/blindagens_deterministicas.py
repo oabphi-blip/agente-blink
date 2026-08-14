@@ -2102,6 +2102,20 @@ def tentar_bypass_deterministico(
         except Exception as _e108:
             log.warning("[C-108] bypass desistencia falhou: %s", _e108)
 
+        # Bug C-135 (13/08/2026): insatisfação do paciente → política de transparência IA.
+        # Vem DEPOIS de C-108 (desistência explícita tem prioridade, não queremos
+        # responder com "política" quando paciente já encerrou). Objetivo: defuse anger
+        # ANTES de virar desistência — detecta frustração com bug/repetição/robô e entrega
+        # mensagem canônica: transparência IA + supervisão humana + opção de transferência
+        # + pedido de registro do erro. Dedup Redis 12h: dispara no máx 1x por conversa.
+        try:
+            from voice_agent.politica_insatisfacao import deve_responder_insatisfacao as _c135
+            t = _c135(ctx, user_text)
+            if t:
+                return ("insatisfacao_c135", t)
+        except Exception as _e135:
+            log.warning("[C-135] bypass insatisfacao falhou: %s", _e135)
+
         # Bug C-109 (11/08/2026): NO-SHOW COUNT >= 2 → sinal Pix obrigatório antes do slot.
         # Vem DEPOIS de desistência (C-108) e ANTES de urgência — se o paciente está
         # desistindo, não precisamos cobrar sinal; mas se está querendo agendar E tem

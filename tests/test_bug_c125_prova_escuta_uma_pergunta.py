@@ -325,12 +325,15 @@ class TestUmaPerguntaPorTurno:
             assert "beatriz" not in resto, f"Repetição detectada: {resultado!r}"
 
     def test_cpf_com_nome_do_paciente(self, ctx_particular_sem_cpf):
-        """CPF incluído no nome do paciente para identificação."""
+        """Fábio 13/08/2026: CPF nunca mais é exigido pela Lia (C-135).
+        Particular sem CPF → checklist completo → None (humano coleta se necessário).
+        """
         resultado = deve_perguntar_dados_pendentes(ctx_particular_sem_cpf, "sim")
-        assert resultado is not None
-        assert "cpf" in resultado.lower()
-        # Deve mencionar Ana (ou Ana Luiza)
-        assert "ana" in resultado.lower()
+        # CPF não é mais pendente: checklist.pronto_para_oferecer_slot = True sem CPF
+        # C-125 retorna None (não há mais dados a coletar via Lia)
+        assert resultado is None or "cpf" not in (resultado or "").lower(), (
+            f"CPF não deve ser exigido pela Lia — Fábio 13/08/2026: {resultado!r}"
+        )
 
     def test_apenas_medico_pendente_retorna_none(self, ctx_apenas_medico_pendente):
         """Quando só médico está faltando, C-125 retorna None (Python resolve)."""
