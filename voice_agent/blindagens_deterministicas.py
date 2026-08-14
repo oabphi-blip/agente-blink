@@ -909,6 +909,242 @@ _FAQ_CORNEA = re.compile(
 # Perguntas gerais sobre "tem oftalmologista" / "tem médico" → não interceptar,
 # deixa LLM responder (pode querer coletar contexto)
 
+# ═══════════════════════════════════════════════════════════════════════
+# S10 (Manual v1.0, 14/08/2026) — FAQ DURAÇÃO DA CONSULTA
+#
+# "quanto tempo dura?", "demora muito?", "tempo de consulta"
+# → Resposta 100% determinística. Dra. Karla = 30 min | Dr. Fabrício = 40 min.
+# Toggle: BLINDAGEM_FAQ_DURACAO_ATIVADO (default ON)
+# ═══════════════════════════════════════════════════════════════════════
+_FAQ_DURACAO = re.compile(
+    r"("
+    r"quanto\s+tempo\s+(?:dura|leva|demora|(?:é|e)\s+a\s+consulta)"
+    r"|(?:dura|demora|leva)\s+muito"
+    r"|consulta\s+(?:é\s+)?(?:demorada|longa|r[áa]pida)"
+    r"|quantas?\s+horas?\s+(?:fica|demora|dura|leva)"
+    r"|quanto\s+tempo\s+(?:precisa|fico|fica)"
+    r"|tempo\s+(?:de|da)\s+(?:consulta|atendimento)"
+    r"|(?:demora|dura)\s+a\s+consulta"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def deve_responder_faq_duracao(
+    ctx: Optional[dict], user_text: str,
+) -> Optional[str]:
+    """Retorna duração da consulta sem chamar LLM.
+
+    Dra. Karla = 30 min | Dr. Fabrício = 40 min | sem médico = média 30-40 min.
+    Toggle: BLINDAGEM_FAQ_DURACAO_ATIVADO (default ON). Fail-open.
+    """
+    if not _ativado("BLINDAGEM_FAQ_DURACAO_ATIVADO"):
+        return None
+    if not user_text or not _FAQ_DURACAO.search(user_text.strip()):
+        return None
+    try:
+        known = (ctx or {}).get("known") or {}
+        medico_raw = str(known.get("medico") or "").lower()
+        if "karla" in medico_raw:
+            return (
+                "A consulta com a Dra. Karla Delalíbera dura em média 30 minutos. 😊\n\n"
+                "Quer que eu verifique os horários disponíveis?"
+            )
+        if "fabricio" in medico_raw or "fabrício" in medico_raw:
+            return (
+                "A consulta com o Dr. Fabrício Freitas dura em média 40 minutos. 😊\n\n"
+                "Quer que eu verifique os horários disponíveis?"
+            )
+        return (
+            "As consultas duram em média 30 a 40 minutos, dependendo do atendimento. 😊\n\n"
+            "Quer que eu verifique os horários disponíveis?"
+        )
+    except Exception as _e_s10:
+        log.warning("[S10] faq_duracao falhou: %s", _e_s10)
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# S11 (Manual v1.0, 14/08/2026) — FAQ DILATAÇÃO DA PUPILA
+#
+# "vai dilatar?", "posso dirigir depois?", "precisa de colírio?", "fundo de olho"
+# → Explicação: dilatação é indicação médica reativa; trazer acompanhante se
+#   for fazer fundo de olho. Zero LLM.
+# Toggle: BLINDAGEM_FAQ_DILATACAO_ATIVADO (default ON)
+# ═══════════════════════════════════════════════════════════════════════
+_FAQ_DILATACAO = re.compile(
+    r"("
+    r"(?:vai|vão|tem\s+que|irá|ir[áa])\s+(?:dilatar|usar\s+col[íi]rio)"
+    r"|dilata[çc][aã]o\s+(?:da\s+)?(?:pupila|olho)"
+    r"|posso\s+(?:ir\s+de\s+)?dirigir\s+(?:depois|ap[oó]s|logo\s+ap[oó]s|depois\s+da\s+consulta)"
+    r"|(?:precisa|preciso|vou\s+precisar)\s+(?:de\s+)?(?:col[íi]rio|dilat[ao]r)"
+    r"|col[íi]rio\s+(?:de\s+dilata[çc][aã]o|pra\s+dilat[ao]r|para\s+dilat[ao]r)"
+    r"|fundo\s+(?:de\s+)?olho"
+    r"|mapa\s+(?:de\s+)?retina"
+    r"|(?:olho|vista)\s+(?:vai\s+)?ficar\s+(?:emba[çc]ad[ao]|turva)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def deve_responder_faq_dilatacao(
+    ctx: Optional[dict], user_text: str,
+) -> Optional[str]:
+    """Retorna explicação sobre dilatação de pupila sem chamar LLM.
+
+    Toggle: BLINDAGEM_FAQ_DILATACAO_ATIVADO (default ON). Fail-open.
+    """
+    if not _ativado("BLINDAGEM_FAQ_DILATACAO_ATIVADO"):
+        return None
+    if not user_text or not _FAQ_DILATACAO.search(user_text.strip()):
+        return None
+    try:
+        return (
+            "A dilatação da pupila é feita quando o médico indicar durante a consulta "
+            "— não é obrigatória em todos os casos. 👁️\n\n"
+            "Se for realizar exames de fundo de olho, recomendamos trazer um acompanhante, "
+            "pois a visão pode ficar turva por algumas horas após o colírio."
+        )
+    except Exception as _e_s11:
+        log.warning("[S11] faq_dilatacao falhou: %s", _e_s11)
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# S13 (Manual v1.0, 14/08/2026) — FAQ ENCAMINHAMENTO MÉDICO
+#
+# "preciso de encaminhamento?", "pedido do clínico", "precisa de guia"
+# → Particular: não precisa. Convênio: depende do plano.
+# Toggle: BLINDAGEM_FAQ_ENCAMINHAMENTO_ATIVADO (default ON)
+# ═══════════════════════════════════════════════════════════════════════
+_FAQ_ENCAMINHAMENTO = re.compile(
+    r"("
+    r"precis[ao]\s+(?:\w+\s+){0,2}(?:encaminhamento|pedido\s+m[ée]dico|guia|solicita[çc][aã]o)"
+    r"|(?:encaminhamento|guia|pedido)\s+(?:do\s+)?(?:cl[íi]nico|m[ée]dico|geral|pediatra|neurologista|outro\s+m[ée]dico)"
+    r"|(?:tem\s+(?:que\s+)?(?:ter\s+)?|precisa\s+de\s+)\s*(?:pedido|encaminhamento|guia)"
+    r"|encaminhamento\s+(?:é|e)\s+(?:necess[áa]rio|obrigat[óo]rio)"
+    r"|sem\s+(?:encaminhamento|pedido|guia)\b"
+    r"|pedido\s+(?:do\s+cl[íi]nico|m[ée]dico|de\s+encaminhamento)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def deve_responder_faq_encaminhamento(
+    ctx: Optional[dict], user_text: str,
+) -> Optional[str]:
+    """Retorna explicação sobre encaminhamento médico sem chamar LLM.
+
+    Particular → não precisa. Convênio → depende do plano.
+    Toggle: BLINDAGEM_FAQ_ENCAMINHAMENTO_ATIVADO (default ON). Fail-open.
+    """
+    if not _ativado("BLINDAGEM_FAQ_ENCAMINHAMENTO_ATIVADO"):
+        return None
+    if not user_text or not _FAQ_ENCAMINHAMENTO.search(user_text.strip()):
+        return None
+    try:
+        known = (ctx or {}).get("known") or {}
+        convenio_raw = str(known.get("convenio") or "").lower().strip()
+        # "Não se aplica" = particular (codPlano 1); vazio = ainda não coletado
+        eh_particular = (
+            "não se aplica" in convenio_raw  # NBSP
+            or "não se aplica" in convenio_raw
+            or "nao se aplica" in convenio_raw
+            or "particular" in convenio_raw
+            or convenio_raw == ""
+        )
+        if eh_particular:
+            return (
+                "Para consultas sem convênio não é necessário nenhum encaminhamento "
+                "ou pedido médico. 😊\n\n"
+                "Basta agendar diretamente — posso verificar os horários agora?"
+            )
+        # Convênio aceito conhecido — resposta cautelosa
+        return (
+            "Para consultas sem convênio, não é necessário encaminhamento. 😊\n\n"
+            "Para planos de saúde, isso pode variar conforme a regra do seu convênio "
+            "— o mais comum é não ser exigido, mas recomendamos confirmar com o seu plano."
+        )
+    except Exception as _e_s13:
+        log.warning("[S13] faq_encaminhamento falhou: %s", _e_s13)
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# S16 (Manual v1.0, 14/08/2026) — FAQ MÍDIAS E ÁUDIOS (geral)
+#
+# Quando o paciente envia ÁUDIO ou IMAGEM sem contexto de comprovante Pix.
+# O webhook converte pra texto sintético:
+#   Áudio Evolution: "[O paciente enviou um áudio pelo WhatsApp]"
+#   Áudio WA Cloud:  "[audio message]" / "[voice message]"
+#   Imagem geral:    qualquer texto sintético de imagem SEM flag C-116
+#
+# Nota: C-116 (comprovante_pix) trata imagens QUANDO flag
+# blink:c114_aguardando_comprovante:{lead_id} está ativo. Se C-116
+# não disparou (flag ausente), S16 recebe o turno aqui.
+#
+# Toggle: BLINDAGEM_FAQ_MIDIA_ATIVADO (default ON)
+# ═══════════════════════════════════════════════════════════════════════
+_RE_AUDIO_SINTETICO = re.compile(
+    r"("
+    r"o\s+paciente\s+(?:acabou\s+de\s+)?enviou?\s+(?:um\s+)?[áa]udio"
+    r"|\[audio\s+message\]"
+    r"|\[voice\s+message\]"
+    r"|\[mensagem\s+de\s+voz\]"
+    r"|paciente\s+enviou\s+(?:um\s+)?[áa]udio"
+    r")",
+    re.IGNORECASE,
+)
+
+_RE_IMAGEM_GENERICA = re.compile(
+    r"("
+    # Evolution: "O paciente acabou de enviar uma imagem" OU "O paciente enviou uma imagem"
+    r"o\s+paciente\s+(?:acabou\s+de\s+)?envi(?:ou|ar)\s+(?:uma?\s+)?(?:imagem|foto|documento|arquivo|sticker)"
+    r"|\[image\s+message\]"
+    r"|\[photo\s+message\]"
+    r"|\[document\s+message\]"
+    r"|\[sticker\s+message\]"
+    r")",
+    re.IGNORECASE,
+)
+
+_RESP_AUDIO_MIDIA = (
+    "Recebi o seu áudio! 🎧 Como nossa triagem de vagas é rápida e dinâmica, "
+    "fica muito melhor se você puder me escrever o que precisa em uma mensagem "
+    "rápida de texto por aqui. 😊"
+)
+
+_RESP_IMAGEM_MIDIA = (
+    "Recebi seu documento ou imagem! 📋 Ele já foi registrado no seu atendimento.\n\n"
+    "Pode me dizer em texto o que precisa? Assim consigo te ajudar mais rápido. 😊"
+)
+
+
+def deve_responder_faq_midia(
+    ctx: Optional[dict], user_text: str,
+) -> Optional[str]:
+    """Responde recebimento de áudio ou imagem geral sem chamar LLM.
+
+    Áudio → pede texto. Imagem → confirma recebimento + pede texto.
+    Não interfere com C-116 (comprovante Pix) pois C-116 roda antes na chain.
+    Toggle: BLINDAGEM_FAQ_MIDIA_ATIVADO (default ON). Fail-open.
+    """
+    if not _ativado("BLINDAGEM_FAQ_MIDIA_ATIVADO"):
+        return None
+    if not user_text:
+        return None
+    txt = user_text.strip()
+    try:
+        if _RE_AUDIO_SINTETICO.search(txt):
+            return _RESP_AUDIO_MIDIA
+        if _RE_IMAGEM_GENERICA.search(txt):
+            return _RESP_IMAGEM_MIDIA
+        return None
+    except Exception as _e_s16:
+        log.warning("[S16] faq_midia falhou: %s", _e_s16)
+        return None
+
+
 # ── Bug C-87 (05/08/2026): FAQ endereço ────────────────────────────────
 _FAQ_ENDERECO = re.compile(
     r"("
@@ -2214,6 +2450,35 @@ def tentar_bypass_deterministico(
         if t and not _repete_ultima_outbound(t):
             return ("faq_especialidade", t)
 
+        # S10 (Manual v1.0, 14/08/2026): FAQ duração da consulta.
+        # "quanto tempo dura?", "demora muito?", "tempo de consulta"
+        # → 30 min Karla / 40 min Fabrício. Zero LLM. Zero Medware.
+        t = deve_responder_faq_duracao(ctx, user_text)
+        if t and not _repete_ultima_outbound(t):
+            return ("faq_duracao_s10", t)
+
+        # S11 (Manual v1.0, 14/08/2026): FAQ dilatação da pupila.
+        # "vai dilatar?", "posso dirigir depois?", "fundo de olho"
+        # → explicação reativa: indicação médica + trazer acompanhante.
+        t = deve_responder_faq_dilatacao(ctx, user_text)
+        if t and not _repete_ultima_outbound(t):
+            return ("faq_dilatacao_s11", t)
+
+        # S13 (Manual v1.0, 14/08/2026): FAQ encaminhamento médico.
+        # "preciso de encaminhamento?", "pedido do clínico", "precisa de guia"
+        # → Particular: não precisa. Convênio: depende do plano.
+        t = deve_responder_faq_encaminhamento(ctx, user_text)
+        if t and not _repete_ultima_outbound(t):
+            return ("faq_encaminhamento_s13", t)
+
+        # S16 (Manual v1.0, 14/08/2026): FAQ mídias e áudios geral.
+        # Detecta texto sintético de áudio ou imagem quando NÃO há flag de
+        # comprovante Pix ativo (C-116 trata esse caso específico acima).
+        # Áudio → pede texto. Imagem geral → confirma recebimento + pede texto.
+        t = deve_responder_faq_midia(ctx, user_text)
+        if t and not _repete_ultima_outbound(t):
+            return ("faq_midia_s16", t)
+
         # C-136 (14/08/2026): Pergunta de perfil do paciente — "bebê, criança,
         # adolescente ou adulto?" em vez de "para você ou para outra pessoa?".
         # Fabio (14/08/2026): a faixa etária é o dado crítico — deriva médico,
@@ -2260,6 +2525,7 @@ def tentar_bypass_deterministico(
             log.warning("bypass convênio falhou: %s", e)
 
         # Bug C-107 (11/08/2026): objeção de preço — "caro", "encontrei mais barato".
+        # C-137 (14/08/2026): "desconto" adicionado ao regex.
         # Vem ANTES de deve_responder_valor para capturar pacientes que já sabem
         # o preço e estão objectionando, não apenas pedindo o valor pela primeira vez.
         # Entrega script contextualizado: diferencial especialidade + alternativas.
@@ -2274,6 +2540,19 @@ def tentar_bypass_deterministico(
         t = deve_responder_valor(ctx, user_text)
         if t and not _repete_ultima_outbound(t):
             return ("valor", t)
+
+        # C-138 (14/08/2026): fluxo sem convênio — benchmarks por especialidade.
+        # Quando o paciente é sem convênio e hesita sem agendar, Python entrega
+        # conteúdo de benchmark progressivo (especialidade → fila encaixe → humano).
+        # Vem APÓS valor e objeção — é o layer de aprofundamento conversacional.
+        try:
+            from voice_agent.fluxo_sem_convenio import deve_aprofundar_especialidade
+            _redis_c138 = ctx.get("_redis") if isinstance(ctx, dict) else None
+            t = deve_aprofundar_especialidade(ctx, user_text, _redis_c138)
+            if t and not _repete_ultima_outbound(t):
+                return ("fluxo_sem_convenio_c138", t)
+        except Exception as _e138:
+            log.warning("[C-138] bypass fluxo_sem_convenio falhou: %s", _e138)
 
         t = deve_gerar_confirmacao_aceite(ctx, user_text)
         if t:

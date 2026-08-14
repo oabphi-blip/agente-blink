@@ -162,7 +162,8 @@ def test_anti_rep_closure_overlap_alto():
     # Não testamos a função interna (é closure), mas sim o comportamento externo
     r = bd.tentar_bypass_deterministico(ctx, "onde fica asa norte?")
     # Qualquer resultado é aceito — o teste documenta o comportamento esperado
-    assert r is None or isinstance(r, str)
+    # tentar_bypass_deterministico retorna (nome, texto) ou None
+    assert r is None or isinstance(r, (str, tuple))
 
 
 def test_anti_rep_nao_suprime_acoes_criticas():

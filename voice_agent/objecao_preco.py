@@ -1,8 +1,9 @@
 """
 Bug C-107 (11/08/2026) — Quebra de objeção de preço.
+Bug C-137 (14/08/2026) — "desconto" não estava no regex (lead 24328426 Alice Tavares).
 
-Quando o paciente diz "está caro" / "encontrei mais barato" / "não tenho esse valor",
-Python entrega script contextualizado que:
+Quando o paciente diz "está caro" / "encontrei mais barato" / "não tenho esse valor"
+/ "queria um desconto", Python entrega script contextualizado que:
 
   1. Reconhece a objeção (sem dispensar)
   2. Ancora no VALOR da especialidade (diferencial Blink vs clínica genérica)
@@ -15,9 +16,10 @@ NUNCA:
   - Fechar a conversa sem oferecer alternativa
   - Pressionar com urgência inventada
 
-Caso real que motivou (lead 24436018 Gael, bebê 8 meses, conjuntivite 3 semanas):
-  Atendente humana soube oferecer alternativa — mas tarde demais (por telefone).
-  Python entrega o script no momento certo, na conversa, antes de o paciente ir embora.
+Caso C-107: lead 24436018 Gael, bebê 8 meses, conjuntivite 3 semanas.
+Caso C-137: lead 24328426 Alice Tavares — "desconto" → agente respondeu 4x com stall
+  "Anotado. Vou verificar os próximos horários disponíveis..." porque "desconto"
+  não casava com nenhum padrão em _RE_OBJECAO.
 
 Toggle: OBJECAO_PRECO_ATIVADO (default ON)
 Fail-open: qualquer exceção → None (LLM continua normalmente)
@@ -59,7 +61,21 @@ _RE_OBJECAO = re.compile(
     r"|sem\s+condi[çc][õo]es"
     r"|outr[ao]\s+(?:cl[ií]nica|lugar|local|m[eé]dic[oa])\s+(?:[eé]|custa|cobra|achei|encontrei|por)"
     r"|por\s+menos\s+(?:de\s+)?(?:R\$\s*)?\d{2,3}"
+    # C-137: pedidos de desconto (lead 24328426 Alice Tavares)
+    r"|descontos?"
+    r"|promo[çc][aã]o"          # "promoção" (ç) e "promocao" (c)
+    r"|pre[çc]o\s+(?:mais\s+)?especial"  # "preço especial" (ç) e "preco especial" (c)
+    r"|valor\s+especial"
+    r"|tem?\s+algum\s+desconto"
+    r"|(?:consegue|d[aá])\s+(?:um\s+)?desconto"
     r")",
+    re.IGNORECASE | re.UNICODE,
+)
+
+# C-137: detector específico de pedido de desconto (para routing interno)
+_RE_DESCONTO_ESPECIFICO = re.compile(
+    r"\b(?:descontos?|promo[çc][aã]o|pre[çc]o\s+(?:mais\s+)?especial|valor\s+especial"
+    r"|tem?\s+algum\s+desconto|(?:consegue|d[aá])\s+(?:um\s+)?desconto)\b",
     re.IGNORECASE | re.UNICODE,
 )
 
@@ -77,6 +93,16 @@ def detectar_objecao_preco(user_text: str) -> bool:
     if _RE_NAO_OBJECAO.search(user_text):
         return False
     return bool(_RE_OBJECAO.search(user_text))
+
+
+def detectar_desconto_especifico(user_text: str) -> bool:
+    """C-137: True se o paciente está pedindo desconto/promoção (não 'está caro').
+
+    Distinção importante: "desconto" é pedido de negociação — resposta diferente
+    de "está caro" (price shock). Para desconto, pulamos a âncora de valor e
+    vamos direto para as opções de pagamento flexível.
+    """
+    return bool(_RE_DESCONTO_ESPECIFICO.search(user_text or ""))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -152,6 +178,29 @@ def _alternativas(parcela_1: int, parcela_2: int, tem_fila: bool = True) -> str:
             "condições especiais para o seu caso"
         )
     return "\n".join(linhas)
+
+
+# C-137: resposta específica para pedido de desconto
+# Diferença de "está caro": paciente não está em choque — está negociando.
+# Não precisamos âncora de valor — vamos direto para opções de pagamento.
+
+def _montar_resposta_desconto(nome: str, parcela_2: int) -> str:
+    """Resposta para paciente que pediu desconto/promoção.
+
+    Tom: amigável, honesto, propositivo. Não dismissar ("não fazemos desconto")
+    nem prometer o que não pode ("vou verificar").
+    Apresenta o parcelamento como equivalente funcional ao desconto.
+    """
+    saud = f"{nome}, " if nome else ""
+    return (
+        f"{saud}desconto direto no valor da consulta não temos — o valor já reflete "
+        "a especialização e os exames incluídos. 😊\n\n"
+        "Mas tenho duas opções que podem facilitar bastante:\n\n"
+        f"1️⃣ *Parcelamento:* 2x de R$ {parcela_2} no cartão sem juros\n"
+        "2️⃣ *Fila de encaixe:* quando abre uma vaga, entramos em contato "
+        "com condições diferenciadas\n\n"
+        "Qual dessas encaixa melhor para você?"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -275,8 +324,20 @@ def deve_responder_objecao_preco(
             return None
 
         nome = _extrair_nome(ctx)
-        saudacao = f"{nome}, " if nome else ""
-        _ = saudacao  # usado nos templates internos via nome
+
+        # C-137: pedido de desconto recebe resposta diferente de "está caro"
+        # Para desconto: pulamos âncora de valor, vamos direto para opções flexíveis
+        if detectar_desconto_especifico(user_text) and not tem_flag:
+            medico_raw_d = (known.get("medico") or "").lower()
+            motivo_d = (known.get("motivo") or "").lower()
+            # Valor da parcela depende da especialidade
+            if "apv" in motivo_d or "processamento" in motivo_d:
+                parcela_d = 435
+            elif "catarata" in motivo_d or "fabr" in medico_raw_d:
+                parcela_d = 235
+            else:
+                parcela_d = 335
+            return _montar_resposta_desconto(nome, parcela_d)
 
         ancoragem = _ancoragem_clinica(ctx)
 
