@@ -141,10 +141,15 @@ def deve_perguntar_perfil(
         if not known.get("convenio") and known.get("convenio_aceito") is None and not known.get("sem_convenio"):
             return None  # C-145 pergunta convênio antes do perfil
 
-        # Verificar se já perguntamos antes (última msg outbound contém "bebê, criança")
+        # C-148 (14/08/2026): anti-loop — checar TODA CONVERSA além de ultima_msg_outbound.
+        # ultima_msg_outbound pode ter sido sobrescrita por C-125 (pediu data_nasc),
+        # mas a pergunta de perfil ainda aparece em TODA CONVERSA.
+        _MARCA_PERFIL = ("bebê, criança", "bebe, crianca", "bebê, crian")
         ultima = known.get("ultima_msg_outbound") or ""
-        if "bebê, criança" in ultima.lower() or "bebe, crianca" in ultima.lower():
-            return None  # já perguntamos, não repetir
+        toda = (ctx or {}).get("toda_conversa") or ""
+        for _m in _MARCA_PERFIL:
+            if _m in ultima.lower() or _m in toda.lower():
+                return None  # já perguntamos perfil antes — não repetir
 
         log.debug("[C-136] perfil não identificado → pergunta de perfil")
         return _montar_pergunta(ctx)

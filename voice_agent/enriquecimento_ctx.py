@@ -42,7 +42,11 @@ _FABRICIO_DIAS           = {1, 3}       # ter, qui (Águas Claras)
 # Convênios NÃO aceitos (resposta imediata: não atendemos)
 _CONVENIOS_NAO_ACEITOS = frozenset({
     "inas", "gdf", "gdf saúde", "saúde df", "cassi", "sulamerica",
-    "sul america", "sul américa", "bradesco", "amil", "unimed",
+    "sul america", "sul américa",
+    # C-148 (14/08/2026): variantes acentuadas que falhavam na comparação
+    # "sulamérica" (é com acento) != "sulamerica" (sem acento) em Python
+    "sulamérica", "sul améric",
+    "bradesco", "amil", "unimed",
     "notredame", "notre dame", "hapvida", "saúde da caixa",  # ≠ Saúde Caixa
     "fapes", "ipe", "ipc", "geap",
 })
@@ -186,16 +190,47 @@ def _dia_semana_de_preferencia(known: dict) -> "int | None":
 
 # ── Validação de convênio ─────────────────────────────────────────────────────
 
+def _normalizar_sem_acento(s: str) -> str:
+    """Remove acentos para comparação robusta (C-148)."""
+    import unicodedata
+    return unicodedata.normalize("NFD", s).encode("ascii", "ignore").decode("ascii")
+
+
+# C-148: frozensets normalizados (sem acentos) para comparação robusta
+# Construídos uma vez no import — zero overhead por chamada
+_CONVENIOS_NAO_ACEITOS_NORM: frozenset = frozenset(
+    _normalizar_sem_acento(x) for x in _CONVENIOS_NAO_ACEITOS
+)
+_CONVENIOS_ACEITOS_NORM: frozenset = frozenset(
+    _normalizar_sem_acento(x) for x in _CONVENIOS_ACEITOS
+)
+
+
 def _convenio_aceito(convenio: str) -> "bool | None":
-    """True = aceito, False = não aceito, None = não reconhecido (LLM decide)."""
+    """True = aceito, False = não aceito, None = não reconhecido (LLM decide).
+
+    C-148 (14/08/2026): normaliza acentos antes de comparar.
+    "sulamérica" → "sulamerica" para evitar falha de substring por acento.
+    Antes: "sulamerica" not in "sulamérica" → retornava None (bug).
+    Agora: "sulamerica" in "sulamerica" → retorna False (correto).
+    """
     c = convenio.lower().strip()
     if not c or c in ("", "nenhum", "sem", "não tem"):
         return None
+    # Comparação com acentos originais (compatibilidade retroativa)
     for nao in _CONVENIOS_NAO_ACEITOS:
         if nao in c:
             return False
+    # C-148: fallback sem acentos (cobre variantes como "sulamérica" vs "sulamerica")
+    c_norm = _normalizar_sem_acento(c)
+    for nao_norm in _CONVENIOS_NAO_ACEITOS_NORM:
+        if nao_norm in c_norm:
+            return False
     for sim in _CONVENIOS_ACEITOS:
         if sim in c:
+            return True
+    for sim_norm in _CONVENIOS_ACEITOS_NORM:
+        if sim_norm in c_norm:
             return True
     return None  # não mapeado — LLM decide
 

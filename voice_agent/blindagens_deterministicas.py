@@ -1455,7 +1455,9 @@ _FAQ_CONVENIO_ACEITO_RE = re.compile(
     r"("
     r"voc[êe]s?\s+aceitam?"
     r"|aceitam?\s+(?:o\s+)?(?:meu\s+)?(?:conv[êe]nio|plano)"
-    r"|atendem?\s+(?:o\s+)?(?:meu\s+)?(?:conv[êe]nio|plano)"
+    # C-148 (14/08/2026): "aceitam [nome_plano]?" sem a palavra "plano"
+    r"|aceitam?\s+(?:o\s+plano\s+)?[A-Za-zÀ-ú]"
+    r"|atendem?\s+(?:o\s+)?(?:pelo\s+)?(?:meu\s+)?(?:conv[êe]nio|plano)"
     r"|funciona\s+(?:com\s+)?(?:o\s+)?(?:meu\s+)?(?:conv[êe]nio|plano)"
     r"|(?:meu|o)\s+(?:conv[êe]nio|plano)\s+(?:é\s+)?(?:aceito|válido|cobre|funciona)"
     r"|tem\s+conv[êe]nio"
@@ -1467,8 +1469,14 @@ _FAQ_CONVENIO_ACEITO_RE = re.compile(
 )
 
 # Padrão para extrair nome do convênio do user_text quando não está no ctx
+# C-148 (14/08/2026): aceita também "aceitam [nome]?" sem a palavra "plano"
 _CONV_NOME_INTEXT_RE = re.compile(
-    r"(?:conv[êe]nio|plano)\s+(?:de\s+sa[uú]de\s+)?([A-Za-zÀ-ú\s\-/\.]+?)(?:\??$|\s+(?:funciona|é aceito|cobre))",
+    r"(?:"
+    r"(?:conv[êe]nio|plano)\s+(?:de\s+sa[uú]de\s+)?"  # "plano X" ou "convênio X"
+    r"|(?:aceitam?\s+)(?!plano|conv[êe]nio)"           # "aceitam X" (sem plano antes)
+    r"|(?:atendem?\s+pelo\s+plano\s+)"                 # "atendem pelo plano X"
+    r")"
+    r"([A-Za-zÀ-ú][A-Za-zÀ-ú\s\-/\.]{1,40}?)(?:\??$|\s+(?:funciona|é aceito|cobre|\?))",
     re.IGNORECASE,
 )
 
