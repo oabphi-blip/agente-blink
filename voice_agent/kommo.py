@@ -2498,6 +2498,141 @@ class KommoClient:
                     out["notas_historico"] = notas_truncadas
             except Exception:  # noqa: BLE001
                 pass
+
+            # ----------------------------------------------------------
+            # C-147 (14/08/2026) — Chats API como memória de fallback
+            # ----------------------------------------------------------
+            # Quando TODA CONVERSA (1261206) está vazio (lead novo, bug
+            # de escrita num canal, ou primeira mensagem da conversa),
+            # busca o histórico real via GET /chats/{chat_id}/messages.
+            #
+            # A Chats API é escrita pelo Kommo diretamente — independente
+            # de canal (WA Cloud 8133, Evolution 0710, Salesbot) e de
+            # qualquer bug no pipeline de escrita. É a fonte mais confiável.
+            #
+            # Estratégia em 2 camadas:
+            #   1. Extrai chat_id do campo url_da_conversa (1260160) — já
+            #      lido no GET acima, zero custo extra de API.
+            #   2. Se chat_id não disponível via URL E toda_conversa vazia,
+            #      chama GET /chats?entity_id={lead_id} (1 request extra).
+            #
+            # Toggle: CHATS_API_MEMORIA_ATIVADA=0 desliga. Default ON.
+            # Fail-open: qualquer exceção → usa o que já existe em ctx.
+            try:
+                import os as _os_c147
+                _chats_api_on = _os_c147.environ.get(
+                    "CHATS_API_MEMORIA_ATIVADA", "1"
+                ).lower() not in ("0", "false", "no", "off")
+
+                if _chats_api_on:
+                    _toda_conv_vazia = not out.get("toda_conversa")
+                    _ultima_outbound_vazia = not out["known"].get(
+                        "ultima_msg_outbound"
+                    )
+
+                    # Só vale a pena chamar Chats API se falta alguma coisa
+                    if _toda_conv_vazia or _ultima_outbound_vazia:
+                        # Tenta extrair chat_id do campo url_da_conversa
+                        _chat_id_c147: Optional[int] = None
+                        _url_conv_c147 = out["known"].get("url_da_conversa") or ""
+                        _m_url_c147 = re.search(r"/chats/(\d+)", _url_conv_c147)
+                        if _m_url_c147:
+                            try:
+                                _chat_id_c147 = int(_m_url_c147.group(1))
+                            except (ValueError, TypeError):
+                                pass
+
+                        # Fallback: descobrir chat_id via API (1 request extra)
+                        # Só faz se toda_conversa vazia (custo justificado)
+                        if not _chat_id_c147 and _toda_conv_vazia:
+                            try:
+                                _chat_id_c147 = self.get_chat_id_for_lead(
+                                    lead_id
+                                )
+                            except Exception:  # noqa: BLE001
+                                pass
+
+                        if _chat_id_c147:
+                            _limit_c147 = 30 if _toda_conv_vazia else 5
+                            _msgs_raw_c147 = self.get_chat_messages_raw(
+                                _chat_id_c147, limit=_limit_c147
+                            )
+                            if _msgs_raw_c147:
+                                _linhas_c147: list[str] = []
+                                _ultima_out_c147 = ""
+                                # Ordenar por created_at (mais antigo primeiro)
+                                for _msg_c147 in sorted(
+                                    _msgs_raw_c147,
+                                    key=lambda m: m.get("created_at") or 0,
+                                ):
+                                    _dir_c147 = _msg_c147.get("direction") or ""
+                                    _content_c147 = _msg_c147.get("content") or {}
+                                    _txt_c147 = ""
+                                    if isinstance(_content_c147, dict):
+                                        _txt_c147 = (
+                                            _content_c147.get("text") or ""
+                                        ).strip()
+                                    if not _txt_c147:
+                                        # Imagem, áudio, etc. — representa como marcador
+                                        _tipo = (
+                                            _content_c147.get("type") or "arquivo"
+                                            if isinstance(_content_c147, dict)
+                                            else "arquivo"
+                                        )
+                                        if _tipo not in ("text",):
+                                            _txt_c147 = f"[{_tipo}]"
+                                    if not _txt_c147:
+                                        continue
+                                    _ts_c147 = _msg_c147.get("created_at") or 0
+                                    if _ts_c147:
+                                        _dt_c147 = datetime.fromtimestamp(
+                                            _ts_c147, tz=_TZ_BR
+                                        )
+                                    else:
+                                        _dt_c147 = datetime.now(tz=_TZ_BR)
+                                    _hora_c147 = _dt_c147.strftime("%H:%M")
+                                    _data_c147 = _dt_c147.strftime("%d/%m")
+                                    # direction "out" = saída (Lia ou humano)
+                                    # direction "in"  = entrada (paciente)
+                                    if _dir_c147 == "out":
+                                        _linha = f"[L {_hora_c147} {_data_c147}] {_txt_c147[:300]}"
+                                        _linhas_c147.append(_linha)
+                                        _ultima_out_c147 = _txt_c147[:300]
+                                    elif _dir_c147 == "in":
+                                        _linhas_c147.append(
+                                            f"[P {_hora_c147} {_data_c147}] {_txt_c147[:300]}"
+                                        )
+
+                                if _toda_conv_vazia and _linhas_c147:
+                                    out["toda_conversa"] = "\n".join(
+                                        _linhas_c147
+                                    )
+                                    log.info(
+                                        "[C-147] toda_conversa via Chats API "
+                                        "lead=%s chat=%s linhas=%d",
+                                        lead_id,
+                                        _chat_id_c147,
+                                        len(_linhas_c147),
+                                    )
+
+                                if _ultima_outbound_vazia and _ultima_out_c147:
+                                    out["known"]["ultima_msg_outbound"] = (
+                                        _ultima_out_c147
+                                    )
+                                    log.info(
+                                        "[C-147] ultima_msg_outbound via Chats "
+                                        "API lead=%s: '%s...'",
+                                        lead_id,
+                                        _ultima_out_c147[:60],
+                                    )
+            except Exception as _e_c147:  # noqa: BLE001
+                log.warning(
+                    "[C-147] Chats API fallback falhou lead=%s: %s",
+                    lead_id,
+                    _e_c147,
+                )
+            # ----------------------------------------------------------
+
         except Exception as e:  # noqa: BLE001
             log.warning("Kommo get_caller_context_by_lead erro: %s", e)
         return out
