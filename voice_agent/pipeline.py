@@ -1089,21 +1089,61 @@ class VoicePipeline:
             except Exception as _e72:  # noqa: BLE001
                 log.debug("[C-72-E2] falha ao carregar historico chat: %s", _e72)
 
-        # 3) Resposta com Claude
+        # 3) Triagem Simples — C-149 (19/08/2026)
+        # Quando TRIAGEM_SIMPLES_ATIVADA=1, coleta 5 campos e transfere para humano.
+        # Bypassa LLM completamente.
+        _triagem_result = None
         try:
-            result = self.responder.reply(
-                conversation_key, user_text, caller_context=caller_context
-            )
-            answer = result["answer"]
-            model_used = result["model_used"]
-            articles_used = result["articles_used"]
-        except Exception as e:  # noqa: BLE001
-            log.exception("Claude falhou")
-            return PipelineResult(
-                transcript=user_text, answer="", sent=False,
-                model_used="", articles_used=[],
-                error=f"claude: {e}",
-            )
+            from .triagem_simples import processar as _triagem_processar
+            _lid_ts = caller_context.get("lead_id") if isinstance(caller_context, dict) else None
+            _redis_ts = getattr(self, "_redis", None)
+            _triagem_result = _triagem_processar(_lid_ts, user_text, caller_context or {}, _redis_ts)
+        except Exception as _e_ts:
+            log.warning("[TRIAGEM-SIMPLES] erro: %s", _e_ts)
+            _triagem_result = {"ativo": False}
+
+        if _triagem_result and _triagem_result.get("ativo"):
+            answer = _triagem_result["resposta"]
+            model_used = "triagem_simples"
+            articles_used = []
+            # Atualizar known com dados extraídos
+            if isinstance(caller_context, dict) and _triagem_result.get("known"):
+                caller_context["known"] = _triagem_result["known"]
+            # Se todos os dados coletados → mover para ATENDIMENTO HUMANO
+            if _triagem_result.get("transferir") and self.kommo is not None and _lid_ts:
+                try:
+                    _ST_HUMANO = 106563343
+                    self.kommo.update_lead_fields(_lid_ts, {
+                        "status_id": _ST_HUMANO,
+                        "ativado_ia": "Desativado",
+                    })
+                    self.kommo.add_note(
+                        _lid_ts,
+                        f"[LIA TRIAGEM-SIMPLES] Dados coletados e transferido para ATENDIMENTO HUMANO.\n{answer}",
+                    )
+                    log.info("[TRIAGEM-SIMPLES] lead=%s transferido para humano", _lid_ts)
+                except Exception as _e_mv:
+                    log.warning("[TRIAGEM-SIMPLES] falha ao mover lead: %s", _e_mv)
+        else:
+            # 3) Resposta com Claude (caminho normal)
+            pass
+
+        # 3-LLM) Resposta com Claude — só se triagem_simples não tratou
+        if not (_triagem_result and _triagem_result.get("ativo")):
+            try:
+                result = self.responder.reply(
+                    conversation_key, user_text, caller_context=caller_context
+                )
+                answer = result["answer"]
+                model_used = result["model_used"]
+                articles_used = result["articles_used"]
+            except Exception as e:  # noqa: BLE001
+                log.exception("Claude falhou")
+                return PipelineResult(
+                    transcript=user_text, answer="", sent=False,
+                    model_used="", articles_used=[],
+                    error=f"claude: {e}",
+                )
 
         # 3a-bis) Bug C-84b (04/08/2026 Juliana 24413852) — paciente pediu atendente.
         # Filtro C-84b em responder.py já substituiu o texto e gravou flag Redis.
