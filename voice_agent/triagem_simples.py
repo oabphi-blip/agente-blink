@@ -99,14 +99,21 @@ def _extrair_do_inbound(user_text: str, ctx: dict) -> dict:
             achados["sem_convenio"] = True
             achados["convenio"] = "Sem convênio"
         else:
-            # qualquer texto que não seja resposta a outra pergunta pode ser o nome do plano
-            # só captura se for resposta curta (< 6 palavras) indicando um nome
+            # só captura como convênio se for texto curto que NÃO seja motivo/rotina/etc.
+            _NAO_CONVENIO = {
+                "rotina", "retorno", "urgente", "urgencia", "urgência",
+                "consulta", "exame", "cirurgia", "catarata", "estrabismo",
+                "visao", "visão", "oculos", "óculos", "miopia", "astigmatismo",
+                "glaucoma", "macula", "macula", "pterígio", "pterigio",
+                "checkup", "check-up", "revisao", "revisão",
+            }
             palavras = [w for w in ut.split() if len(w) > 2]
             if 1 <= len(palavras) <= 5:
-                # não é saudação genérica
                 genericos = {"oi", "olá", "ola", "bom", "dia", "tarde", "noite",
                              "sim", "não", "nao", "ok", "certo", "tudo", "bem"}
-                if not all(w.lower() in genericos for w in palavras):
+                palavras_lower = {w.lower() for w in palavras}
+                if (not all(w.lower() in genericos for w in palavras)
+                        and not palavras_lower & _NAO_CONVENIO):
                     achados["convenio"] = ut.strip()
 
     # Nome completo (≥ 2 palavras, só letras)

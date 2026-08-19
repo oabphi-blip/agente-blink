@@ -731,6 +731,60 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 wa_cloud.mark_read_typing(msg_id)
             except Exception as e:  # noqa: BLE001
                 log.debug("WA Cloud typing falhou: %s", e)
+        # === C-149 TRIAGEM SIMPLES — WA Cloud path (19/08/2026) ===
+        # _process_whatsapp_cloud chama responder.reply() diretamente,
+        # bypassa pipeline.run(). Sem esse bloco, triagem nunca dispara
+        # para leads WA Cloud (8133).
+        import os as _os_c149_wc  # noqa: PLC0415
+        if _os_c149_wc.environ.get("TRIAGEM_SIMPLES_ATIVADA", "0").lower() in ("1", "true", "yes", "on"):
+            _ts_result_wc = None
+            try:
+                from voice_agent.triagem_simples import processar as _ts_processar_wc  # noqa: PLC0415
+                _lid_wc = caller_context.get("lead_id") if isinstance(caller_context, dict) else None
+                _redis_wc = getattr(pipeline, "_redis", None)
+                _ts_result_wc = _ts_processar_wc(_lid_wc, user_text, caller_context or {}, _redis_wc)
+            except Exception as _e_ts_wc:  # noqa: BLE001
+                log.warning("[TRIAGEM-SIMPLES WC] erro: %s", _e_ts_wc)
+
+            if _ts_result_wc and _ts_result_wc.get("ativo"):
+                _ts_answer_wc = _ts_result_wc["resposta"]
+                # Enviar via WA Cloud
+                try:
+                    wa_cloud.send_text(phone, _ts_answer_wc)
+                except Exception as _e_send_wc:  # noqa: BLE001
+                    log.warning("[TRIAGEM-SIMPLES WC] envio falhou: %s", _e_send_wc)
+                # Kommo: se transferir → gravar campos + mover etapa
+                if _ts_result_wc.get("transferir") and pipeline.kommo is not None and _lid_wc:
+                    try:
+                        _kn_wc = _ts_result_wc.get("known") or {}
+                        import time as _time_wc  # noqa: PLC0415
+                        _fmt_wc = _time_wc.strftime("%H:%M %d/%m")
+                        _toda_wc = (
+                            f"[TRIAGEM {_fmt_wc}]\n"
+                            f"👥 Qtd: {_kn_wc.get('quantidade_agendamentos', '—')}\n"
+                            f"🏥 Convênio: {_kn_wc.get('convenio') or ('Sem convênio' if _kn_wc.get('sem_convenio') else '—')}\n"
+                            f"👤 Paciente: {_kn_wc.get('nome_paciente', '—')}\n"
+                            f"📅 Nascimento: {_kn_wc.get('data_nasc', '—')}\n"
+                            f"📋 Motivo: {_kn_wc.get('motivo_consulta', '—')}"
+                        )
+                        _cfs_wc = [
+                            {"field_id": 1261206, "values": [{"value": _toda_wc}]},
+                            {"field_id": 1260817, "values": [{"value": "Desativado", "enum_id": 927035}]},
+                        ]
+                        if _kn_wc.get("sem_convenio"):
+                            _cfs_wc.append({"field_id": 853206, "values": [{"value": "Não se aplica"}]})
+                        if hasattr(pipeline.kommo, "patch_custom_fields_raw"):
+                            pipeline.kommo.patch_custom_fields_raw(_lid_wc, _cfs_wc)
+                        pipeline.kommo.update_lead_fields(_lid_wc, {"status_id": 106563343})
+                        pipeline.kommo.add_note(
+                            _lid_wc,
+                            f"[LIA TRIAGEM-SIMPLES] Dados coletados e transferido para ATENDIMENTO HUMANO.\n{_ts_answer_wc}",
+                        )
+                        log.info("[TRIAGEM-SIMPLES WC] lead=%s transferido para humano", _lid_wc)
+                    except Exception as _e_mv_wc:  # noqa: BLE001
+                        log.warning("[TRIAGEM-SIMPLES WC] falha Kommo: %s", _e_mv_wc)
+                return  # não chamar responder.reply()
+
         # Gera a resposta com até 3 tentativas — uma falha transitória da
         # API (timeout, 5xx, rate-limit) NÃO deve virar mensagem de erro
         # para o paciente. Só cai no fallback se as 3 falharem.
