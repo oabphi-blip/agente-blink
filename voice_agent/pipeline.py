@@ -1109,14 +1109,41 @@ class VoicePipeline:
             # Atualizar known com dados extraídos
             if isinstance(caller_context, dict) and _triagem_result.get("known"):
                 caller_context["known"] = _triagem_result["known"]
-            # Se todos os dados coletados → mover para ATENDIMENTO HUMANO
+            # Se todos os dados coletados → gravar campos + mover para ATENDIMENTO HUMANO
             if _triagem_result.get("transferir") and self.kommo is not None and _lid_ts:
                 try:
                     _ST_HUMANO = 106563343
-                    self.kommo.update_lead_fields(_lid_ts, {
-                        "status_id": _ST_HUMANO,
-                        "ativado_ia": "Desativado",
-                    })
+                    _kn = _triagem_result.get("known") or {}
+
+                    # 1) Gravar TODA CONVERSA (1261206) com os 5 campos coletados
+                    import time as _time
+                    _ts_fmt = _time.strftime("%H:%M %d/%m")
+                    _toda = (
+                        f"[TRIAGEM {_ts_fmt}]\n"
+                        f"👥 Qtd agendamentos: {_kn.get('quantidade_agendamentos', '—')}\n"
+                        f"🏥 Convênio: {_kn.get('convenio') or ('Sem convênio' if _kn.get('sem_convenio') else '—')}\n"
+                        f"👤 Paciente: {_kn.get('nome_paciente', '—')}\n"
+                        f"📅 Nascimento: {_kn.get('data_nasc', '—')}\n"
+                        f"📋 Motivo: {_kn.get('motivo_consulta', '—')}"
+                    )
+
+                    # 2) Gravar campos via patch_custom_fields_raw (único método confiável — C-12)
+                    _cfs = [
+                        # TODA CONVERSA
+                        {"field_id": 1261206, "values": [{"value": _toda}]},
+                        # ATIVADO IA → Desativado (enum_id 927035)
+                        {"field_id": 1260817, "values": [{"value": "Desativado", "enum_id": 927035}]},
+                    ]
+
+                    # Convênio: se reconhecido como "sem convênio" → "Não se aplica" (enum)
+                    if _kn.get("sem_convenio"):
+                        _cfs.append({"field_id": 853206, "values": [{"value": "Não se aplica"}]})
+
+                    if hasattr(self.kommo, "patch_custom_fields_raw"):
+                        self.kommo.patch_custom_fields_raw(_lid_ts, _cfs)
+
+                    # 3) Mover etapa + nota
+                    self.kommo.update_lead_fields(_lid_ts, {"status_id": _ST_HUMANO})
                     self.kommo.add_note(
                         _lid_ts,
                         f"[LIA TRIAGEM-SIMPLES] Dados coletados e transferido para ATENDIMENTO HUMANO.\n{answer}",
