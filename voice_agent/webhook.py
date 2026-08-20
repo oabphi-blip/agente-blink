@@ -8742,6 +8742,65 @@ async function submit(dryRun) {
             log.exception("[C-132] form_preagendamento erro: %s", e)
             return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
 
+    # ── FASE 4 / C-150 (19/08/2026) — Verificar contexto Supabase pré-reativação ──
+    # n8n chama este endpoint antes de disparar template de reativação.
+    # Se paciente tem conversa ativa nas últimas 48h → NÃO reativar.
+    @app.get("/admin/contexto-supabase")
+    async def contexto_supabase(
+        phone: str = "",
+        secret: str = "",
+        horas: int = 48,
+    ):
+        if settings.webhook_secret and secret != settings.webhook_secret:
+            return JSONResponse({"erro": "unauthorized"}, status_code=401)
+        if not phone:
+            return JSONResponse({"erro": "phone obrigatório"}, status_code=400)
+
+        from voice_agent.supabase_memory import ler_historico, _get_client as _sb_client
+        from datetime import datetime, timezone, timedelta
+
+        if _sb_client() is None:
+            return JSONResponse({"ativo": False, "motivo": "supabase_nao_configurado", "msgs_recentes": 0})
+
+        try:
+            # Normalizar telefone
+            import re as _re
+            ph = _re.sub(r"[^\d+]", "", phone)
+            if ph and not ph.startswith("+"):
+                ph = "+" + ph
+
+            msgs = ler_historico(ph, limit=20)
+            if not msgs:
+                return JSONResponse({"ativo": False, "msgs_recentes": 0, "phone_normalizado": ph})
+
+            # Verificar se há mensagem recente dentro da janela
+            agora = datetime.now(timezone.utc)
+            limite = agora - timedelta(hours=horas)
+            recentes = []
+            for m in msgs:
+                ts_str = m.get("ts", "")
+                try:
+                    dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                    if dt >= limite:
+                        recentes.append({"role": m["role"], "ts": ts_str, "preview": m.get("content", "")[:80]})
+                except Exception:
+                    pass
+
+            ativo = len(recentes) > 0
+            ultima_ts = msgs[-1].get("ts", "") if msgs else ""
+
+            return JSONResponse({
+                "ativo": ativo,
+                "msgs_recentes": len(recentes),
+                "ultima_ts": ultima_ts,
+                "horas_verificadas": horas,
+                "phone_normalizado": ph,
+                "reativar": not ativo,  # campo direto pra n8n usar em IF node
+            })
+        except Exception as e:
+            log.exception("[FASE4] contexto_supabase erro: %s", e)
+            return JSONResponse({"ativo": False, "erro": str(e), "reativar": True})
+
     # ── C-150-IMPORT (19/08/2026) ─────────────────────────────────────────────
     # Importa histórico TODA CONVERSA do Kommo → Supabase retroativamente.
     # Evita duplicatas via INSERT com dedup por (phone, role, content[:100]).
