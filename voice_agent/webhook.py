@@ -8752,7 +8752,7 @@ async function submit(dryRun) {
         dry_run: bool = True,
         max_leads: int = 200,
     ):
-        if secret != settings.webhook_secret:
+        if settings.webhook_secret and secret != settings.webhook_secret:
             return JSONResponse({"erro": "unauthorized"}, status_code=401)
 
         from voice_agent.supabase_memory import gravar_mensagem, _get_client as _sb_client
