@@ -213,6 +213,39 @@ Esquecer qualquer um desses 4 campos = bug C-12. Equipe humana fica cega sobre o
 
 ## 0. ÚLTIMAS 5 LIÇÕES DURAS — LER PRIMEIRO (rolling log)
 
+### 0. (19/08/2026) C-150 — Memória persistente Supabase (cada turno gravado em conversations)
+
+**Origem:** Lia esquecia contexto entre sessões. Implementado banco Supabase para memória persistente.
+
+**Arquitetura (3 componentes):**
+
+1. **`voice_agent/supabase_memory.py` (NOVO):**
+   - `gravar_mensagem(phone, role, content, lead_id, channel)` — INSERT na tabela `conversations`
+   - `ler_historico(phone, limit=20)` — SELECT últimas N mensagens por telefone
+   - `montar_bloco_historico_supabase(phone)` — formata histórico para injeção no ctx
+   - Fail-open: qualquer exceção → log DEBUG, continua normalmente
+   - Toggle: `SUPABASE_MEMORY_ENABLED` (default "1" quando `SUPABASE_URL` setado)
+
+2. **`voice_agent/pipeline.py` — bloco C-150 em `_sync_kommo_safely`:**
+   ```python
+   # C-150 (19/08/2026) — Gravar turno no Supabase (memória persistente)
+   _sb_gravar(_sb_phone, "patient", user_text, lead_id=lead_id, channel=channel)
+   _sb_gravar(_sb_phone, "lia", answer, lead_id=lead_id, channel=channel)
+   ```
+
+3. **Tabela Supabase `conversations`** (projeto `blink-memoria`, `pasmtlsyfcmcghnmnitj`):
+   - Campos: `id`, `phone`, `lead_id`, `role` (patient/lia/human), `content`, `ts`, `channel`, `metadata`
+   - Índices: `phone + ts DESC`, `lead_id + ts DESC`
+   - RLS ativa — acesso apenas via service_role key
+
+**Envs adicionadas no Easypanel:**
+- `SUPABASE_URL=https://pasmtlsyfcmcghnmnitj.supabase.co`
+- `SUPABASE_KEY=<service_role secret key>`
+
+**requirements.txt:** `supabase>=2.0.0` adicionado.
+
+**Rollback:** `SUPABASE_MEMORY_ENABLED=0` em Easypanel → Implantar (pipeline continua funcionando normalmente).
+
 ### 0. (14/08/2026) Bug C-146 — Pergunta fora do escopo Python → escalação imediata (financeiro/reembolso)
 
 **Origem:** lead 24328426 (Alice Tavares). Paciente pagou Pix sinal + depois conseguiu vaga pelo convênio. Perguntou: "gostaria de saber se o valor enviado poderia ser reembolsado, pois consegui uma vaga no meu convênio." Lia inventou: "a consulta com a Doutora Karla cobre a avaliação" — completamente fora do escopo.

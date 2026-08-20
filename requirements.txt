@@ -19,3 +19,4 @@ scikit-learn>=1.4.0
 
 # Memória de longo prazo — Zep Cloud (adicionado 15/06/2026)
 zep-cloud>=2.0.0
+supabase>=2.0.0

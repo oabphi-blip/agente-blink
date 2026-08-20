@@ -8742,6 +8742,128 @@ async function submit(dryRun) {
             log.exception("[C-132] form_preagendamento erro: %s", e)
             return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
 
+    # ── C-150-IMPORT (19/08/2026) ─────────────────────────────────────────────
+    # Importa histórico TODA CONVERSA do Kommo → Supabase retroativamente.
+    # Evita duplicatas via INSERT com dedup por (phone, role, content[:100]).
+    @app.post("/admin/importar-historico-supabase")
+    @app.get("/admin/importar-historico-supabase")
+    async def importar_historico_supabase(
+        secret: str = "",
+        dry_run: bool = True,
+        max_leads: int = 200,
+    ):
+        if secret != settings.webhook_secret:
+            return JSONResponse({"erro": "unauthorized"}, status_code=401)
+
+        from voice_agent.supabase_memory import gravar_mensagem, _get_client as _sb_client
+        import re
+        from datetime import datetime
+
+        if _sb_client() is None:
+            return JSONResponse({"erro": "Supabase não configurado"}, status_code=500)
+
+        FIELD_TODA_CONVERSA = 1261206
+        _RE_LINHA = re.compile(
+            r"\[([PLH])\s+(\d{2}:\d{2})\s+(\d{2}/\d{2})\]\s*(.*?)(?=\n\[|$)",
+            re.DOTALL,
+        )
+
+        total_leads = 0
+        total_msgs = 0
+        erros = 0
+
+        try:
+            # Buscar leads em etapas ativas com TODA CONVERSA preenchido
+            status_ids = [96441724, 101508307, 102560495, 106184631, 101507507,
+                          101109455, 106653499, 91486864, 106184983, 106919911,
+                          106563343, 108749463]
+            leads = pipeline.kommo.list_leads_by_status(
+                pipeline_id=8601819,
+                status_ids=status_ids,
+                limit=max_leads,
+            ) or []
+
+            for lead in leads:
+                total_leads += 1
+                lead_id = lead.get("id")
+
+                # Pegar telefone principal do lead
+                phone = ""
+                try:
+                    contacts = lead.get("_embedded", {}).get("contacts", [])
+                    if contacts:
+                        contact_id = contacts[0].get("id")
+                        contact = pipeline.kommo.get_contact(contact_id) if contact_id else {}
+                        for cf in (contact.get("custom_fields_values") or []):
+                            if cf.get("field_code") == "PHONE":
+                                vals = cf.get("values", [])
+                                if vals:
+                                    phone = vals[0].get("value", "")
+                                    break
+                except Exception:
+                    pass
+
+                if not phone:
+                    continue
+
+                # Normalizar telefone E.164
+                ph = re.sub(r"[^\d+]", "", phone)
+                if ph.startswith("0"):
+                    ph = "55" + ph[1:]
+                if not ph.startswith("+"):
+                    ph = "+" + ph
+
+                # Ler TODA CONVERSA do campo Kommo
+                toda_conversa = ""
+                try:
+                    for cf in (lead.get("custom_fields_values") or []):
+                        if cf.get("field_id") == FIELD_TODA_CONVERSA:
+                            toda_conversa = (cf.get("values") or [{}])[0].get("value", "") or ""
+                            break
+                except Exception:
+                    pass
+
+                if not toda_conversa:
+                    continue
+
+                # Parsear linhas do formato [P/L/H HH:MM DD/MM] texto
+                for m in _RE_LINHA.finditer(toda_conversa):
+                    role_char = m.group(1)
+                    hora = m.group(2)
+                    data = m.group(3)
+                    content = m.group(4).strip()
+
+                    if not content:
+                        continue
+
+                    role = {"P": "patient", "L": "lia", "H": "human"}.get(role_char, "patient")
+
+                    if not dry_run:
+                        try:
+                            gravar_mensagem(
+                                ph, role, content,
+                                lead_id=lead_id,
+                                channel="kommo_import",
+                                metadata={"source": "toda_conversa", "hora": hora, "data": data},
+                            )
+                            total_msgs += 1
+                        except Exception:
+                            erros += 1
+                    else:
+                        total_msgs += 1
+
+        except Exception as e:
+            log.exception("[C-150-IMPORT] erro: %s", e)
+            return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
+
+        return JSONResponse({
+            "ok": True,
+            "dry_run": dry_run,
+            "leads_varridos": total_leads,
+            "msgs_importadas": total_msgs,
+            "erros": erros,
+        })
+
     return app
 
 

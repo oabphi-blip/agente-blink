@@ -2302,6 +2302,21 @@ class VoicePipeline:
                 except Exception as _tc_exc:  # noqa: BLE001
                     log.warning("[C-144] write toda_conversa falhou lead=%s: %s", lead_id, _tc_exc)
 
+            # C-150 (19/08/2026) — Gravar turno no Supabase (memória persistente)
+            # Fail-open: se Supabase off/indisponível, continua normalmente.
+            # phone vem do reply_to_number passado pro _sync_kommo_safely.
+            try:
+                from voice_agent.supabase_memory import gravar_mensagem as _sb_gravar
+                _sb_phone = reply_to_number or ""
+                if _sb_phone and (user_text or answer):
+                    if user_text:
+                        _sb_gravar(_sb_phone, "patient", user_text, lead_id=lead_id, channel=channel or "wa_cloud")
+                    if answer:
+                        _sb_gravar(_sb_phone, "lia", answer, lead_id=lead_id, channel=channel or "wa_cloud")
+                    log.debug("[C-150] Supabase gravado lead=%s phone=%s", lead_id, _sb_phone[-4:] if _sb_phone else "?")
+            except Exception as _sb_exc:  # noqa: BLE001
+                log.debug("[C-150] Supabase write skip: %s", _sb_exc)
+
             # Campos extraídos da conversa.
             fields = self.responder.extract_lead_fields(conversation_key) or {}
 

@@ -4887,6 +4887,33 @@ class Responder:
             # Fail-silent: bloco é apenas melhoria, não é obrigatório.
             pass
 
+        # C-150-READ (19/08/2026) — Injetar histórico Supabase no system prompt.
+        # Lê as últimas 20 msgs do telefone e injeta como bloco HISTORICO_SUPABASE.
+        # Fail-open: se Supabase off/falha, bloco é vazio e pipeline continua.
+        try:
+            _sb_phone = ""
+            if isinstance(caller_context, dict):
+                _sb_phone = (
+                    caller_context.get("phone") or
+                    caller_context.get("known", {}).get("celular") or
+                    caller_context.get("reply_to_number") or ""
+                )
+            if _sb_phone:
+                from voice_agent.supabase_memory import montar_bloco_historico_supabase
+                _sb_bloco = montar_bloco_historico_supabase(_sb_phone, limit=20)
+                if _sb_bloco:
+                    bloco_variavel += (
+                        "\n\n=== HISTORICO_SUPABASE (conversas anteriores) ===\n"
+                        + _sb_bloco
+                        + "\n=== FIM HISTORICO_SUPABASE ===\n"
+                        "\nUSE o histórico acima para NÃO repetir perguntas já respondidas "
+                        "e manter continuidade da conversa.\n"
+                    )
+                    log.debug("[C-150-READ] histórico Supabase injetado phone=%s msgs=%d",
+                              _sb_phone[-4:], _sb_bloco.count("\n") + 1)
+        except Exception as _sb_r_exc:  # noqa: BLE001
+            log.debug("[C-150-READ] skip: %s", _sb_r_exc)
+
         # Bug C-72 (26/07/2026) — contexto histórico sem janela de tempo.
         # Cobre paciente respondendo DIAS depois a template/campanha humana.
         # Dois caminhos, em ordem de preferência:
